@@ -16,7 +16,10 @@ export class InputManager {
     window.addEventListener('contextmenu',  this._onContext);
   }
 
-  _onKeyDown(e) { this.keys[e.code] = true; }
+  _onKeyDown(e) {
+    if (e.code === 'Space') e.preventDefault();
+    this.keys[e.code] = true;
+  }
   _onKeyUp(e)   { this.keys[e.code] = false; }
   _onMouseDown(e) {
     if (e.button === 0) this.mouseLeft  = true;
@@ -31,6 +34,7 @@ export class InputManager {
   isRight()    { return this.keys['KeyD'] || this.keys['ArrowRight']; }
   isForward()  { return this.keys['KeyW'] || this.keys['ArrowUp']; }
   isBackward() { return this.keys['KeyS'] || this.keys['ArrowDown']; }
+  isBoost()    { return this.keys['Space']; }
 
   consumeShoot() {
     if (this.mouseLeft) { this.mouseLeft = false; return true; }

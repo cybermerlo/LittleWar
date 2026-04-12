@@ -11,6 +11,10 @@ import {
   BASE_SPEED,
   SPEED_REDUCTION_PER_LEVEL,
   MIN_SPEED,
+  BOOST_MAX,
+  BOOST_SPEED_MULT,
+  BOOST_DRAIN_PER_SEC,
+  BOOST_REGEN_PER_SEC,
   POWERUP_COLLECT_RADIUS,
   POWERUP_LIFETIME,
   POWERUP_RANDOM_INTERVAL,
@@ -26,6 +30,19 @@ import {
 
 const TICK_DT = TICK_INTERVAL / 1000; // secondi per tick
 const VALID_MODELS = new Set(['airplane', 'spaceship']);
+const TAU = Math.PI * 2;
+
+function wrapAngle01(a) {
+  if (!Number.isFinite(a)) return 0;
+  let x = a % TAU;
+  if (x < 0) x += TAU;
+  return x;
+}
+
+function clampTheta(theta) {
+  if (!Number.isFinite(theta)) return null;
+  return Math.max(0, Math.min(Math.PI, theta));
+}
 
 export class Game {
   constructor(io) {
@@ -116,9 +133,17 @@ export class Game {
   updatePlayerInput(socketId, input) {
     const player = this.players.get(socketId);
     if (!player || !player.alive) return;
-    player.theta = input.theta;
-    player.phi = input.phi;
-    player.heading = input.heading;
+
+    // Hardening input: evita NaN/Infinity o valori fuori range.
+    const nextTheta = clampTheta(input?.theta);
+    if (nextTheta === null) return;
+    const nextPhi = wrapAngle01(input?.phi);
+    const nextHeading = wrapAngle01(input?.heading);
+
+    player.theta = nextTheta;
+    player.phi = nextPhi;
+    player.heading = nextHeading;
+    player.boostPressed = !!input.boost;
     player.lastInputTime = Date.now();
     // Controlla raccolta powerup subito con la posizione reale del client,
     // non solo ogni tick con la posizione predetta (che può divergere).
@@ -133,12 +158,12 @@ export class Game {
 
     // Usa la posizione/heading inviati dal client — più accurati della
     // predizione server, soprattutto quando il giocatore sta girando.
-    const theta   = (typeof data?.theta   === 'number') ? data.theta   : player.theta;
-    const phi     = (typeof data?.phi     === 'number') ? data.phi     : player.phi;
-    const heading = (typeof data?.heading === 'number') ? data.heading : player.heading;
+    const theta = clampTheta(data?.theta);
+    const phi = Number.isFinite(data?.phi) ? wrapAngle01(data.phi) : player.phi;
+    const heading = Number.isFinite(data?.heading) ? wrapAngle01(data.heading) : player.heading;
 
     // Corregge anche la posizione predetta dal server
-    player.theta   = theta;
+    player.theta   = theta ?? player.theta;
     player.phi     = phi;
     player.heading = heading;
 
@@ -149,7 +174,7 @@ export class Game {
       const offset = config.bullets === 1
         ? 0
         : (i / (config.bullets - 1) - 0.5) * config.spread;
-      const proj = new Projectile(player.id, theta, phi, heading + offset);
+      const proj = new Projectile(player.id, player.theta, player.phi, heading + offset);
       this.projectiles.set(proj.id, proj);
     }
   }
@@ -160,9 +185,9 @@ export class Game {
     const player = this.players.get(socketId);
     if (!player || !player.alive) return;
 
-    const theta = (typeof data?.theta === 'number') ? data.theta : player.theta;
-    const phi   = (typeof data?.phi   === 'number') ? data.phi   : player.phi;
-    player.theta = theta;
+    const theta = clampTheta(data?.theta);
+    const phi = Number.isFinite(data?.phi) ? wrapAngle01(data.phi) : player.phi;
+    player.theta = theta ?? player.theta;
     player.phi   = phi;
 
     this.bombs.push({
@@ -184,7 +209,15 @@ export class Game {
     for (const player of this.players.values()) {
       if (!player.alive) continue;
       const wl = player.weaponLevel ?? 0;
-      const speed = Math.max(MIN_SPEED, BASE_SPEED - wl * SPEED_REDUCTION_PER_LEVEL);
+      const baseSpeed = Math.max(MIN_SPEED, BASE_SPEED - wl * SPEED_REDUCTION_PER_LEVEL);
+      const canBoost = player.boostPressed && player.boostEnergy > 0;
+      if (canBoost) {
+        player.boostEnergy = Math.max(0, player.boostEnergy - BOOST_DRAIN_PER_SEC * TICK_DT);
+      } else {
+        player.boostEnergy = Math.min(BOOST_MAX, player.boostEnergy + BOOST_REGEN_PER_SEC * TICK_DT);
+      }
+      const speedMult = canBoost ? BOOST_SPEED_MULT : 1;
+      const speed = baseSpeed * speedMult;
       const moved = moveOnSphere(player.theta, player.phi, player.heading, speed * TICK_DT);
       player.theta = moved.theta;
       player.phi = moved.phi;
@@ -255,8 +288,6 @@ export class Game {
       victim.hasShield = false;
       victim.shieldInvincible = true;
       setTimeout(() => { victim.shieldInvincible = false; }, SHIELD_INVINCIBILITY);
-
-      const killerSocket = this.getSocketById(killerId);
       this.io.emit('shield-broken', { playerId: victim.id });
       return;
     }
@@ -266,6 +297,7 @@ export class Game {
     victim.respawnAt = Date.now() + RESPAWN_DELAY;
     victim.weaponLevel = 0;
     victim.hasShield = false;
+    victim.boostPressed = false;
 
     const killer = this.getPlayerById(killerId);
     if (killer) killer.kills++;
@@ -293,6 +325,8 @@ export class Game {
     player.heading = Math.random() * Math.PI * 2;
     player.weaponLevel = 0;
     player.hasShield = false;
+    player.boostEnergy = BOOST_MAX;
+    player.boostPressed = false;
 
     const socket = this.getSocketById(player.socketId);
     if (socket) socket.emit('respawned', player.toState());

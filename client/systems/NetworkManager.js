@@ -31,8 +31,8 @@ export class NetworkManager {
     this.socket.emit('join', { nickname, color, model });
   }
 
-  sendInput(theta, phi, heading) {
-    this.socket.emit('player-input', { theta, phi, heading });
+  sendInput(theta, phi, heading, boost) {
+    this.socket.emit('player-input', { theta, phi, heading, boost });
   }
 
   sendShoot(theta, phi, heading) {

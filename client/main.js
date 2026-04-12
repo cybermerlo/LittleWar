@@ -21,6 +21,7 @@ import { DeathScreen } from './ui/DeathScreen.js';
 import { moveOnSphere } from './utils/SphereUtils.js';
 import {
   BASE_SPEED, SPEED_REDUCTION_PER_LEVEL, MIN_SPEED,
+  BOOST_MAX, BOOST_SPEED_MULT, BOOST_DRAIN_PER_SEC, BOOST_REGEN_PER_SEC,
   WEAPON_CONFIGS, FLY_ALTITUDE, MAX_PLAYERS, CLIENT_INPUT_SEND_MS,
 } from '../shared/constants.js';
 
@@ -117,6 +118,9 @@ const SHOOT_COOLDOWN = 200; // ms
 let lastBombTime = 0;
 const BOMB_COOLDOWN = 1500; // ms
 
+// Boost locale
+let boostEnergy = BOOST_MAX;
+
 // ── Lobby + Network ───────────────────────────────────────────────────────────
 
 const lobby = new LobbyScreen((nickname, color, model) => {
@@ -162,6 +166,7 @@ const net = new NetworkManager({
       theta   = localState.theta;
       phi     = localState.phi;
       heading = localState.heading;
+      boostEnergy = typeof localState.boostEnergy === 'number' ? localState.boostEnergy : BOOST_MAX;
     }
 
     // Crea aerei degli altri giocatori già presenti
@@ -344,6 +349,7 @@ const net = new NetworkManager({
     theta   = state.theta;
     phi     = state.phi;
     heading = state.heading;
+    boostEnergy = typeof state.boostEnergy === 'number' ? state.boostEnergy : BOOST_MAX;
     death.hide();
   },
 });
@@ -373,7 +379,17 @@ function animate() {
 
     // Velocità in base al livello arma (radianti/secondo * delta)
     const wl = localState.weaponLevel ?? 0;
-    const speed = Math.max(MIN_SPEED, BASE_SPEED - wl * SPEED_REDUCTION_PER_LEVEL);
+    const baseSpeed = Math.max(MIN_SPEED, BASE_SPEED - wl * SPEED_REDUCTION_PER_LEVEL);
+
+    const wantsBoost = input.isBoost();
+    const boostActive = wantsBoost && boostEnergy > 0.01;
+    if (boostActive) {
+      boostEnergy = Math.max(0, boostEnergy - BOOST_DRAIN_PER_SEC * delta);
+    } else {
+      boostEnergy = Math.min(BOOST_MAX, boostEnergy + BOOST_REGEN_PER_SEC * delta);
+    }
+    const speedMult = boostActive ? BOOST_SPEED_MULT : 1;
+    const speed = baseSpeed * speedMult;
 
     // Input → aggiorna heading e posizione (tutto * delta)
     const turnSpeed = 1.8; // rad/s
@@ -387,12 +403,20 @@ function animate() {
     phi   = moved.phi;
     heading = moved.heading;
 
-    localAirplane.update(theta, phi, heading, wl, localState.hasShield ?? false, delta);
+    localAirplane.update(
+      theta,
+      phi,
+      heading,
+      wl,
+      localState.hasShield ?? false,
+      delta,
+      boostActive ? (boostEnergy / BOOST_MAX) : 0,
+    );
     camCtrl.update(localAirplane.mesh, localAirplane.sphereQuaternion);
 
     // Invia input al server (throttled)
     if (now - lastInputSend >= CLIENT_INPUT_SEND_MS) {
-      net.sendInput(theta, phi, heading);
+      net.sendInput(theta, phi, heading, boostActive);
       lastInputSend = now;
     }
 
@@ -433,7 +457,7 @@ function animate() {
 
   // HUD
   if (inGame) {
-    hud.update(localState, allPlayerStates, currentTarget, camera);
+    hud.update(localState, allPlayerStates, currentTarget, camera, boostEnergy / BOOST_MAX, input.isBoost());
   }
 
   composer.render();

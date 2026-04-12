@@ -1,4 +1,4 @@
-import { FLY_ALTITUDE, MAX_WEAPON_LEVEL } from '../shared/constants.js';
+import { FLY_ALTITUDE, BOOST_MAX } from '../shared/constants.js';
 
 let nextId = 1;
 
@@ -24,6 +24,8 @@ export class Player {
     this.bombPoints = 0;
     this.alive = true;
     this.respawnAt = null;
+    this.boostEnergy = BOOST_MAX;
+    this.boostPressed = false;
 
     // Target bombardamento (assegnato dal server)
     this.targetId = null;
@@ -47,6 +49,8 @@ export class Player {
       kills: this.kills,
       bombPoints: this.bombPoints,
       alive: this.alive,
+      boostEnergy: this.boostEnergy,
+      boosting: this.boostPressed && this.boostEnergy > 0,
     };
   }
 

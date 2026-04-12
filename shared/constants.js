@@ -11,6 +11,12 @@ export const BASE_SPEED = 0.20;
 export const SPEED_REDUCTION_PER_LEVEL = 0.025;
 export const MIN_SPEED = 0.06;
 
+// Boost
+export const BOOST_MAX = 100;
+export const BOOST_SPEED_MULT = 1.9;
+export const BOOST_DRAIN_PER_SEC = 34;
+export const BOOST_REGEN_PER_SEC = 18;
+
 // Rollio in virata (banking) — radianti
 export const MAX_BANK_ANGLE = 0.38;      // ~22°
 export const BANK_GAIN = 0.34;           // quanto il roll risponde alla velocità di virata (rad / (rad/s))

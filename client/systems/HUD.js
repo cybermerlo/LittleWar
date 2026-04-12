@@ -11,6 +11,7 @@ export class HUD {
       weapon:     document.getElementById('hud-weapon'),
       shield:     document.getElementById('hud-shield'),
       speed:      document.getElementById('hud-speed'),
+      boost:      document.getElementById('hud-boost'),
       playerList: document.getElementById('player-list'),
       arrow:      document.getElementById('target-arrow'),
       playerArrows: document.getElementById('player-arrows'),
@@ -53,7 +54,7 @@ export class HUD {
     }, 3200);
   }
 
-  update(localPlayer, allPlayers, target, camera) {
+  update(localPlayer, allPlayers, target, camera, boostRatio = 1, boostPressed = false) {
     if (!localPlayer) return;
 
     const wl = localPlayer.weaponLevel;
@@ -64,6 +65,8 @@ export class HUD {
     this.el.weapon.textContent = `Arma: Lv.${wl}`;
     this.el.shield.textContent = localPlayer.hasShield ? 'Scudo: ✓' : 'Scudo: ✗';
     this.el.speed.textContent  = `Velocità: ${speedPct}%`;
+    const boostPct = Math.round(Math.max(0, Math.min(1, boostRatio)) * 100);
+    this.el.boost.textContent = `Boost: ${boostPct}%${boostPressed && boostPct > 0 ? ' ⚡' : ''}`;
 
     // Lista giocatori
     this.el.playerList.innerHTML = allPlayers

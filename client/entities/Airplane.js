@@ -168,6 +168,26 @@ export class Airplane {
     this._netWeaponLevel = 0;
     this._netHasShield = false;
     this._remoteNetReady = false;
+
+    // Effetto boost (solo aereo locale): piccola fiamma in coda.
+    this._boostTrail = null;
+    this._boostTrailMat = null;
+    if (this.isLocal) {
+      const boostGeo = new THREE.ConeGeometry(0.16, 1.1, 10, 1, true);
+      this._boostTrailMat = new THREE.MeshBasicMaterial({
+        color: 0xffa31a,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+      });
+      this._boostTrail = new THREE.Mesh(boostGeo, this._boostTrailMat);
+      this._boostTrail.rotation.z = Math.PI / 2;
+      this._boostTrail.position.set(-1.15, 0, 0);
+      this._boostTrail.visible = false;
+      this.mesh.add(this._boostTrail);
+    }
   }
 
   /**
@@ -212,7 +232,7 @@ export class Airplane {
     this.update(sph.theta, sph.phi, this._displayHeading, this._netWeaponLevel, this._netHasShield, delta);
   }
 
-  update(theta, phi, heading, weaponLevel, hasShield, delta = 1 / 60) {
+  update(theta, phi, heading, weaponLevel, hasShield, delta = 1 / 60, boostAmount = 0) {
     this.theta = theta;
     this.phi = phi;
     this.heading = heading;
@@ -246,10 +266,26 @@ export class Airplane {
     if (this.mesh.userData.shield) {
       this.mesh.userData.shield.visible = hasShield;
     }
+
+    if (this._boostTrail && this._boostTrailMat) {
+      const amount = THREE.MathUtils.clamp(boostAmount, 0, 1);
+      if (amount <= 0.01) {
+        this._boostTrail.visible = false;
+      } else {
+        const flicker = 0.9 + Math.sin(performance.now() * 0.045) * 0.1;
+        this._boostTrail.visible = true;
+        this._boostTrailMat.opacity = (0.22 + amount * 0.5) * flicker;
+        const len = 0.9 + amount * 1.2;
+        this._boostTrail.scale.set(len, 1, 1);
+        this._boostTrail.position.x = -1.05 - amount * 0.45;
+      }
+    }
   }
 
   dispose(scene) {
     this.mesh.userData.disposed = true;
+    if (this._boostTrail) this._boostTrail.geometry.dispose();
+    if (this._boostTrailMat) this._boostTrailMat.dispose();
     scene.remove(this.mesh);
   }
 }
