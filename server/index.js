@@ -25,6 +25,9 @@ const game = new Game(io);
 io.on('connection', (socket) => {
   console.log(`[+] Socket connesso: ${socket.id}`);
 
+  // Invia subito i colori occupati al nuovo client (per aggiornare la lobby)
+  game.broadcastLobbyInfo(socket);
+
   socket.on('join', ({ nickname, color, model }) => {
     game.addPlayer(socket, nickname, color, model);
   });

@@ -32,14 +32,48 @@ export class LobbyScreen {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'color-btn' + (i === 0 ? ' selected' : '');
+      btn.dataset.color = c;
       btn.style.background = c;
       btn.addEventListener('click', () => {
+        if (btn.disabled) return;
         document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('selected'));
         btn.classList.add('selected');
         this.selectedColor = c;
       });
       this._colorEl.appendChild(btn);
     });
+  }
+
+  /**
+   * Marca i colori occupati come disabilitati.
+   * Se il colore correntemente selezionato è tra quelli occupati,
+   * seleziona automaticamente il primo libero.
+   */
+  setTakenColors(takenColors) {
+    const taken = new Set(takenColors);
+    let currentStillFree = false;
+
+    document.querySelectorAll('.color-btn').forEach(btn => {
+      const c = btn.dataset.color;
+      if (taken.has(c)) {
+        btn.disabled = true;
+        btn.classList.add('color-btn--taken');
+        btn.classList.remove('selected');
+      } else {
+        btn.disabled = false;
+        btn.classList.remove('color-btn--taken');
+        if (c === this.selectedColor) currentStillFree = true;
+      }
+    });
+
+    if (!currentStillFree) {
+      // Seleziona il primo colore libero disponibile
+      const firstFree = document.querySelector('.color-btn:not([disabled])');
+      if (firstFree) {
+        firstFree.classList.add('selected');
+        this.selectedColor = firstFree.dataset.color;
+      }
+    }
   }
 
   _buildModelPicker() {

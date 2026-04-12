@@ -302,6 +302,27 @@
 
     .color-btn:active { transform: scale(0.92); }
 
+    .color-btn--taken {
+      opacity: 0.28;
+      cursor: not-allowed;
+      transform: scale(0.88) !important;
+      outline-color: transparent !important;
+      position: relative;
+    }
+    .color-btn--taken::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: repeating-linear-gradient(
+        -45deg,
+        rgba(0,0,0,0.55) 0px,
+        rgba(0,0,0,0.55) 2px,
+        transparent 2px,
+        transparent 6px
+      );
+    }
+
     #play-btn {
       width: 100%;
       position: relative;
@@ -568,6 +589,36 @@
       transform: translateX(-50%) translateY(0);
     }
 
+    #hud-kill-toast {
+      position: absolute;
+      left: 50%;
+      top: 28%;
+      transform: translateX(-50%) translateY(-10px);
+      max-width: min(24rem, calc(100% - 2rem));
+      padding: 0.65rem 1.35rem;
+      border-radius: 9999px;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 0.95rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-align: center;
+      color: #ffffff;
+      background: linear-gradient(135deg, #f87171 0%, #ef4444 55%, #dc2626 100%);
+      border: 1px solid color-mix(in srgb, #fca5a5 70%, transparent);
+      box-shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.08),
+        0 12px 40px rgba(220, 38, 38, 0.45);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.35s ease, transform 0.35s ease;
+      z-index: 25;
+    }
+
+    #hud-kill-toast.hud-toast--visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
     /* ── Morte ────────────────────────────────────── */
     #death-screen {
       position: fixed;
@@ -684,6 +735,7 @@
     <div id="target-arrow">🎯</div>
     <div id="player-arrows"></div>
     <div id="hud-bomb-toast" role="status" aria-live="polite"></div>
+    <div id="hud-kill-toast" role="status" aria-live="polite"></div>
   </div>
 
   <!-- Schermata morte -->

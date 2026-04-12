@@ -15,8 +15,10 @@ export class HUD {
       arrow:      document.getElementById('target-arrow'),
       playerArrows: document.getElementById('player-arrows'),
       bombToast:  document.getElementById('hud-bomb-toast'),
+      killToast:  document.getElementById('hud-kill-toast'),
     };
     this._bombToastTimer = null;
+    this._killToastTimer = null;
     this._playerArrowMap = new Map();
     this._tmpRemote = new THREE.Vector3();
     this._tmpProj = new THREE.Vector3();
@@ -24,6 +26,19 @@ export class HUD {
 
   show() { this.el.hud.style.display = 'block'; }
   hide() { this.el.hud.style.display = 'none'; }
+
+  /** Avviso quando elimini un avversario */
+  showKillNotice(nickname) {
+    const el = this.el.killToast;
+    if (!el) return;
+    el.textContent = nickname ? `Eliminato ${nickname}!` : 'Eliminazione!';
+    el.classList.add('hud-toast--visible');
+    if (this._killToastTimer) clearTimeout(this._killToastTimer);
+    this._killToastTimer = setTimeout(() => {
+      el.classList.remove('hud-toast--visible');
+      this._killToastTimer = null;
+    }, 3200);
+  }
 
   /** Avviso quando la tua bomba colpisce il bersaglio bombardamento */
   showBombHitNotice() {

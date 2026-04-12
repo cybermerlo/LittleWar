@@ -40,7 +40,7 @@ export const BOMB_FALL_SPEED = 4.0;
 export const BOMB_HIT_RADIUS = 3.0;  // distanza dall'obiettivo per contare il colpo
 
 // Powerup
-export const POWERUP_COLLECT_RADIUS = 2.5;
+export const POWERUP_COLLECT_RADIUS = 4.0;
 export const POWERUP_LIFETIME = 30000;       // ms
 export const POWERUP_RANDOM_INTERVAL = 12000; // ms tra spawn casuali
 export const POWERUP_DROP_CHANCE = 0.5;      // 50% alla morte

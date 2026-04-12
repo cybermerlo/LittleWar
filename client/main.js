@@ -144,6 +144,16 @@ const net = new NetworkManager({
     lobby.setMessage('Server pieno, riprova tra poco.');
   },
 
+  onLobbyInfo({ takenColors, online }) {
+    lobby.setTakenColors(takenColors);
+    lobby.setOnlineCount(online, MAX_PLAYERS);
+  },
+
+  onColorTaken({ takenColors }) {
+    lobby.setTakenColors(takenColors);
+    lobby.setMessage('Quel colore è già in uso! Scegline un altro.');
+  },
+
   onJoined({ playerId, players, powerups, target }) {
     localPlayerId = playerId;
     localState = players.find(p => p.id === playerId) ?? null;
@@ -293,6 +303,9 @@ const net = new NetworkManager({
       death.show(killer?.nickname ?? null, () => {
         // Il respawn arriva dal server via onRespawned
       });
+    } else if (killerId === localPlayerId) {
+      const victim = allPlayerStates.find(pl => pl.id === victimId);
+      hud.showKillNotice(victim?.nickname ?? null);
     }
   },
 

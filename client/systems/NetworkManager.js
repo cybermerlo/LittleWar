@@ -23,6 +23,8 @@ export class NetworkManager {
     this.socket.on('respawned',         (d) => h.onRespawned?.(d));
     this.socket.on('connect',           ()  => h.onConnect?.());
     this.socket.on('disconnect',        ()  => h.onDisconnect?.());
+    this.socket.on('lobby-info',        (d) => h.onLobbyInfo?.(d));
+    this.socket.on('color-taken',       (d) => h.onColorTaken?.(d));
   }
 
   join(nickname, color, model) {

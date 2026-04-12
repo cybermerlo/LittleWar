@@ -44,9 +44,26 @@ export class Game {
 
   // ── Giocatori ──────────────────────────────────────────────────────────────
 
+  getTakenColors() {
+    return [...this.players.values()].map(p => p.color);
+  }
+
+  /** Invia lobby-info (colori occupati + contatore) a uno o tutti i socket */
+  broadcastLobbyInfo(target = this.io) {
+    target.emit('lobby-info', {
+      takenColors: this.getTakenColors(),
+      online: this.players.size,
+    });
+  }
+
   addPlayer(socket, nickname, color, model) {
     if (this.players.size >= MAX_PLAYERS) {
       socket.emit('server-full');
+      return;
+    }
+
+    if (this.getTakenColors().includes(color)) {
+      socket.emit('color-taken', { takenColors: this.getTakenColors() });
       return;
     }
 
@@ -70,6 +87,9 @@ export class Game {
 
     socket.broadcast.emit('player-joined', player.toPublicInfo());
 
+    // Aggiorna tutti i client in lobby con i colori ora occupati
+    this.broadcastLobbyInfo();
+
     console.log(`[game] ${nickname} entrato (${this.players.size}/${MAX_PLAYERS})`);
   }
 
@@ -86,6 +106,10 @@ export class Game {
     }
 
     this.io.emit('player-left', { id: player.id });
+
+    // Aggiorna tutti i client in lobby: il colore è di nuovo disponibile
+    this.broadcastLobbyInfo();
+
     console.log(`[game] ${player.nickname} uscito (${this.players.size}/${MAX_PLAYERS})`);
   }
 
@@ -96,6 +120,9 @@ export class Game {
     player.phi = input.phi;
     player.heading = input.heading;
     player.lastInputTime = Date.now();
+    // Controlla raccolta powerup subito con la posizione reale del client,
+    // non solo ogni tick con la posizione predetta (che può divergere).
+    this._checkPowerupCollection(player);
   }
 
   // ── Sparo ──────────────────────────────────────────────────────────────────
@@ -197,20 +224,11 @@ export class Game {
       if (now - pu.createdAt > POWERUP_LIFETIME) this.powerups.delete(id);
     }
 
-    // Raccolta powerup (rimozione dopo il giro: niente delete durante l’iterazione sulla Map)
-    const powerupsToRemove = new Set();
+    // Raccolta powerup con posizione predetta (backup del check in updatePlayerInput)
     for (const player of this.players.values()) {
       if (!player.alive) continue;
-      for (const [id, pu] of this.powerups) {
-        if (powerupsToRemove.has(id)) continue;
-        const dist = this.distanceSphere(player.theta, player.phi, pu.theta, pu.phi, FLY_ALTITUDE);
-        if (dist < POWERUP_COLLECT_RADIUS) {
-          this.collectPowerup(player, pu);
-          powerupsToRemove.add(id);
-        }
-      }
+      this._checkPowerupCollection(player);
     }
-    for (const id of powerupsToRemove) this.powerups.delete(id);
 
     // Respawn
     for (const player of this.players.values()) {
@@ -309,6 +327,21 @@ export class Game {
   }
 
   // ── Powerup ───────────────────────────────────────────────────────────────
+
+  /**
+   * Controlla se il giocatore è abbastanza vicino a un powerup per raccoglierlo.
+   * Chiamato sia dal tick() (posizione predetta) sia da updatePlayerInput()
+   * (posizione reale del client) per non perdere passaggi tra un tick e l'altro.
+   */
+  _checkPowerupCollection(player) {
+    for (const [id, pu] of this.powerups) {
+      const dist = this.distanceSphere(player.theta, player.phi, pu.theta, pu.phi, FLY_ALTITUDE);
+      if (dist < POWERUP_COLLECT_RADIUS) {
+        this.collectPowerup(player, pu);
+        this.powerups.delete(id);
+      }
+    }
+  }
 
   collectPowerup(player, pu) {
     if (pu.type === 'weapon' && player.weaponLevel < MAX_WEAPON_LEVEL) {
