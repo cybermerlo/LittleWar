@@ -15,9 +15,12 @@ import {
   SHIELD_INVINCIBILITY,
   BULLET_HIT_RADIUS,
   BOMB_HIT_RADIUS,
+  BOMB_FALL_SPEED,
   PLANET_RADIUS,
   FLY_ALTITUDE,
 } from '../shared/constants.js';
+
+const TICK_DT = TICK_INTERVAL / 1000; // secondi per tick
 
 export class Game {
   constructor(io) {
@@ -153,7 +156,7 @@ export class Game {
 
     // Aggiorna bombe
     this.bombs = this.bombs.filter(bomb => {
-      bomb.altitude -= 0.4;
+      bomb.altitude -= BOMB_FALL_SPEED * TICK_DT;
       if (bomb.altitude <= PLANET_RADIUS + 0.5) {
         this.bombLanded(bomb);
         return false;

@@ -289,18 +289,18 @@ function animate() {
   if (inGame && isAlive && localState) {
     ensureLocalAirplane(localState.color ?? '#ff4444');
 
-    // Velocità in base al livello arma
+    // Velocità in base al livello arma (radianti/secondo * delta)
     const wl = localState.weaponLevel ?? 0;
     const speed = Math.max(MIN_SPEED, BASE_SPEED - wl * SPEED_REDUCTION_PER_LEVEL);
 
-    // Input → aggiorna heading e posizione
-    const turnSpeed = 0.03;
-    if (input.isLeft())  heading -= turnSpeed;
-    if (input.isRight()) heading += turnSpeed;
+    // Input → aggiorna heading e posizione (tutto * delta)
+    const turnSpeed = 1.8; // rad/s
+    if (input.isLeft())  heading -= turnSpeed * delta;
+    if (input.isRight()) heading += turnSpeed * delta;
 
-    // Movimento in avanti sempre attivo (puoi togliere W/S se vuoi velocità costante)
-    const accel = input.isForward() ? 1.2 : input.isBackward() ? 0.4 : 1.0;
-    const moved = moveOnSphere(theta, phi, heading, speed * accel);
+    // Movimento in avanti sempre attivo
+    const accel = input.isForward() ? 1.3 : input.isBackward() ? 0.4 : 1.0;
+    const moved = moveOnSphere(theta, phi, heading, speed * accel * delta);
     theta = moved.theta;
     phi   = moved.phi;
 

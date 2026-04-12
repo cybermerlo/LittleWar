@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 
-const CAMERA_BACK   = 6.0;   // distanza dietro l'aereo
-const CAMERA_UP     = 2.2;   // altezza sopra l'aereo
-const LERP_FACTOR   = 0.08;
+const CAMERA_BACK   = 14.0;  // distanza dietro l'aereo
+const CAMERA_UP     = 5.0;   // altezza sopra l'aereo
+const LERP_FACTOR   = 0.06;
 
 export class CameraController {
   constructor(camera) {
@@ -24,7 +24,7 @@ export class CameraController {
 
     this.camera.position.lerp(desiredPos, LERP_FACTOR);
 
-    this._lookAt.lerp(airplaneMesh.position, 0.12);
+    this._lookAt.lerp(airplaneMesh.position, 0.08);
     this.camera.lookAt(this._lookAt);
   }
 }

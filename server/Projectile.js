@@ -4,7 +4,10 @@ import {
   BULLET_HIT_RADIUS,
   PLANET_RADIUS,
   FLY_ALTITUDE,
+  TICK_INTERVAL,
 } from '../shared/constants.js';
+
+const TICK_DT = TICK_INTERVAL / 1000; // secondi per tick
 
 let nextProjectileId = 1;
 
@@ -64,7 +67,7 @@ export class Projectile {
   }
 
   update() {
-    const pos = moveOnSphere(this.theta, this.phi, this.heading, BULLET_SPEED);
+    const pos = moveOnSphere(this.theta, this.phi, this.heading, BULLET_SPEED * TICK_DT);
     this.theta = pos.theta;
     this.phi = pos.phi;
   }
