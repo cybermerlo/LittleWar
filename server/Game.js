@@ -2,11 +2,15 @@ import { Player } from './Player.js';
 import { Projectile } from './Projectile.js';
 import { PowerUp } from './PowerUp.js';
 import { Target } from './Target.js';
+import { moveOnSphere } from '../shared/movement.js';
 import {
   MAX_PLAYERS,
   TICK_INTERVAL,
   WEAPON_CONFIGS,
   MAX_WEAPON_LEVEL,
+  BASE_SPEED,
+  SPEED_REDUCTION_PER_LEVEL,
+  MIN_SPEED,
   POWERUP_COLLECT_RADIUS,
   POWERUP_LIFETIME,
   POWERUP_RANDOM_INTERVAL,
@@ -137,6 +141,18 @@ export class Game {
 
   tick() {
     const now = Date.now();
+
+    // Predizione movimento: il server muove ogni player nella direzione corrente
+    // tra un input e l'altro, così il game-state contiene sempre posizioni fresche.
+    for (const player of this.players.values()) {
+      if (!player.alive) continue;
+      const wl = player.weaponLevel ?? 0;
+      const speed = Math.max(MIN_SPEED, BASE_SPEED - wl * SPEED_REDUCTION_PER_LEVEL);
+      const moved = moveOnSphere(player.theta, player.phi, player.heading, speed * TICK_DT);
+      player.theta = moved.theta;
+      player.phi = moved.phi;
+      player.heading = moved.heading;
+    }
 
     // Aggiorna proiettili + controlla collisioni
     for (const [id, proj] of this.projectiles) {
