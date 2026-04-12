@@ -2,7 +2,7 @@ import { io } from 'socket.io-client';
 
 export class NetworkManager {
   constructor(handlers) {
-    this.socket = io();
+    this.socket = io({ transports: ['websocket', 'polling'] });
     this.handlers = handlers;
     this._setupEvents();
   }
