@@ -20,9 +20,10 @@ export class NetworkManager {
     this.socket.on('powerup-collected', (d) => h.onPowerupCollected?.(d));
     this.socket.on('bomb-exploded',     (d) => h.onBombExploded?.(d));
     this.socket.on('new-target',        (d) => h.onNewTarget?.(d));
-    this.socket.on('respawned',         (d) => h.onRespawned?.(d));
-    this.socket.on('connect',           ()  => h.onConnect?.());
-    this.socket.on('disconnect',        ()  => h.onDisconnect?.());
+    this.socket.on('respawned',           (d) => h.onRespawned?.(d));
+    this.socket.on('building-destroyed', (d) => h.onBuildingDestroyed?.(d));
+    this.socket.on('connect',            ()  => h.onConnect?.());
+    this.socket.on('disconnect',         ()  => h.onDisconnect?.());
     this.socket.on('lobby-info',        (d) => h.onLobbyInfo?.(d));
     this.socket.on('color-taken',       (d) => h.onColorTaken?.(d));
   }

@@ -2,6 +2,7 @@ import { Player } from './Player.js';
 import { Projectile } from './Projectile.js';
 import { PowerUp } from './PowerUp.js';
 import { Target } from './Target.js';
+import { Building, generateBuildings } from './Building.js';
 import { moveOnSphere } from '../shared/movement.js';
 import {
   MAX_PLAYERS,
@@ -28,6 +29,7 @@ import {
   BOMB_FALL_SPEED,
   PLANET_RADIUS,
   FLY_ALTITUDE,
+  BUILDING_COUNT,
 } from '../shared/constants.js';
 
 const TICK_DT = TICK_INTERVAL / 1000; // secondi per tick
@@ -54,6 +56,8 @@ export class Game {
     this.powerups = new Map();
     this.targets = new Map();   // playerId → Target
     this.bombs = [];
+
+    this.buildings = generateBuildings(BUILDING_COUNT);
 
     this.lastPowerupSpawn = Date.now();
 
@@ -102,6 +106,7 @@ export class Game {
       players: allPlayers,
       powerups: allPowerups,
       target: target.toState(),
+      buildings: [...this.buildings.values()].map(b => b.toState()),
     });
 
     socket.broadcast.emit('player-joined', player.toPublicInfo());
@@ -122,6 +127,13 @@ export class Game {
     // Rimuovi i proiettili del giocatore
     for (const [id, proj] of this.projectiles) {
       if (proj.ownerId === player.id) this.projectiles.delete(id);
+    }
+
+    // Rilascia gli edifici posseduti dal giocatore
+    for (const building of this.buildings.values()) {
+      if (building.ownerId === player.id) {
+        building.reset();
+      }
     }
 
     this.io.emit('player-left', { id: player.id });
@@ -239,11 +251,13 @@ export class Game {
       for (const player of this.players.values()) {
         if (!player.alive) continue;
         if (player.id === proj.ownerId) continue;
+        // Proiettili torretta non colpiscono il proprietario della torre
+        if (proj.buildingOwnerId && player.id === proj.buildingOwnerId) continue;
 
         const dist = proj.distanceTo(player.theta, player.phi);
         if (dist < BULLET_HIT_RADIUS) {
           this.projectiles.delete(id);
-          this.hitPlayer(proj.ownerId, player);
+          this.hitPlayer(proj.buildingOwnerId || proj.ownerId, player);
           break;
         }
       }
@@ -270,6 +284,16 @@ export class Game {
       this._checkPowerupCollection(player);
     }
 
+    // Edifici: conquista + torrette
+    for (const building of this.buildings.values()) {
+      building.updateConquest(this.players);
+
+      const proj = building.updateTurret(this.players);
+      if (proj) {
+        this.projectiles.set(proj.id, proj);
+      }
+    }
+
     // Respawn
     for (const player of this.players.values()) {
       if (!player.alive && player.respawnAt && now >= player.respawnAt) {
@@ -283,6 +307,7 @@ export class Game {
       projectiles: [...this.projectiles.values()].map(p => p.toState()),
       powerups: [...this.powerups.values()].map(p => p.toState()),
       bombs: this.bombs.map(b => ({ id: b.id, theta: b.theta, phi: b.phi, altitude: b.altitude })),
+      buildings: [...this.buildings.values()].map(b => b.toState()),
     });
   }
 
@@ -346,6 +371,22 @@ export class Game {
   // ── Bomba atterrata ───────────────────────────────────────────────────────
 
   bombLanded(bomb) {
+    // Controlla collisione con edifici conquistati (non propri)
+    for (const building of this.buildings.values()) {
+      if (!building.ownerId) continue;
+      if (building.ownerId === bomb.ownerId) continue; // non puoi bombardare le tue torri
+      const dist = this.distanceSphere(bomb.theta, bomb.phi, building.theta, building.phi, PLANET_RADIUS);
+      if (dist < BOMB_HIT_RADIUS) {
+        building.reset();
+        this.io.emit('building-destroyed', {
+          buildingId: building.id,
+          theta: building.theta,
+          phi: building.phi,
+          destroyerId: bomb.ownerId,
+        });
+      }
+    }
+
     const target = this.targets.get(bomb.ownerId);
     if (!target) return;
 

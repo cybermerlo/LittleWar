@@ -57,23 +57,25 @@ function moveOnSphere(theta, phi, heading, delta) {
 }
 
 export class Projectile {
-  constructor(ownerId, theta, phi, heading) {
+  constructor(ownerId, theta, phi, heading, speed = BULLET_SPEED, lifetime = BULLET_LIFETIME) {
     this.id = String(nextProjectileId++);
     this.ownerId = ownerId;
     this.theta = theta;
     this.phi = phi;
     this.heading = heading;
+    this.speed = speed;
+    this.lifetime = lifetime;
     this.createdAt = Date.now();
   }
 
   update() {
-    const pos = moveOnSphere(this.theta, this.phi, this.heading, BULLET_SPEED * TICK_DT);
+    const pos = moveOnSphere(this.theta, this.phi, this.heading, this.speed * TICK_DT);
     this.theta = pos.theta;
     this.phi = pos.phi;
   }
 
   isExpired() {
-    return Date.now() - this.createdAt > BULLET_LIFETIME;
+    return Date.now() - this.createdAt > this.lifetime;
   }
 
   // Distanza cartesiana da un giocatore (theta2, phi2)
