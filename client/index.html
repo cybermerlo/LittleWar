@@ -495,6 +495,49 @@
       z-index: 20;
     }
 
+    #player-arrows {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 19;
+    }
+
+    .player-arrow {
+      position: absolute;
+      width: 1.55rem;
+      height: 1.55rem;
+      border-radius: 9999px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 0.72rem;
+      font-weight: 800;
+      color: #ffffff;
+      background: color-mix(in srgb, var(--arrow-color, #60a5fa) 62%, #0b1220);
+      border: 1px solid color-mix(in srgb, var(--arrow-color, #60a5fa) 85%, #ffffff);
+      box-shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.35),
+        0 6px 18px color-mix(in srgb, var(--arrow-color, #60a5fa) 36%, transparent);
+      transform: translate(-50%, -50%);
+      opacity: 0.92;
+    }
+
+    .player-arrow--offscreen {
+      width: auto;
+      height: auto;
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--arrow-color, #60a5fa);
+      text-shadow:
+        0 0 1px rgba(0, 0, 0, 0.8),
+        0 0 7px color-mix(in srgb, var(--arrow-color, #60a5fa) 65%, transparent);
+    }
+
     #hud-bomb-toast {
       position: absolute;
       left: 50%;
@@ -589,7 +632,7 @@
       <div id="lobby-box">
         <div>
           <h1 class="lw-hero-title">LITTLEWAR</h1>
-          <p class="lw-hero-sub">Sali a bordo e spara a tutti</p>
+          <p class="lw-hero-sub">Sali a bordo e Giacomo muore</p>
         </div>
 
         <div class="lw-fields">
@@ -639,6 +682,7 @@
       <div id="player-list"></div>
     </div>
     <div id="target-arrow">🎯</div>
+    <div id="player-arrows"></div>
     <div id="hud-bomb-toast" role="status" aria-live="polite"></div>
   </div>
 

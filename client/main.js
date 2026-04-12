@@ -87,6 +87,7 @@ let heading = 0;
 
 // Mappe entità remote
 const remoteAirplanes  = new Map(); // playerId → Airplane
+const remoteWasDead    = new Map(); // playerId → boolean
 const projectileEntities = new Map();
 const bombEntities       = new Map();
 const powerupEntities    = new Map();
@@ -193,12 +194,23 @@ const net = new NetworkManager({
   onPlayerLeft({ id }) {
     remoteAirplanes.get(id)?.dispose(scene);
     remoteAirplanes.delete(id);
+    remoteWasDead.delete(id);
     allPlayerStates = allPlayerStates.filter(p => p.id !== id);
     lobby.setOnlineCount(allPlayerStates.length, MAX_PLAYERS);
   },
 
   onGameState(state) {
     allPlayerStates = state.players;
+
+    // Rimuovi aerei remoti non più presenti nel game-state
+    const serverPlayerIds = new Set(state.players.map(p => p.id));
+    for (const [id, plane] of remoteAirplanes) {
+      if (!serverPlayerIds.has(id)) {
+        plane.dispose(scene);
+        remoteAirplanes.delete(id);
+        remoteWasDead.delete(id);
+      }
+    }
 
     // Aggiorna aerei remoti
     state.players.forEach(p => {
@@ -207,14 +219,25 @@ const net = new NetworkManager({
         return;
       }
       if (!remoteAirplanes.has(p.id)) {
-        // Giocatore che non avevamo ancora
         const plane = new Airplane(scene, THREE, p.color ?? '#aaaaaa', p.model, false);
         remoteAirplanes.set(p.id, plane);
       }
+      const plane = remoteAirplanes.get(p.id);
+      if (!plane) return;
+
       if (p.alive) {
-        remoteAirplanes.get(p.id)?.setNetworkTarget(
+        const wasDead = remoteWasDead.get(p.id) ?? true;
+        if (wasDead) {
+          plane.resetRemote(p.theta, p.phi, p.heading);
+        }
+        plane.mesh.visible = true;
+        plane.setNetworkTarget(
           p.theta, p.phi, p.heading, p.weaponLevel, p.hasShield,
         );
+        remoteWasDead.set(p.id, false);
+      } else {
+        plane.mesh.visible = false;
+        remoteWasDead.set(p.id, true);
       }
     });
 
@@ -377,8 +400,15 @@ function animate() {
   // Aerei remoti: interpolazione ogni frame verso lo stato rete
   if (inGame) {
     for (const p of allPlayerStates) {
-      if (p.id === localPlayerId || !p.alive) continue;
-      remoteAirplanes.get(p.id)?.tickRemote(delta);
+      if (p.id === localPlayerId) continue;
+      const plane = remoteAirplanes.get(p.id);
+      if (!plane) continue;
+      if (p.alive) {
+        plane.mesh.visible = true;
+        plane.tickRemote(delta);
+      } else {
+        plane.mesh.visible = false;
+      }
     }
   }
 

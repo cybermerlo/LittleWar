@@ -154,16 +154,13 @@ export class Airplane {
     scene.add(this.mesh);
     this.isLocal = isLocal;
 
-    // Stato sférico
     this.theta = Math.PI / 2;
     this.phi = 0;
     this.heading = 0;
     this._bankRoll = 0;
     this._lastHeading = undefined;
-    /** Quaternion solo da posizione/heading sulla sfera (senza rollio in virata) */
     this.sphereQuaternion = new THREE.Quaternion();
 
-    // Solo remoti: interpolazione verso ultimo stato dal server (ogni frame)
     this._targetPos = new THREE.Vector3(0, 1, 0);
     this._displayPos = new THREE.Vector3(0, 1, 0);
     this._targetHeading = 0;
@@ -174,9 +171,20 @@ export class Airplane {
   }
 
   /**
-   * Aggiorna bersaglio di rete per un aereo remoto (chiamato da game-state).
-   * Il mesh viene aggiornato in tickRemote ogni frame.
+   * Forza teletrasporto immediato alla posizione indicata (usato al respawn).
    */
+  resetRemote(theta, phi, heading) {
+    const c = sphericalToCartesian(theta, phi, 1);
+    this._targetPos.set(c.x, c.y, c.z).normalize();
+    this._displayPos.copy(this._targetPos);
+    this._targetHeading = heading;
+    this._displayHeading = heading;
+    this._remoteNetReady = true;
+    this._lastHeading = undefined;
+    const sph = cartesianToSpherical(this._displayPos.x, this._displayPos.y, this._displayPos.z);
+    this.update(sph.theta, sph.phi, heading, this._netWeaponLevel, this._netHasShield, 1 / 60);
+  }
+
   setNetworkTarget(theta, phi, heading, weaponLevel, hasShield) {
     if (this.isLocal) return;
     const c = sphericalToCartesian(theta, phi, 1);
@@ -184,11 +192,7 @@ export class Airplane {
     this._targetHeading = heading;
     this._netWeaponLevel = weaponLevel ?? 0;
     this._netHasShield = !!hasShield;
-    // Respawn / salto grande: riallinea senza trascinare dall’ultima posizione
-    if (this._remoteNetReady && this._displayPos.distanceTo(this._targetPos) > 0.35) {
-      this._remoteNetReady = false;
-    }
-    if (!this._remoteNetReady) {
+    if (!this._remoteNetReady || this._displayPos.distanceTo(this._targetPos) > 0.35) {
       this._displayPos.copy(this._targetPos);
       this._displayHeading = heading;
       this._remoteNetReady = true;
@@ -198,7 +202,6 @@ export class Airplane {
     }
   }
 
-  /** Chiamare ogni frame per aerei remoti vivi (dopo setNetworkTarget). */
   tickRemote(delta) {
     if (this.isLocal || !this._remoteNetReady) return;
     const k = 1 - Math.exp(-REMOTE_NET_SMOOTH * delta);
@@ -240,7 +243,6 @@ export class Airplane {
     _rollQuat.setFromAxisAngle(_axisX, this._bankRoll);
     this.mesh.quaternion.copy(q).multiply(_rollQuat);
 
-    // Scudo
     if (this.mesh.userData.shield) {
       this.mesh.userData.shield.visible = hasShield;
     }
