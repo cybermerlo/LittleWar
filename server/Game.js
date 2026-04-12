@@ -104,20 +104,25 @@ export class Game {
     const player = this.players.get(socketId);
     if (!player || !player.alive) return;
 
+    // Usa la posizione/heading inviati dal client — più accurati della
+    // predizione server, soprattutto quando il giocatore sta girando.
+    const theta   = (typeof data?.theta   === 'number') ? data.theta   : player.theta;
+    const phi     = (typeof data?.phi     === 'number') ? data.phi     : player.phi;
+    const heading = (typeof data?.heading === 'number') ? data.heading : player.heading;
+
+    // Corregge anche la posizione predetta dal server
+    player.theta   = theta;
+    player.phi     = phi;
+    player.heading = heading;
+
     const config = WEAPON_CONFIGS[player.weaponLevel];
-    const baseHeading = player.heading;
 
     // Genera N proiettili con spread
     for (let i = 0; i < config.bullets; i++) {
       const offset = config.bullets === 1
         ? 0
         : (i / (config.bullets - 1) - 0.5) * config.spread;
-      const proj = new Projectile(
-        player.id,
-        player.theta,
-        player.phi,
-        baseHeading + offset
-      );
+      const proj = new Projectile(player.id, theta, phi, heading + offset);
       this.projectiles.set(proj.id, proj);
     }
   }
@@ -128,11 +133,16 @@ export class Game {
     const player = this.players.get(socketId);
     if (!player || !player.alive) return;
 
+    const theta = (typeof data?.theta === 'number') ? data.theta : player.theta;
+    const phi   = (typeof data?.phi   === 'number') ? data.phi   : player.phi;
+    player.theta = theta;
+    player.phi   = phi;
+
     this.bombs.push({
       id: String(Date.now()) + Math.random(),
       ownerId: player.id,
-      theta: player.theta,
-      phi: player.phi,
+      theta,
+      phi,
       altitude: FLY_ALTITUDE,
     });
   }

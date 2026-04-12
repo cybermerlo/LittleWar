@@ -24,8 +24,8 @@ A multiplayer 3D browser game built with Three.js. Players fly around a small pl
 
 ## Tech Stack
 
-- **Frontend**: Three.js (vanilla JS or minimal bundler)
-- **Backend / Multiplayer**: TBD — likely Node.js + WebSockets (e.g. Socket.io)
+- **Frontend**: Three.js (vanilla JS) + Vite bundler
+- **Backend / Multiplayer**: Node.js + Socket.IO (WebSocket con fallback polling)
 - **Deployment**: GitHub → Railway (Railway pulls from the GitHub repo and deploys automatically)
 
 ## Deployment
@@ -59,6 +59,22 @@ npm run build      # build produzione in dist/
 ```
 
 In sviluppo aprire **due terminali**: uno per `npm start` (server), uno per `npm run dev` (client Vite).
+
+## Architecture
+
+- `shared/` — codice puro senza dipendenze (constants, movement math) importato sia da client che da server
+- `shared/movement.js` — `moveOnSphere`, `sphericalToCartesian`, `cartesianToSpherical` (senza Three.js)
+- `client/utils/SphereUtils.js` — re-esporta da shared + funzioni Three.js-dipendenti (`sphereOrientation`)
+- `server/Game.js` — usa `moveOnSphere` da shared per **predizione server-side** (muove ogni player a ogni tick)
+- Coordinate: theta = angolo polare (0..PI), phi = azimutale (0..2PI), heading = direzione di volo (0 = nord)
+
+## Networking Notes (Railway)
+
+- Railway **non supporta WebSocket affidabilmente** — Socket.IO ricade su HTTP polling
+- Con polling lento (1 req/s), gli input arrivano tardi → il server predice il movimento server-side
+- `Game.tick()` muove ogni player nella direzione corrente prima del broadcast; `updatePlayerInput` corregge
+- Gli eventi `shoot` e `drop-bomb` **devono includere theta/phi/heading** dal client — la posizione predetta dal server diverge, specialmente quando si sta girando
+- Socket.IO client configurato con `transports: ['websocket', 'polling']` (WebSocket prioritario)
 
 ## Development Notes
 

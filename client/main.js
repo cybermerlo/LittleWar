@@ -385,14 +385,14 @@ function animate() {
 
     // Sparo
     if (input.consumeShoot() && now - lastShootTime > SHOOT_COOLDOWN) {
-      net.sendShoot();
+      net.sendShoot(theta, phi, heading);
       AudioManager.playShoot();
       lastShootTime = now;
     }
 
     // Bomba
     if (input.consumeBomb() && now - lastBombTime > BOMB_COOLDOWN) {
-      net.sendBomb();
+      net.sendBomb(theta, phi);
       lastBombTime = now;
     }
   }

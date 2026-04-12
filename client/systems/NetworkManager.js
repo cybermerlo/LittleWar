@@ -33,11 +33,11 @@ export class NetworkManager {
     this.socket.emit('player-input', { theta, phi, heading });
   }
 
-  sendShoot() {
-    this.socket.emit('shoot', {});
+  sendShoot(theta, phi, heading) {
+    this.socket.emit('shoot', { theta, phi, heading });
   }
 
-  sendBomb() {
-    this.socket.emit('drop-bomb', {});
+  sendBomb(theta, phi) {
+    this.socket.emit('drop-bomb', { theta, phi });
   }
 }
