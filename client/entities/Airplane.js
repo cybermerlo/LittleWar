@@ -168,18 +168,18 @@ function createBoostParticleSystem() {
     blending: THREE.AdditiveBlending,
     uniforms: {
       uColor: { value: new THREE.Color(0xffa31a) },
-      uSize: { value: 30.0 },
     },
     vertexShader: `
       attribute float aLife;
-      uniform float uSize;
       varying float vLife;
       void main() {
         vLife = aLife;
         vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * mvPos;
-        float size = mix(2.0, uSize, aLife);
-        gl_PointSize = size * (250.0 / max(1.0, -mvPos.z));
+        // Più piccole in generale; leggermente più strette quando la vita è alta (appena nate)
+        float t = pow(clamp(aLife, 0.0, 1.0), 0.85);
+        float size = mix(2.0, 7.2, t);
+        gl_PointSize = size * (175.0 / max(1.0, -mvPos.z));
       }
     `,
     fragmentShader: `
@@ -188,9 +188,9 @@ function createBoostParticleSystem() {
       void main() {
         vec2 p = gl_PointCoord - vec2(0.5);
         float d = length(p);
-        float core = smoothstep(0.45, 0.0, d);
-        float glow = smoothstep(0.9, 0.1, d);
-        float alpha = (core * 0.85 + glow * 0.35) * vLife;
+        float core = smoothstep(0.38, 0.0, d);
+        float glow = smoothstep(0.72, 0.12, d);
+        float alpha = (core * 0.72 + glow * 0.22) * vLife;
         if (alpha < 0.01) discard;
         gl_FragColor = vec4(uColor, alpha);
       }
@@ -226,9 +226,11 @@ export class Airplane {
     this._displayHeading = 0;
     this._netWeaponLevel = 0;
     this._netHasShield = false;
+    /** Boost visivo remoto 0..1 (da game-state server). */
+    this._netBoostAmount = 0;
     this._remoteNetReady = false;
 
-    // Effetto boost (solo aereo locale): coda particellare in world space.
+    // Coda particellare turbo (world space): locale e remoti.
     this._boostPoints = null;
     this._boostGeometry = null;
     this._boostMaterial = null;
@@ -237,16 +239,14 @@ export class Airplane {
     this._boostVel = null;
     this._boostSpawnAcc = 0;
     this._boostHead = 0;
-    if (this.isLocal) {
-      const ps = createBoostParticleSystem();
-      this._boostPoints = ps.points;
-      this._boostGeometry = ps.geometry;
-      this._boostMaterial = ps.material;
-      this._boostPositions = ps.positions;
-      this._boostLife = ps.life;
-      this._boostVel = new Float32Array(BOOST_PARTICLE_COUNT * 3);
-      scene.add(this._boostPoints);
-    }
+    const ps = createBoostParticleSystem();
+    this._boostPoints = ps.points;
+    this._boostGeometry = ps.geometry;
+    this._boostMaterial = ps.material;
+    this._boostPositions = ps.positions;
+    this._boostLife = ps.life;
+    this._boostVel = new Float32Array(BOOST_PARTICLE_COUNT * 3);
+    scene.add(this._boostPoints);
   }
 
   /**
@@ -261,23 +261,32 @@ export class Airplane {
     this._remoteNetReady = true;
     this._lastHeading = undefined;
     const sph = cartesianToSpherical(this._displayPos.x, this._displayPos.y, this._displayPos.z);
-    this.update(sph.theta, sph.phi, heading, this._netWeaponLevel, this._netHasShield, 1 / 60);
+    this.update(sph.theta, sph.phi, heading, this._netWeaponLevel, this._netHasShield, 1 / 60, this._netBoostAmount);
   }
 
-  setNetworkTarget(theta, phi, heading, weaponLevel, hasShield) {
+  setNetworkTarget(theta, phi, heading, weaponLevel, hasShield, boostAmount = 0) {
     if (this.isLocal) return;
     const c = sphericalToCartesian(theta, phi, 1);
     this._targetPos.set(c.x, c.y, c.z).normalize();
     this._targetHeading = heading;
     this._netWeaponLevel = weaponLevel ?? 0;
     this._netHasShield = !!hasShield;
+    this._netBoostAmount = THREE.MathUtils.clamp(boostAmount, 0, 1);
     if (!this._remoteNetReady || this._displayPos.distanceTo(this._targetPos) > 0.35) {
       this._displayPos.copy(this._targetPos);
       this._displayHeading = heading;
       this._remoteNetReady = true;
       this._lastHeading = undefined;
       const sph = cartesianToSpherical(this._displayPos.x, this._displayPos.y, this._displayPos.z);
-      this.update(sph.theta, sph.phi, this._displayHeading, this._netWeaponLevel, this._netHasShield, 1 / 60);
+      this.update(
+        sph.theta,
+        sph.phi,
+        this._displayHeading,
+        this._netWeaponLevel,
+        this._netHasShield,
+        1 / 60,
+        this._netBoostAmount,
+      );
     }
   }
 
@@ -288,7 +297,25 @@ export class Airplane {
     const sph = cartesianToSpherical(this._displayPos.x, this._displayPos.y, this._displayPos.z);
     let dh = wrapAngle(this._targetHeading - this._displayHeading);
     this._displayHeading += dh * k;
-    this.update(sph.theta, sph.phi, this._displayHeading, this._netWeaponLevel, this._netHasShield, delta);
+    this.update(
+      sph.theta,
+      sph.phi,
+      this._displayHeading,
+      this._netWeaponLevel,
+      this._netHasShield,
+      delta,
+      this._netBoostAmount,
+    );
+  }
+
+  /** Nasconde le particelle turbo (oggetto separato dalla mesh; es. giocatore morto). */
+  setBoostParticlesVisible(visible) {
+    if (!this._boostPoints) return;
+    this._boostPoints.visible = visible;
+    if (!visible && this._boostLife) {
+      for (let i = 0; i < BOOST_PARTICLE_COUNT; i++) this._boostLife[i] = 0;
+      this._boostSpawnAcc = 0;
+    }
   }
 
   update(theta, phi, heading, weaponLevel, hasShield, delta = 1 / 60, boostAmount = 0) {

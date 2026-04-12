@@ -26,6 +26,8 @@ export class Player {
     this.respawnAt = null;
     this.boostEnergy = BOOST_MAX;
     this.boostPressed = false;
+    this.moveForward = false;
+    this.moveBackward = false;
 
     // Target bombardamento (assegnato dal server)
     this.targetId = null;
@@ -36,6 +38,8 @@ export class Player {
   }
 
   toState() {
+    const boosting = this.boostPressed && this.boostEnergy > 0;
+    const boostEnergy = Math.round(Math.max(0, Math.min(BOOST_MAX, this.boostEnergy)));
     return {
       id: this.id,
       nickname: this.nickname,
@@ -49,8 +53,9 @@ export class Player {
       kills: this.kills,
       bombPoints: this.bombPoints,
       alive: this.alive,
-      boostEnergy: this.boostEnergy,
-      boosting: this.boostPressed && this.boostEnergy > 0,
+      // Ottimizzazione rete: boostEnergy serve ai remoti solo durante boost attivo.
+      boosting,
+      boostEnergy: boosting ? boostEnergy : undefined,
     };
   }
 

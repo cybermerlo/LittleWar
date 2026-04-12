@@ -15,6 +15,8 @@ import {
   BOOST_SPEED_MULT,
   BOOST_DRAIN_PER_SEC,
   BOOST_REGEN_PER_SEC,
+  FORWARD_ACCEL,
+  BACKWARD_ACCEL,
   POWERUP_COLLECT_RADIUS,
   POWERUP_LIFETIME,
   POWERUP_RANDOM_INTERVAL,
@@ -133,6 +135,8 @@ export class Game {
   updatePlayerInput(socketId, input) {
     const player = this.players.get(socketId);
     if (!player || !player.alive) return;
+    const prevTheta = player.theta;
+    const prevPhi = player.phi;
 
     // Hardening input: evita NaN/Infinity o valori fuori range.
     const nextTheta = clampTheta(input?.theta);
@@ -144,10 +148,12 @@ export class Game {
     player.phi = nextPhi;
     player.heading = nextHeading;
     player.boostPressed = !!input.boost;
+    player.moveForward = !!input.forward;
+    player.moveBackward = !!input.backward;
     player.lastInputTime = Date.now();
-    // Controlla raccolta powerup subito con la posizione reale del client,
-    // non solo ogni tick con la posizione predetta (che può divergere).
-    this._checkPowerupCollection(player);
+    // Controllo anti-tunneling su traiettoria reale tra due input:
+    // evita pass-through dei powerup con polling lento/boost.
+    this._checkPowerupCollectionAlongPath(player, prevTheta, prevPhi, nextTheta, nextPhi);
   }
 
   // ── Sparo ──────────────────────────────────────────────────────────────────
@@ -217,7 +223,8 @@ export class Game {
         player.boostEnergy = Math.min(BOOST_MAX, player.boostEnergy + BOOST_REGEN_PER_SEC * TICK_DT);
       }
       const speedMult = canBoost ? BOOST_SPEED_MULT : 1;
-      const speed = baseSpeed * speedMult;
+      const accel = player.moveForward ? FORWARD_ACCEL : player.moveBackward ? BACKWARD_ACCEL : 1;
+      const speed = baseSpeed * speedMult * accel;
       const moved = moveOnSphere(player.theta, player.phi, player.heading, speed * TICK_DT);
       player.theta = moved.theta;
       player.phi = moved.phi;
@@ -298,6 +305,8 @@ export class Game {
     victim.weaponLevel = 0;
     victim.hasShield = false;
     victim.boostPressed = false;
+    victim.moveForward = false;
+    victim.moveBackward = false;
 
     const killer = this.getPlayerById(killerId);
     if (killer) killer.kills++;
@@ -327,6 +336,8 @@ export class Game {
     player.hasShield = false;
     player.boostEnergy = BOOST_MAX;
     player.boostPressed = false;
+    player.moveForward = false;
+    player.moveBackward = false;
 
     const socket = this.getSocketById(player.socketId);
     if (socket) socket.emit('respawned', player.toState());
@@ -377,6 +388,22 @@ export class Game {
     }
   }
 
+  _checkPowerupCollectionAlongPath(player, t0, p0, t1, p1) {
+    for (const [id, pu] of this.powerups) {
+      const directDist = this.distanceSphere(t1, p1, pu.theta, pu.phi, FLY_ALTITUDE);
+      if (directDist < POWERUP_COLLECT_RADIUS) {
+        this.collectPowerup(player, pu);
+        this.powerups.delete(id);
+        continue;
+      }
+      const segDist = this.distancePointToSegmentOnSphere(t0, p0, t1, p1, pu.theta, pu.phi, FLY_ALTITUDE);
+      if (segDist < POWERUP_COLLECT_RADIUS) {
+        this.collectPowerup(player, pu);
+        this.powerups.delete(id);
+      }
+    }
+  }
+
   collectPowerup(player, pu) {
     if (pu.type === 'weapon' && player.weaponLevel < MAX_WEAPON_LEVEL) {
       player.weaponLevel++;
@@ -409,6 +436,42 @@ export class Game {
     const y2 = r * Math.cos(t2);
     const z2 = r * Math.sin(t2) * Math.sin(p2);
     return Math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2 + (z1 - z2) ** 2);
+  }
+
+  distancePointToSegmentOnSphere(t0, p0, t1, p1, tp, pp, r) {
+    const a = this.sphericalToCartesian(t0, p0, r);
+    const b = this.sphericalToCartesian(t1, p1, r);
+    const p = this.sphericalToCartesian(tp, pp, r);
+
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const abz = b.z - a.z;
+    const apx = p.x - a.x;
+    const apy = p.y - a.y;
+    const apz = p.z - a.z;
+
+    const ab2 = abx * abx + aby * aby + abz * abz;
+    if (ab2 < 1e-8) {
+      return Math.sqrt(apx * apx + apy * apy + apz * apz);
+    }
+
+    let t = (apx * abx + apy * aby + apz * abz) / ab2;
+    t = Math.max(0, Math.min(1, t));
+    const cx = a.x + abx * t;
+    const cy = a.y + aby * t;
+    const cz = a.z + abz * t;
+    const dx = p.x - cx;
+    const dy = p.y - cy;
+    const dz = p.z - cz;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+
+  sphericalToCartesian(theta, phi, r) {
+    return {
+      x: r * Math.sin(theta) * Math.cos(phi),
+      y: r * Math.cos(theta),
+      z: r * Math.sin(theta) * Math.sin(phi),
+    };
   }
 
   getPlayerById(id) {

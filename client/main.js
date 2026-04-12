@@ -22,8 +22,17 @@ import { moveOnSphere } from './utils/SphereUtils.js';
 import {
   BASE_SPEED, SPEED_REDUCTION_PER_LEVEL, MIN_SPEED,
   BOOST_MAX, BOOST_SPEED_MULT, BOOST_DRAIN_PER_SEC, BOOST_REGEN_PER_SEC,
+  FORWARD_ACCEL, BACKWARD_ACCEL,
   WEAPON_CONFIGS, FLY_ALTITUDE, MAX_PLAYERS, CLIENT_INPUT_SEND_MS,
 } from '../shared/constants.js';
+
+/** Intensità visiva turbo per aerei remoti (0..1) dal game-state. */
+function remoteBoostAmount(p) {
+  if (!p?.boosting) return 0;
+  const e = p.boostEnergy;
+  if (typeof e !== 'number' || !Number.isFinite(e)) return 1;
+  return Math.max(0, Math.min(1, e / BOOST_MAX));
+}
 
 // ── Renderer + Scena ──────────────────────────────────────────────────────────
 
@@ -173,7 +182,7 @@ const net = new NetworkManager({
     players.forEach(p => {
       if (p.id !== localPlayerId) {
         const plane = new Airplane(scene, THREE, p.color, p.model, false);
-        plane.update(p.theta, p.phi, p.heading, p.weaponLevel, p.hasShield, 0);
+        plane.update(p.theta, p.phi, p.heading, p.weaponLevel, p.hasShield, 0, remoteBoostAmount(p));
         remoteAirplanes.set(p.id, plane);
       }
     });
@@ -246,12 +255,15 @@ const net = new NetworkManager({
           plane.resetRemote(p.theta, p.phi, p.heading);
         }
         plane.mesh.visible = true;
+        plane.setBoostParticlesVisible(true);
         plane.setNetworkTarget(
           p.theta, p.phi, p.heading, p.weaponLevel, p.hasShield,
+          remoteBoostAmount(p),
         );
         remoteWasDead.set(p.id, false);
       } else {
         plane.mesh.visible = false;
+        plane.setBoostParticlesVisible(false);
         remoteWasDead.set(p.id, true);
       }
     });
@@ -294,6 +306,8 @@ const net = new NetworkManager({
       const id = powerupKey(p.id);
       if (!powerupEntities.has(id)) {
         powerupEntities.set(id, new PowerUpEntity(scene, id, p.type, p.theta, p.phi));
+      } else {
+        powerupEntities.get(id).update(p.theta, p.phi);
       }
     });
   },
@@ -397,7 +411,9 @@ function animate() {
     if (input.isRight()) heading += turnSpeed * delta;
 
     // Movimento in avanti sempre attivo
-    const accel = input.isForward() ? 1.3 : input.isBackward() ? 0.4 : 1.0;
+    const movingForward = input.isForward();
+    const movingBackward = input.isBackward();
+    const accel = movingForward ? FORWARD_ACCEL : movingBackward ? BACKWARD_ACCEL : 1;
     const moved = moveOnSphere(theta, phi, heading, speed * accel * delta);
     theta = moved.theta;
     phi   = moved.phi;
@@ -416,7 +432,7 @@ function animate() {
 
     // Invia input al server (throttled)
     if (now - lastInputSend >= CLIENT_INPUT_SEND_MS) {
-      net.sendInput(theta, phi, heading, boostActive);
+      net.sendInput(theta, phi, heading, boostActive, movingForward, movingBackward);
       lastInputSend = now;
     }
 

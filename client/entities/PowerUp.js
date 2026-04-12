@@ -83,6 +83,12 @@ export class PowerUpEntity {
     this.root.rotateX(Math.PI); // corregge eventuale flip del modello
   }
 
+  update(theta, phi) {
+    this.theta = theta;
+    this.phi = phi;
+    this._updatePosition();
+  }
+
   tick(delta) {
     this.root.rotation.y += delta * 1.8;
     const t = performance.now() / 800;

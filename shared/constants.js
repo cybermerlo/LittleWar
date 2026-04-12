@@ -16,6 +16,8 @@ export const BOOST_MAX = 100;
 export const BOOST_SPEED_MULT = 1.9;
 export const BOOST_DRAIN_PER_SEC = 34;
 export const BOOST_REGEN_PER_SEC = 11;
+export const FORWARD_ACCEL = 1.3;
+export const BACKWARD_ACCEL = 0.4;
 
 // Rollio in virata (banking) — radianti
 export const MAX_BANK_ANGLE = 0.38;      // ~22°
