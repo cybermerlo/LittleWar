@@ -13,11 +13,26 @@ export class HUD {
       speed:      document.getElementById('hud-speed'),
       playerList: document.getElementById('player-list'),
       arrow:      document.getElementById('target-arrow'),
+      bombToast:  document.getElementById('hud-bomb-toast'),
     };
+    this._bombToastTimer = null;
   }
 
   show() { this.el.hud.style.display = 'block'; }
   hide() { this.el.hud.style.display = 'none'; }
+
+  /** Avviso quando la tua bomba colpisce il bersaglio bombardamento */
+  showBombHitNotice() {
+    const el = this.el.bombToast;
+    if (!el) return;
+    el.textContent = 'Bersaglio colpito!';
+    el.classList.add('hud-toast--visible');
+    if (this._bombToastTimer) clearTimeout(this._bombToastTimer);
+    this._bombToastTimer = setTimeout(() => {
+      el.classList.remove('hud-toast--visible');
+      this._bombToastTimer = null;
+    }, 3200);
+  }
 
   update(localPlayer, allPlayers, target, camera) {
     if (!localPlayer) return;

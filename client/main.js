@@ -1,6 +1,9 @@
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { createPlanet } from './scene/Planet.js';
-import { createTerrain } from './scene/Terrain.js';
+import { createTerrain, loadTreeTemplates } from './scene/Terrain.js';
 import { createSky } from './scene/Sky.js';
 import { setupLighting } from './scene/Lighting.js';
 import { Airplane } from './entities/Airplane.js';
@@ -18,7 +21,7 @@ import { DeathScreen } from './ui/DeathScreen.js';
 import { moveOnSphere } from './utils/SphereUtils.js';
 import {
   BASE_SPEED, SPEED_REDUCTION_PER_LEVEL, MIN_SPEED,
-  WEAPON_CONFIGS, FLY_ALTITUDE, MAX_PLAYERS,
+  WEAPON_CONFIGS, FLY_ALTITUDE, MAX_PLAYERS, CLIENT_INPUT_SEND_MS,
 } from '../shared/constants.js';
 
 // ── Renderer + Scena ──────────────────────────────────────────────────────────
@@ -26,16 +29,34 @@ import {
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.03;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(0, 80, 0);
 
+const composer = new EffectComposer(renderer);
+const renderPass = new RenderPass(scene, camera);
+composer.addPass(renderPass);
+
+const bloomScale = window.devicePixelRatio > 1.5 ? 0.65 : 1.0;
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth * bloomScale, window.innerHeight * bloomScale),
+  0.34,
+  0.72,
+  0.84,
+);
+composer.addPass(bloomPass);
+
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  composer.setSize(window.innerWidth, window.innerHeight);
+  bloomPass.resolution.set(window.innerWidth * bloomScale, window.innerHeight * bloomScale);
 });
 
 // ── Costruzione mondo ─────────────────────────────────────────────────────────
@@ -43,7 +64,9 @@ window.addEventListener('resize', () => {
 createSky(scene);
 setupLighting(scene);
 const { heightData, posAttr } = createPlanet(scene);
-createTerrain(scene, heightData, posAttr);
+loadTreeTemplates().then((treeTemplates) => {
+  createTerrain(scene, heightData, posAttr, treeTemplates);
+});
 
 // ── Stato gioco ───────────────────────────────────────────────────────────────
 
@@ -67,11 +90,22 @@ const remoteAirplanes  = new Map(); // playerId → Airplane
 const projectileEntities = new Map();
 const bombEntities       = new Map();
 const powerupEntities    = new Map();
+/** Chiavi Map allineate a stringa (evita mismatch con eventi socket). */
+function powerupKey(id) {
+  return String(id);
+}
+function removePowerupEntity(scene, rawId) {
+  const id = powerupKey(rawId);
+  const e = powerupEntities.get(id);
+  if (!e) return;
+  e.dispose(scene);
+  powerupEntities.delete(id);
+}
 let   targetEntity       = null;
 let   currentTarget      = null;
 let   allPlayerStates    = [];
 
-// Throttle invio input (20 Hz)
+// Throttle invio input (allineato al tick server)
 let lastInputSend = 0;
 
 // Shoot cooldown
@@ -85,6 +119,7 @@ const BOMB_COOLDOWN = 1500; // ms
 // ── Lobby + Network ───────────────────────────────────────────────────────────
 
 const lobby = new LobbyScreen((nickname, color, model) => {
+  AudioManager.startMusic();
   net.join(nickname, color, model);
   lobby.setMessage('Connessione…');
 });
@@ -96,6 +131,7 @@ const net = new NetworkManager({
   },
 
   onDisconnect() {
+    AudioManager.stopMusic();
     lobby.show();
     lobby.setMessage('Disconnesso. Ricarica la pagina.');
     inGame = false;
@@ -128,8 +164,9 @@ const net = new NetworkManager({
 
     // Powerup già presenti
     powerups.forEach(pu => {
-      const e = new PowerUpEntity(scene, pu.id, pu.type, pu.theta, pu.phi);
-      powerupEntities.set(pu.id, e);
+      const id = powerupKey(pu.id);
+      const e = new PowerUpEntity(scene, id, pu.type, pu.theta, pu.phi);
+      powerupEntities.set(id, e);
     });
 
     // Obiettivo bombardamento
@@ -175,7 +212,9 @@ const net = new NetworkManager({
         remoteAirplanes.set(p.id, plane);
       }
       if (p.alive) {
-        remoteAirplanes.get(p.id)?.update(p.theta, p.phi, p.heading, p.weaponLevel, p.hasShield, lastAnimDelta);
+        remoteAirplanes.get(p.id)?.setNetworkTarget(
+          p.theta, p.phi, p.heading, p.weaponLevel, p.hasShield,
+        );
       }
     });
 
@@ -205,14 +244,18 @@ const net = new NetworkManager({
       }
     });
 
-    // Powerup
-    const serverPuIds = new Set(state.powerups.map(p => p.id));
+    // Powerup (stato server = fonte di verità: spariscono se non sono più nella lista)
+    const serverPuIds = new Set(state.powerups.map(p => powerupKey(p.id)));
     for (const [id, e] of powerupEntities) {
-      if (!serverPuIds.has(id)) { e.dispose(scene); powerupEntities.delete(id); }
+      if (!serverPuIds.has(id)) {
+        e.dispose(scene);
+        powerupEntities.delete(id);
+      }
     }
     state.powerups.forEach(p => {
-      if (!powerupEntities.has(p.id)) {
-        powerupEntities.set(p.id, new PowerUpEntity(scene, p.id, p.type, p.theta, p.phi));
+      const id = powerupKey(p.id);
+      if (!powerupEntities.has(id)) {
+        powerupEntities.set(id, new PowerUpEntity(scene, id, p.type, p.theta, p.phi));
       }
     });
   },
@@ -235,20 +278,23 @@ const net = new NetworkManager({
   },
 
   onPowerupSpawned(pu) {
-    if (!powerupEntities.has(pu.id)) {
-      powerupEntities.set(pu.id, new PowerUpEntity(scene, pu.id, pu.type, pu.theta, pu.phi));
+    const id = powerupKey(pu.id);
+    if (!powerupEntities.has(id)) {
+      powerupEntities.set(id, new PowerUpEntity(scene, id, pu.type, pu.theta, pu.phi));
     }
   },
 
   onPowerupCollected({ playerId, powerupId }) {
-    powerupEntities.get(powerupId)?.dispose(scene);
-    powerupEntities.delete(powerupId);
+    removePowerupEntity(scene, powerupId);
     if (playerId === localPlayerId) AudioManager.playPowerup();
   },
 
-  onBombExploded({ theta: t, phi: p, hit }) {
+  onBombExploded({ theta: t, phi: p, hit, ownerId }) {
     spawnExplosion(scene, t, p, 50, hit ? 0xffcc00 : 0x884400);
     AudioManager.playBomb();
+    if (hit && ownerId === localPlayerId) {
+      hud.showBombHitNotice();
+    }
   },
 
   onNewTarget(target) {
@@ -280,13 +326,10 @@ function ensureLocalAirplane(color, model) {
 // ── Game Loop ─────────────────────────────────────────────────────────────────
 
 const clock = new THREE.Clock();
-/** Ultimo delta del game loop — usato per banking sugli aerei remoti (callback di rete) */
-let lastAnimDelta = 1 / 60;
 
 function animate() {
   requestAnimationFrame(animate);
   const delta = clock.getDelta();
-  lastAnimDelta = delta;
   const now = performance.now();
 
   if (inGame && isAlive && localState) {
@@ -312,7 +355,7 @@ function animate() {
     camCtrl.update(localAirplane.mesh, localAirplane.sphereQuaternion);
 
     // Invia input al server (throttled)
-    if (now - lastInputSend > 50) {
+    if (now - lastInputSend >= CLIENT_INPUT_SEND_MS) {
       net.sendInput(theta, phi, heading);
       lastInputSend = now;
     }
@@ -331,6 +374,14 @@ function animate() {
     }
   }
 
+  // Aerei remoti: interpolazione ogni frame verso lo stato rete
+  if (inGame) {
+    for (const p of allPlayerStates) {
+      if (p.id === localPlayerId || !p.alive) continue;
+      remoteAirplanes.get(p.id)?.tickRemote(delta);
+    }
+  }
+
   // Anima powerup
   for (const pu of powerupEntities.values()) pu.tick(delta);
 
@@ -342,7 +393,7 @@ function animate() {
     hud.update(localState, allPlayerStates, currentTarget, camera);
   }
 
-  renderer.render(scene, camera);
+  composer.render();
 }
 
 animate();

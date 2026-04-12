@@ -7,15 +7,15 @@ const NOISE_SCALE = 0.8;
 const MOUNTAIN_HEIGHT = 7;
 const WATER_LEVEL = 0.05; // altitudine normalizzata al di sotto della quale = acqua
 
-// Palette colori per altitudine (normalizzata 0..1)
+// Palette pastello per altitudine (normalizzata 0..1)
 const COLORS = [
-  { h: -0.02, color: new THREE.Color(0x1a5fa8) }, // acqua profonda
-  { h:  0.00, color: new THREE.Color(0x2277cc) }, // acqua
-  { h:  0.03, color: new THREE.Color(0xf0d080) }, // spiaggia
-  { h:  0.08, color: new THREE.Color(0x5aaa44) }, // pianura
-  { h:  0.25, color: new THREE.Color(0x3d7a2e) }, // colline
-  { h:  0.55, color: new THREE.Color(0x8a8070) }, // roccia
-  { h:  0.85, color: new THREE.Color(0xfafafa) }, // neve
+  { h: -0.02, color: new THREE.Color(0x3f88c6) }, // acqua profonda
+  { h:  0.00, color: new THREE.Color(0x5ea8d9) }, // acqua
+  { h:  0.04, color: new THREE.Color(0xf5df9f) }, // spiaggia
+  { h:  0.11, color: new THREE.Color(0x8ecf73) }, // pianura
+  { h:  0.30, color: new THREE.Color(0x6eb25c) }, // colline
+  { h:  0.58, color: new THREE.Color(0xb09c86) }, // roccia
+  { h:  0.86, color: new THREE.Color(0xfff9f1) }, // neve
   { h:  1.00, color: new THREE.Color(0xffffff) },
 ];
 
@@ -23,11 +23,23 @@ function altitudeColor(normalizedH) {
   for (let i = 0; i < COLORS.length - 1; i++) {
     const a = COLORS[i], b = COLORS[i + 1];
     if (normalizedH <= b.h) {
-      const t = (normalizedH - a.h) / (b.h - a.h);
-      return new THREE.Color().lerpColors(a.color, b.color, Math.max(0, t));
+      const t = THREE.MathUtils.clamp((normalizedH - a.h) / (b.h - a.h), 0, 1);
+      const smoothT = t * t * (3 - 2 * t);
+      return new THREE.Color().lerpColors(a.color, b.color, smoothT);
     }
   }
   return COLORS[COLORS.length - 1].color.clone();
+}
+
+function createToonGradientMap() {
+  // 4 gradini morbidi per uno shading cartoon leggero.
+  const data = new Uint8Array([42, 110, 182, 255]);
+  const gradientMap = new THREE.DataTexture(data, 4, 1, THREE.RedFormat);
+  gradientMap.minFilter = THREE.NearestFilter;
+  gradientMap.magFilter = THREE.NearestFilter;
+  gradientMap.generateMipmaps = false;
+  gradientMap.needsUpdate = true;
+  return gradientMap;
 }
 
 export function createPlanet(scene) {
@@ -74,9 +86,10 @@ export function createPlanet(scene) {
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
 
-  const mat = new THREE.MeshLambertMaterial({
+  const mat = new THREE.MeshToonMaterial({
     vertexColors: true,
     flatShading: true,
+    gradientMap: createToonGradientMap(),
   });
 
   const mesh = new THREE.Mesh(geo, mat);
@@ -85,13 +98,29 @@ export function createPlanet(scene) {
   // Sfera acqua
   const waterGeo = new THREE.SphereGeometry(PLANET_RADIUS + 0.05, 32, 32);
   const waterMat = new THREE.MeshPhongMaterial({
-    color: 0x2277cc,
+    color: 0x73b6e0,
+    emissive: 0x1b4360,
+    emissiveIntensity: 0.2,
+    specular: 0xcde9ff,
     transparent: true,
-    opacity: 0.65,
-    shininess: 80,
+    opacity: 0.58,
+    shininess: 45,
   });
   const water = new THREE.Mesh(waterGeo, waterMat);
   scene.add(water);
 
-  return { mesh, water, heightData, posAttr };
+  const atmosphereGeo = new THREE.SphereGeometry(PLANET_RADIUS + 0.9, 32, 32);
+  const atmosphereMat = new THREE.MeshBasicMaterial({
+    color: 0xbdeaff,
+    transparent: true,
+    opacity: 0.12,
+    side: THREE.BackSide,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  const atmosphere = new THREE.Mesh(atmosphereGeo, atmosphereMat);
+  scene.add(atmosphere);
+
+  return { mesh, water, atmosphere, heightData, posAttr };
 }

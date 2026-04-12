@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { sphericalToCartesian, sphereOrientation } from '../utils/SphereUtils.js';
+import { sphericalToCartesian, cartesianToSpherical, sphereOrientation } from '../utils/SphereUtils.js';
 import {
   FLY_ALTITUDE,
   MAX_BANK_ANGLE,
@@ -11,6 +11,8 @@ import {
 
 const _rollQuat = new THREE.Quaternion();
 const _axisX = new THREE.Vector3(1, 0, 0);
+/** Smussatura posizione aerei remoti (1/s, verso lo stato rete). */
+const REMOTE_NET_SMOOTH = 14;
 const _modelLoader = new GLTFLoader();
 const _modelTemplateCache = new Map();
 
@@ -160,6 +162,51 @@ export class Airplane {
     this._lastHeading = undefined;
     /** Quaternion solo da posizione/heading sulla sfera (senza rollio in virata) */
     this.sphereQuaternion = new THREE.Quaternion();
+
+    // Solo remoti: interpolazione verso ultimo stato dal server (ogni frame)
+    this._targetPos = new THREE.Vector3(0, 1, 0);
+    this._displayPos = new THREE.Vector3(0, 1, 0);
+    this._targetHeading = 0;
+    this._displayHeading = 0;
+    this._netWeaponLevel = 0;
+    this._netHasShield = false;
+    this._remoteNetReady = false;
+  }
+
+  /**
+   * Aggiorna bersaglio di rete per un aereo remoto (chiamato da game-state).
+   * Il mesh viene aggiornato in tickRemote ogni frame.
+   */
+  setNetworkTarget(theta, phi, heading, weaponLevel, hasShield) {
+    if (this.isLocal) return;
+    const c = sphericalToCartesian(theta, phi, 1);
+    this._targetPos.set(c.x, c.y, c.z).normalize();
+    this._targetHeading = heading;
+    this._netWeaponLevel = weaponLevel ?? 0;
+    this._netHasShield = !!hasShield;
+    // Respawn / salto grande: riallinea senza trascinare dall’ultima posizione
+    if (this._remoteNetReady && this._displayPos.distanceTo(this._targetPos) > 0.35) {
+      this._remoteNetReady = false;
+    }
+    if (!this._remoteNetReady) {
+      this._displayPos.copy(this._targetPos);
+      this._displayHeading = heading;
+      this._remoteNetReady = true;
+      this._lastHeading = undefined;
+      const sph = cartesianToSpherical(this._displayPos.x, this._displayPos.y, this._displayPos.z);
+      this.update(sph.theta, sph.phi, this._displayHeading, this._netWeaponLevel, this._netHasShield, 1 / 60);
+    }
+  }
+
+  /** Chiamare ogni frame per aerei remoti vivi (dopo setNetworkTarget). */
+  tickRemote(delta) {
+    if (this.isLocal || !this._remoteNetReady) return;
+    const k = 1 - Math.exp(-REMOTE_NET_SMOOTH * delta);
+    this._displayPos.lerp(this._targetPos, k).normalize();
+    const sph = cartesianToSpherical(this._displayPos.x, this._displayPos.y, this._displayPos.z);
+    let dh = wrapAngle(this._targetHeading - this._displayHeading);
+    this._displayHeading += dh * k;
+    this.update(sph.theta, sph.phi, this._displayHeading, this._netWeaponLevel, this._netHasShield, delta);
   }
 
   update(theta, phi, heading, weaponLevel, hasShield, delta = 1 / 60) {

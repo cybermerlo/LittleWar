@@ -1,8 +1,10 @@
 export const PLANET_RADIUS = 50;
 export const FLY_ALTITUDE = 56;       // altitudine volo sopra la superficie
 export const MAX_PLAYERS = 10;
-export const TICK_RATE = 20;          // Hz server broadcast
+export const TICK_RATE = 40;          // Hz server broadcast / simulazione
 export const TICK_INTERVAL = 1000 / TICK_RATE;
+/** Allinea l’invio input al tick server (evita ritardo extra tra client e broadcast). */
+export const CLIENT_INPUT_SEND_MS = TICK_INTERVAL;
 
 // Velocità aereo (radianti al SECONDO — moltiplicare per delta)
 export const BASE_SPEED = 0.20;
@@ -29,9 +31,9 @@ export const WEAPON_CONFIGS = [
 ];
 
 // Proiettili (radianti al SECONDO)
-export const BULLET_SPEED = 0.8;
-export const BULLET_LIFETIME = 2000;  // ms
-export const BULLET_HIT_RADIUS = 1.2;
+export const BULLET_SPEED = 0.95;
+export const BULLET_LIFETIME = 1600;  // ms
+export const BULLET_HIT_RADIUS = 0.9;
 
 // Bombe (unità al SECONDO)
 export const BOMB_FALL_SPEED = 4.0;

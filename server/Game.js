@@ -171,17 +171,20 @@ export class Game {
       if (now - pu.createdAt > POWERUP_LIFETIME) this.powerups.delete(id);
     }
 
-    // Raccolta powerup
+    // Raccolta powerup (rimozione dopo il giro: niente delete durante l’iterazione sulla Map)
+    const powerupsToRemove = new Set();
     for (const player of this.players.values()) {
       if (!player.alive) continue;
       for (const [id, pu] of this.powerups) {
+        if (powerupsToRemove.has(id)) continue;
         const dist = this.distanceSphere(player.theta, player.phi, pu.theta, pu.phi, FLY_ALTITUDE);
         if (dist < POWERUP_COLLECT_RADIUS) {
           this.collectPowerup(player, pu);
-          this.powerups.delete(id);
+          powerupsToRemove.add(id);
         }
       }
     }
+    for (const id of powerupsToRemove) this.powerups.delete(id);
 
     // Respawn
     for (const player of this.players.values()) {
