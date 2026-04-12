@@ -49,6 +49,17 @@ Skills are installed in `.claude/skills/` and are automatically loaded by Claude
 | `threejs-postprocessing` | Bloom, DOF, screen effects |
 | `threejs-interaction` | Raycasting, controls, input |
 
+## Commands
+
+```bash
+npm install        # installa dipendenze
+npm run dev        # avvia Vite dev server (porta 5173) + proxy a localhost:3000
+npm start          # avvia server Express+Socket.io (porta 3000 o $PORT)
+npm run build      # build produzione in dist/
+```
+
+In sviluppo aprire **due terminali**: uno per `npm start` (server), uno per `npm run dev` (client Vite).
+
 ## Development Notes
 
 - Keep the game lightweight — it runs in the browser for casual sessions with friends
