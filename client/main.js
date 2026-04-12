@@ -11,6 +11,7 @@ import { ProjectileEntity } from './entities/Projectile.js';
 import { BombEntity, spawnExplosion } from './entities/Bomb.js';
 import { PowerUpEntity } from './entities/PowerUp.js';
 import { TargetEntity } from './entities/Target.js';
+import { BuildingEntity, spawnTurretDestruction } from './entities/Building.js';
 import { InputManager } from './systems/InputManager.js';
 import { CameraController } from './systems/CameraController.js';
 import { NetworkManager } from './systems/NetworkManager.js';
@@ -112,6 +113,7 @@ function removePowerupEntity(scene, rawId) {
   e.dispose(scene);
   powerupEntities.delete(id);
 }
+const buildingEntities   = new Map(); // buildingId → BuildingEntity
 let   targetEntity       = null;
 let   currentTarget      = null;
 let   allPlayerStates    = [];
@@ -167,7 +169,7 @@ const net = new NetworkManager({
     lobby.setMessage('Quel colore è già in uso! Scegline un altro.');
   },
 
-  onJoined({ playerId, players, powerups, target }) {
+  onJoined({ playerId, players, powerups, target, buildings }) {
     localPlayerId = playerId;
     localState = players.find(p => p.id === playerId) ?? null;
 
@@ -199,6 +201,15 @@ const net = new NetworkManager({
       currentTarget = target;
       targetEntity?.dispose(scene);
       targetEntity = new TargetEntity(scene, target.theta, target.phi);
+    }
+
+    // Edifici conquistabili
+    if (buildings) {
+      for (const [id, e] of buildingEntities) { e.dispose(scene); }
+      buildingEntities.clear();
+      buildings.forEach(b => {
+        buildingEntities.set(b.id, new BuildingEntity(scene, b.id, b.theta, b.phi));
+      });
     }
 
     allPlayerStates = players;
@@ -310,6 +321,17 @@ const net = new NetworkManager({
         powerupEntities.get(id).update(p.theta, p.phi);
       }
     });
+
+    // Edifici conquistabili
+    if (state.buildings) {
+      state.buildings.forEach(b => {
+        if (!buildingEntities.has(b.id)) {
+          const entity = new BuildingEntity(scene, b.id, b.theta, b.phi);
+          buildingEntities.set(b.id, entity);
+        }
+        buildingEntities.get(b.id).update(b, allPlayerStates, camera);
+      });
+    }
   },
 
   onPlayerKilled({ killerId, victimId, theta: t, phi: p }) {
@@ -356,6 +378,11 @@ const net = new NetworkManager({
     currentTarget = target;
     targetEntity?.dispose(scene);
     targetEntity = new TargetEntity(scene, target.theta, target.phi);
+  },
+
+  onBuildingDestroyed({ buildingId, theta, phi, destroyerId }) {
+    spawnTurretDestruction(scene, theta, phi);
+    AudioManager.playBomb();
   },
 
   onRespawned(state) {
@@ -470,6 +497,13 @@ function animate() {
 
   // Anima target
   targetEntity?.tick();
+
+  // Aggiorna edifici (billboard barra progresso)
+  for (const be of buildingEntities.values()) {
+    if (be.progressGroup.visible) {
+      be.progressGroup.lookAt(camera.position);
+    }
+  }
 
   // HUD
   if (inGame) {
