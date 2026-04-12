@@ -84,8 +84,8 @@ const BOMB_COOLDOWN = 1500; // ms
 
 // ── Lobby + Network ───────────────────────────────────────────────────────────
 
-const lobby = new LobbyScreen((nickname, color) => {
-  net.join(nickname, color);
+const lobby = new LobbyScreen((nickname, color, model) => {
+  net.join(nickname, color, model);
   lobby.setMessage('Connessione…');
 });
 
@@ -120,8 +120,8 @@ const net = new NetworkManager({
     // Crea aerei degli altri giocatori già presenti
     players.forEach(p => {
       if (p.id !== localPlayerId) {
-        const plane = new Airplane(scene, THREE, p.color, false);
-        plane.update(p.theta, p.phi, p.heading, p.weaponLevel, p.hasShield);
+        const plane = new Airplane(scene, THREE, p.color, p.model, false);
+        plane.update(p.theta, p.phi, p.heading, p.weaponLevel, p.hasShield, 0);
         remoteAirplanes.set(p.id, plane);
       }
     });
@@ -147,7 +147,7 @@ const net = new NetworkManager({
 
   onPlayerJoined(info) {
     if (info.id === localPlayerId) return;
-    const plane = new Airplane(scene, THREE, info.color, false);
+    const plane = new Airplane(scene, THREE, info.color, info.model, false);
     remoteAirplanes.set(info.id, plane);
     allPlayerStates.push({ ...info, kills: 0, bombPoints: 0, weaponLevel: 0 });
     lobby.setOnlineCount(allPlayerStates.length, MAX_PLAYERS);
@@ -171,11 +171,11 @@ const net = new NetworkManager({
       }
       if (!remoteAirplanes.has(p.id)) {
         // Giocatore che non avevamo ancora
-        const plane = new Airplane(scene, THREE, p.color ?? '#aaaaaa', false);
+        const plane = new Airplane(scene, THREE, p.color ?? '#aaaaaa', p.model, false);
         remoteAirplanes.set(p.id, plane);
       }
       if (p.alive) {
-        remoteAirplanes.get(p.id)?.update(p.theta, p.phi, p.heading, p.weaponLevel, p.hasShield);
+        remoteAirplanes.get(p.id)?.update(p.theta, p.phi, p.heading, p.weaponLevel, p.hasShield, lastAnimDelta);
       }
     });
 
@@ -271,23 +271,26 @@ const net = new NetworkManager({
 // Usiamo un riferimento lazy.
 let localAirplane = null;
 
-function ensureLocalAirplane(color) {
+function ensureLocalAirplane(color, model) {
   if (!localAirplane) {
-    localAirplane = new Airplane(scene, THREE, color, true);
+    localAirplane = new Airplane(scene, THREE, color, model, true);
   }
 }
 
 // ── Game Loop ─────────────────────────────────────────────────────────────────
 
 const clock = new THREE.Clock();
+/** Ultimo delta del game loop — usato per banking sugli aerei remoti (callback di rete) */
+let lastAnimDelta = 1 / 60;
 
 function animate() {
   requestAnimationFrame(animate);
   const delta = clock.getDelta();
+  lastAnimDelta = delta;
   const now = performance.now();
 
   if (inGame && isAlive && localState) {
-    ensureLocalAirplane(localState.color ?? '#ff4444');
+    ensureLocalAirplane(localState.color ?? '#ff4444', localState.model ?? 'airplane');
 
     // Velocità in base al livello arma (radianti/secondo * delta)
     const wl = localState.weaponLevel ?? 0;
@@ -303,9 +306,10 @@ function animate() {
     const moved = moveOnSphere(theta, phi, heading, speed * accel * delta);
     theta = moved.theta;
     phi   = moved.phi;
+    heading = moved.heading;
 
-    localAirplane.update(theta, phi, heading, wl, localState.hasShield ?? false);
-    camCtrl.update(localAirplane.mesh);
+    localAirplane.update(theta, phi, heading, wl, localState.hasShield ?? false, delta);
+    camCtrl.update(localAirplane.mesh, localAirplane.sphereQuaternion);
 
     // Invia input al server (throttled)
     if (now - lastInputSend > 50) {

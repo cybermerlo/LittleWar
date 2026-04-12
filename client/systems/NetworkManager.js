@@ -25,8 +25,8 @@ export class NetworkManager {
     this.socket.on('disconnect',        ()  => h.onDisconnect?.());
   }
 
-  join(nickname, color) {
-    this.socket.emit('join', { nickname, color });
+  join(nickname, color, model) {
+    this.socket.emit('join', { nickname, color, model });
   }
 
   sendInput(theta, phi, heading) {

@@ -21,6 +21,7 @@ import {
 } from '../shared/constants.js';
 
 const TICK_DT = TICK_INTERVAL / 1000; // secondi per tick
+const VALID_MODELS = new Set(['airplane', 'spaceship']);
 
 export class Game {
   constructor(io) {
@@ -39,13 +40,14 @@ export class Game {
 
   // ── Giocatori ──────────────────────────────────────────────────────────────
 
-  addPlayer(socket, nickname, color) {
+  addPlayer(socket, nickname, color, model) {
     if (this.players.size >= MAX_PLAYERS) {
       socket.emit('server-full');
       return;
     }
 
-    const player = new Player(socket.id, nickname, color);
+    const safeModel = VALID_MODELS.has(model) ? model : 'airplane';
+    const player = new Player(socket.id, nickname, color, safeModel);
     this.players.set(socket.id, player);
 
     const allPlayers = [...this.players.values()].map(p => p.toState());

@@ -9,6 +9,15 @@ export const BASE_SPEED = 0.20;
 export const SPEED_REDUCTION_PER_LEVEL = 0.025;
 export const MIN_SPEED = 0.06;
 
+// Rollio in virata (banking) — radianti
+export const MAX_BANK_ANGLE = 0.38;      // ~22°
+export const BANK_GAIN = 0.34;           // quanto il roll risponde alla velocità di virata (rad / (rad/s))
+export const BANK_SMOOTH = 7.0;          // smorzamento esponenziale (~1/s)
+export const BANK_MAX_DH_FRAME = 0.14;   // limite |Δheading| per frame (evita spike ai poli)
+
+// Telecamera: quanto il rollio dell'aereo influenza l'orientamento della camera (0 = nessuno, 1 = come l'aereo)
+export const CAMERA_BANK_FOLLOW = 0.55;
+
 // Armi
 export const MAX_WEAPON_LEVEL = 4;
 export const WEAPON_CONFIGS = [

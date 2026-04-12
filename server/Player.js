@@ -3,11 +3,12 @@ import { FLY_ALTITUDE, MAX_WEAPON_LEVEL } from '../shared/constants.js';
 let nextId = 1;
 
 export class Player {
-  constructor(socketId, nickname, color) {
+  constructor(socketId, nickname, color, model) {
     this.id = String(nextId++);
     this.socketId = socketId;
     this.nickname = nickname || 'Player';
     this.color = color || '#ff4444';
+    this.model = model || 'airplane';
 
     // Posizione sferica
     this.theta = Math.random() * Math.PI;
@@ -37,6 +38,7 @@ export class Player {
       id: this.id,
       nickname: this.nickname,
       color: this.color,
+      model: this.model,
       theta: this.theta,
       phi: this.phi,
       heading: this.heading,
@@ -53,6 +55,7 @@ export class Player {
       id: this.id,
       nickname: this.nickname,
       color: this.color,
+      model: this.model,
     };
   }
 }

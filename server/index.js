@@ -25,8 +25,8 @@ const game = new Game(io);
 io.on('connection', (socket) => {
   console.log(`[+] Socket connesso: ${socket.id}`);
 
-  socket.on('join', ({ nickname, color }) => {
-    game.addPlayer(socket, nickname, color);
+  socket.on('join', ({ nickname, color, model }) => {
+    game.addPlayer(socket, nickname, color, model);
   });
 
   socket.on('player-input', (input) => {
