@@ -452,6 +452,14 @@ export class Game {
     });
   }
 
+  broadcastChat(socketId, text) {
+    const player = this.players.get(socketId);
+    if (!player) return;
+    const safeText = String(text ?? '').trim().slice(0, 120);
+    if (!safeText) return;
+    this.io.emit('chat-message', { nickname: player.nickname, color: player.color, text: safeText });
+  }
+
   spawnRandomPowerup() {
     if (this.players.size === 0) return;
     const type = Math.random() < 0.7 ? 'weapon' : 'shield';

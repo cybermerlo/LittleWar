@@ -9,7 +9,6 @@ export class HUD {
       kills:       document.getElementById('hud-kills'),
       bombs:       document.getElementById('hud-bombs'),
       weapon:      document.getElementById('hud-weapon'),
-      shield:      document.getElementById('hud-shield'),
       speed:       document.getElementById('hud-speed'),
       boost:       document.getElementById('hud-boost'),
       playerList:  document.getElementById('player-list'),
@@ -82,7 +81,6 @@ export class HUD {
     this.el.kills.textContent  = `Kill: ${localPlayer.kills}`;
     this.el.bombs.textContent  = `Bombe: ${localPlayer.bombPoints}`;
     this.el.weapon.textContent = `Arma: Lv.${wl}`;
-    this.el.shield.textContent = localPlayer.hasShield ? 'Scudo: ✓' : 'Scudo: ✗';
     this.el.speed.textContent  = `Velocità: ${speedPct}%`;
     const boostPct = Math.round(Math.max(0, Math.min(1, boostRatio)) * 100);
     this.el.boost.textContent = `Boost: ${boostPct}%${boostPressed && boostPct > 0 ? ' ⚡' : ''}`;

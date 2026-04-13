@@ -26,6 +26,7 @@ export class NetworkManager {
     this.socket.on('disconnect',         ()  => h.onDisconnect?.());
     this.socket.on('lobby-info',        (d) => h.onLobbyInfo?.(d));
     this.socket.on('color-taken',       (d) => h.onColorTaken?.(d));
+    this.socket.on('chat-message',      (d) => h.onChatMessage?.(d));
   }
 
   join(nickname, color, model) {
@@ -42,5 +43,9 @@ export class NetworkManager {
 
   sendBomb(theta, phi) {
     this.socket.emit('drop-bomb', { theta, phi });
+  }
+
+  sendChat(text) {
+    this.socket.emit('chat', { text });
   }
 }

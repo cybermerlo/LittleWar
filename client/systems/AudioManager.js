@@ -12,6 +12,7 @@ const sounds = {
   explosion: trySound({ src: ['/sounds/explosion.wav'], volume: 0.6 }),
   powerup:   trySound({ src: ['/sounds/powerup.wav'],   volume: 0.5 }),
   bomb:      trySound({ src: ['/sounds/bomb.wav'],      volume: 0.7 }),
+  chatPop:   trySound({ src: ['/sounds/chat-pop.mp3'], volume: 0.5 }),
 };
 
 /** Musica loop — volume più basso dei SFX */
@@ -43,6 +44,7 @@ export const AudioManager = {
   playExplosion() { sounds.explosion?.play(); },
   playPowerup()   { sounds.powerup?.play(); },
   playBomb()      { sounds.bomb?.play(); },
+  playChatPop()   { sounds.chatPop?.play(); },
 
   /** Avvia in un handler da click utente (autoplay browser) */
   startMusic() {

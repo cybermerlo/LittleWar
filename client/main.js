@@ -17,6 +17,7 @@ import { CameraController } from './systems/CameraController.js';
 import { NetworkManager } from './systems/NetworkManager.js';
 import { HUD } from './systems/HUD.js';
 import { AudioManager } from './systems/AudioManager.js';
+import { ChatManager } from './systems/ChatManager.js';
 import { LobbyScreen } from './ui/LobbyScreen.js';
 import { DeathScreen } from './ui/DeathScreen.js';
 import { moveOnSphere } from './utils/SphereUtils.js';
@@ -70,6 +71,9 @@ window.addEventListener('resize', () => {
   bloomPass.resolution.set(window.innerWidth * bloomScale, window.innerHeight * bloomScale);
 });
 
+// Tasti chat (T, L, P) — delegati al ChatManager
+window.addEventListener('keydown', (e) => chat.handleKey(e));
+
 // ── Costruzione mondo ─────────────────────────────────────────────────────────
 
 createSky(scene);
@@ -85,6 +89,10 @@ const input    = new InputManager();
 const camCtrl  = new CameraController(camera);
 const hud      = new HUD();
 const death    = new DeathScreen();
+const chat     = new ChatManager(
+  (text) => net.sendChat(text),
+  ()     => AudioManager.playChatPop(),
+);
 
 let localPlayerId = null;
 let localState    = null;        // stato locale del nostro giocatore
@@ -154,6 +162,7 @@ const net = new NetworkManager({
     lobby.setMessage('Disconnesso. Ricarica la pagina.');
     inGame = false;
     hud.hide();
+    chat.disable();
   },
 
   onServerFull() {
@@ -217,6 +226,7 @@ const net = new NetworkManager({
     allPlayerStates = players;
     lobby.hide();
     hud.show();
+    chat.enable();
     inGame = true;
   },
 
@@ -399,6 +409,10 @@ const net = new NetworkManager({
     heading = state.heading;
     boostEnergy = typeof state.boostEnergy === 'number' ? state.boostEnergy : BOOST_MAX;
     death.hide();
+  },
+
+  onChatMessage(msg) {
+    chat.receive(msg);
   },
 });
 

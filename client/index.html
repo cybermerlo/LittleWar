@@ -745,6 +745,95 @@
       transform: translateX(-50%) translateY(0);
     }
 
+    /* ── Chat ────────────────────────────────────── */
+    #chat-wrap {
+      position: fixed;
+      left: 1.25rem;
+      bottom: 1.25rem;
+      width: min(22rem, calc(100vw - 2.5rem));
+      display: none;
+      flex-direction: column;
+      gap: 0.4rem;
+      z-index: 55;
+      pointer-events: none;
+    }
+
+    #chat-feed {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+
+    .chat-entry {
+      display: inline-flex;
+      gap: 0.4em;
+      align-self: flex-start;
+      max-width: 100%;
+      padding: 0.35rem 0.75rem;
+      border-radius: 0.6rem;
+      background: color-mix(in srgb, var(--lw-surface-container-low) 82%, transparent);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 14%, transparent);
+      font-family: 'Be Vietnam Pro', sans-serif;
+      font-size: 0.82rem;
+      line-height: 1.4;
+      color: var(--lw-on-surface);
+      word-break: break-word;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 0.25s ease, transform 0.25s ease;
+      pointer-events: none;
+    }
+
+    .chat-entry--visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .chat-nick {
+      font-weight: 700;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 0.78rem;
+    }
+
+    .chat-text {
+      color: var(--lw-on-surface-variant);
+    }
+
+    #chat-input-row {
+      display: none;
+      align-items: center;
+      pointer-events: all;
+      margin-top: 0.2rem;
+    }
+
+    #chat-input {
+      width: 100%;
+      padding: 0.55rem 1rem;
+      border-radius: 0.6rem;
+      border: 1px solid color-mix(in srgb, var(--lw-primary) 35%, transparent);
+      background: color-mix(in srgb, var(--lw-surface-container-highest) 90%, transparent);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      color: var(--lw-on-surface);
+      font-family: 'Be Vietnam Pro', sans-serif;
+      font-size: 0.88rem;
+      font-weight: 600;
+      outline: none;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    }
+
+    #chat-input::placeholder {
+      color: color-mix(in srgb, var(--lw-on-surface-variant) 45%, transparent);
+    }
+
+    #chat-input:focus {
+      border-color: color-mix(in srgb, var(--lw-primary) 70%, transparent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--lw-primary) 18%, transparent),
+                  0 4px 16px rgba(0, 0, 0, 0.3);
+    }
+
     /* ── Morte ────────────────────────────────────── */
     #death-screen {
       position: fixed;
@@ -892,7 +981,6 @@
     </div>
     <div id="hud-bottom">
       <div class="hud-pill" id="hud-weapon">Arma: Lv.0</div>
-      <div class="hud-pill" id="hud-shield">Scudo: ✗</div>
       <div class="hud-pill" id="hud-speed">Velocità: 100%</div>
       <div class="hud-pill" id="hud-boost">Boost: 100%</div>
     </div>

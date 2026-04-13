@@ -44,6 +44,10 @@ io.on('connection', (socket) => {
     game.playerDropBomb(socket.id, data);
   });
 
+  socket.on('chat', ({ text }) => {
+    game.broadcastChat(socket.id, text);
+  });
+
   socket.on('disconnect', () => {
     console.log(`[-] Socket disconnesso: ${socket.id}`);
     game.removePlayer(socket.id);
