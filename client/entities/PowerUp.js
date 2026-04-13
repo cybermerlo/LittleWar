@@ -22,6 +22,8 @@ export class PowerUpEntity {
     this.theta = theta;
     this.phi   = phi;
     this._scene = scene;
+    /** Rotazione intorno all'asse radiale (spin del collectible). */
+    this._spinAngle = 0;
 
     this.root = new THREE.Object3D();
     scene.add(this.root);
@@ -78,9 +80,18 @@ export class PowerUpEntity {
   _updatePosition() {
     const pos = sphericalToCartesian(this.theta, this.phi, FLY_ALTITUDE);
     this.root.position.set(pos.x, pos.y, pos.z);
-    // Orienta la stella verso l'esterno della sfera (up = radiale)
-    this.root.lookAt(0, 0, 0);
-    this.root.rotateX(Math.PI); // corregge eventuale flip del modello
+    this._applyOrientation();
+  }
+
+  /**
+   * +Y locale lungo la normale uscente dal pianeta (stella “dritta”), poi spin attorno a quell'asse.
+   * lookAt(0,0,0) lasciava il modello nel piano tangente (orizzontale rispetto alla radiale).
+   */
+  _applyOrientation() {
+    const pos = this.root.position;
+    const normal = pos.clone().normalize();
+    this.root.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+    this.root.rotateY(this._spinAngle);
   }
 
   update(theta, phi) {
@@ -90,7 +101,8 @@ export class PowerUpEntity {
   }
 
   tick(delta) {
-    this.root.rotation.y += delta * 1.8;
+    this._spinAngle += delta * 1.8;
+    this._applyOrientation();
     const t = performance.now() / 800;
     const scale = 1 + Math.sin(t) * 0.15;
     this.root.scale.setScalar(scale);

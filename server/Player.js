@@ -35,6 +35,10 @@ export class Player {
     // Ultimo input ricevuto
     this.lastInput = null;
     this.lastInputTime = Date.now();
+
+    /** Ultima theta/phi inviate dal client (non ricalcolate dai tick) — per sweep powerup sul percorso reale. */
+    this.lastClientTheta = null;
+    this.lastClientPhi = null;
   }
 
   toState() {

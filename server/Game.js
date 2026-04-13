@@ -142,14 +142,18 @@ export class Game {
   updatePlayerInput(socketId, input) {
     const player = this.players.get(socketId);
     if (!player || !player.alive) return;
-    const prevTheta = player.theta;
-    const prevPhi = player.phi;
 
     // Hardening input: evita NaN/Infinity o valori fuori range.
     const nextTheta = clampTheta(input?.theta);
     if (nextTheta === null) return;
     const nextPhi = wrapAngle01(input?.phi);
     const nextHeading = wrapAngle01(input?.heading);
+
+    // Tra due messaggi il server muove il player con tick(); prevTheta/phi del server
+    // non coincidono con l'ultimo punto client. Usiamo l'ultima posizione client
+    // confermata per allineare lo sweep al percorso reale (C0 → C1).
+    const pathFromTheta = player.lastClientTheta ?? player.theta;
+    const pathFromPhi = player.lastClientPhi ?? player.phi;
 
     player.theta = nextTheta;
     player.phi = nextPhi;
@@ -158,9 +162,12 @@ export class Game {
     player.moveForward = !!input.forward;
     player.moveBackward = !!input.backward;
     player.lastInputTime = Date.now();
-    // Controllo anti-tunneling su traiettoria reale tra due input:
-    // evita pass-through dei powerup con polling lento/boost.
-    this._checkPowerupCollectionAlongPath(player, prevTheta, prevPhi, nextTheta, nextPhi);
+    player.lastClientTheta = nextTheta;
+    player.lastClientPhi = nextPhi;
+
+    // Sweep lungo l'arco di grande cerchio (slerp), non la corda 3D — evita falsi negativi
+    // con passi angolari grandi (boost / rete lenta).
+    this._checkPowerupCollectionAlongPath(player, pathFromTheta, pathFromPhi, nextTheta, nextPhi);
   }
 
   // ── Sparo ──────────────────────────────────────────────────────────────────
@@ -359,6 +366,8 @@ export class Game {
     player.boostPressed = false;
     player.moveForward = false;
     player.moveBackward = false;
+    player.lastClientTheta = null;
+    player.lastClientPhi = null;
 
     const socket = this.getSocketById(player.socketId);
     if (socket) socket.emit('respawned', player.toState());
@@ -423,19 +432,66 @@ export class Game {
   }
 
   _checkPowerupCollectionAlongPath(player, t0, p0, t1, p1) {
+    const r = FLY_ALTITUDE;
+    const a = this.sphericalToCartesian(t0, p0, r);
+    const b = this.sphericalToCartesian(t1, p1, r);
+    const alen = Math.hypot(a.x, a.y, a.z);
+    const blen = Math.hypot(b.x, b.y, b.z);
+    const ax = a.x / alen;
+    const ay = a.y / alen;
+    const az = a.z / alen;
+    const bx = b.x / blen;
+    const by = b.y / blen;
+    const bz = b.z / blen;
+
+    const dot = Math.max(-1, Math.min(1, ax * bx + ay * by + az * bz));
+    const omega = Math.acos(dot);
+
+    const toRemove = [];
     for (const [id, pu] of this.powerups) {
-      const directDist = this.distanceSphere(t1, p1, pu.theta, pu.phi, FLY_ALTITUDE);
-      if (directDist < POWERUP_COLLECT_RADIUS) {
+      if (this._powerupHitByArc(ax, ay, az, bx, by, bz, omega, pu, r)) {
         this.collectPowerup(player, pu);
-        this.powerups.delete(id);
-        continue;
-      }
-      const segDist = this.distancePointToSegmentOnSphere(t0, p0, t1, p1, pu.theta, pu.phi, FLY_ALTITUDE);
-      if (segDist < POWERUP_COLLECT_RADIUS) {
-        this.collectPowerup(player, pu);
-        this.powerups.delete(id);
+        toRemove.push(id);
       }
     }
+    for (const id of toRemove) this.powerups.delete(id);
+  }
+
+  /**
+   * Distanza minima dal powerup al percorso lungo l'arco di grande cerchio tra A e B (slerp).
+   */
+  _powerupHitByArc(ax, ay, az, bx, by, bz, omega, pu, r) {
+    const puCart = this.sphericalToCartesian(pu.theta, pu.phi, r);
+    const px = puCart.x;
+    const py = puCart.y;
+    const pz = puCart.z;
+
+    const distA = Math.hypot(r * ax - px, r * ay - py, r * az - pz);
+    if (distA < POWERUP_COLLECT_RADIUS) return true;
+    const distB = Math.hypot(r * bx - px, r * by - py, r * bz - pz);
+    if (distB < POWERUP_COLLECT_RADIUS) return true;
+
+    const sinOmega = Math.sin(omega);
+    const samples = 12;
+    for (let i = 1; i < samples; i++) {
+      const t = i / samples;
+      let sx;
+      let sy;
+      let sz;
+      if (omega < 1e-6) {
+        sx = r * ax;
+        sy = r * ay;
+        sz = r * az;
+      } else {
+        const s0 = Math.sin((1 - t) * omega) / sinOmega;
+        const s1 = Math.sin(t * omega) / sinOmega;
+        sx = r * (s0 * ax + s1 * bx);
+        sy = r * (s0 * ay + s1 * by);
+        sz = r * (s0 * az + s1 * bz);
+      }
+      if (Math.hypot(sx - px, sy - py, sz - pz) < POWERUP_COLLECT_RADIUS) return true;
+    }
+    return false;
   }
 
   collectPowerup(player, pu) {
@@ -478,34 +534,6 @@ export class Game {
     const y2 = r * Math.cos(t2);
     const z2 = r * Math.sin(t2) * Math.sin(p2);
     return Math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2 + (z1 - z2) ** 2);
-  }
-
-  distancePointToSegmentOnSphere(t0, p0, t1, p1, tp, pp, r) {
-    const a = this.sphericalToCartesian(t0, p0, r);
-    const b = this.sphericalToCartesian(t1, p1, r);
-    const p = this.sphericalToCartesian(tp, pp, r);
-
-    const abx = b.x - a.x;
-    const aby = b.y - a.y;
-    const abz = b.z - a.z;
-    const apx = p.x - a.x;
-    const apy = p.y - a.y;
-    const apz = p.z - a.z;
-
-    const ab2 = abx * abx + aby * aby + abz * abz;
-    if (ab2 < 1e-8) {
-      return Math.sqrt(apx * apx + apy * apy + apz * apz);
-    }
-
-    let t = (apx * abx + apy * aby + apz * abz) / ab2;
-    t = Math.max(0, Math.min(1, t));
-    const cx = a.x + abx * t;
-    const cy = a.y + aby * t;
-    const cz = a.z + abz * t;
-    const dx = p.x - cx;
-    const dy = p.y - cy;
-    const dz = p.z - cz;
-    return Math.sqrt(dx * dx + dy * dy + dz * dz);
   }
 
   sphericalToCartesian(theta, phi, r) {
