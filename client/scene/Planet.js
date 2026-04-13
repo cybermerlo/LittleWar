@@ -3,8 +3,8 @@ import { createNoise3D } from 'simplex-noise';
 
 export const PLANET_RADIUS = 50;
 const DETAIL = 4;         // suddivisione icosahedron
-const NOISE_SCALE = 0.8;
-const MOUNTAIN_HEIGHT = 7;
+const NOISE_SCALE = 0.7;
+const MOUNTAIN_HEIGHT = 5.2;
 const WATER_LEVEL = 0.05; // altitudine normalizzata al di sotto della quale = acqua
 
 // Palette pastello per altitudine (normalizzata 0..1)
@@ -62,14 +62,16 @@ export function createPlanet(scene) {
     const len = Math.sqrt(x * x + y * y + z * z);
     const nx = x / len, ny = y / len, nz = z / len;
 
-    // Noise multi-ottava
-    const n = (
-      noise3D(nx * NOISE_SCALE, ny * NOISE_SCALE, nz * NOISE_SCALE) * 1.0 +
-      noise3D(nx * 2.2, ny * 2.2, nz * 2.2) * 0.4 +
-      noise3D(nx * 4.5, ny * 4.5, nz * 4.5) * 0.15
-    ) / 1.55;
+    // Profilo terreno più morbido: rilievi ampi + micro-dettaglio attenuato.
+    const base = noise3D(nx * NOISE_SCALE, ny * NOISE_SCALE, nz * NOISE_SCALE);
+    const broad = noise3D(nx * 1.8, ny * 1.8, nz * 1.8);
+    const detail = noise3D(nx * 3.0, ny * 3.0, nz * 3.0);
+    const n = (base * 1.0 + broad * 0.25 + detail * 0.06) / 1.31;
 
-    const displacement = Math.max(0, n) * MOUNTAIN_HEIGHT;
+    // Rimappa in [0,1] e comprime i picchi per ridurre pendenze locali estreme.
+    const n01 = THREE.MathUtils.clamp((n + 1) * 0.5, 0, 1);
+    const shaped = Math.pow(THREE.MathUtils.smoothstep(n01, 0.46, 0.92), 1.85);
+    const displacement = shaped * MOUNTAIN_HEIGHT;
     const r = PLANET_RADIUS + displacement;
 
     posAttr.setXYZ(i, nx * r, ny * r, nz * r);

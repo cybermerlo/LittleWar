@@ -39,6 +39,15 @@ let _enginePlaying  = false;
 let _engineTargetVol = 0;
 let _engineCurrentVol = 0;
 
+// ── Boost ─────────────────────────────────────────────────────────────────────
+const boost = trySound({
+  src: ['/sounds/boost.mp3'],
+  loop: true,
+  volume: 0.35,
+});
+
+let _boostPlaying = false;
+
 export const AudioManager = {
   playShoot()     { sounds.shoot?.play(); },
   playExplosion() { sounds.explosion?.play(); },
@@ -74,6 +83,7 @@ export const AudioManager = {
     _enginePlaying = false;
     _engineCurrentVol = 0;
     _engineTargetVol = 0;
+    this.stopBoost();
   },
 
   /**
@@ -103,5 +113,19 @@ export const AudioManager = {
     }
 
     engine.volume(_engineCurrentVol);
+  },
+
+  // ── Boost ──────────────────────────────────────────────────────────────────
+
+  startBoost() {
+    if (!boost || _boostPlaying) return;
+    boost.play();
+    _boostPlaying = true;
+  },
+
+  stopBoost() {
+    if (!boost || !_boostPlaying) return;
+    boost.stop();
+    _boostPlaying = false;
   },
 };

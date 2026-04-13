@@ -9,30 +9,144 @@ const TREE_MODEL_URLS = [
   '/models/tree-deciduous-d.glb',
 ];
 
+const BUILDING_MODEL_URLS = [
+  '/models/building-house.glb',
+];
+
 /** Altezza tipica in unità mondo (pianeta raggio ~50), allineata agli alberi procedurali precedenti */
 const TREE_TEMPLATE_TARGET_SIZE = 1.65;
+const BUILDING_TEMPLATE_TARGET_SIZE = 3.2;
+
+/**
+ * Micro-spostamento lungo la normale locale del piano d'appoggio (dopo il fit a 4 punti).
+ * Positivo = verso l'esterno dal pianeta.
+ */
+const BUILDING_HEIGHT_OFFSET = 0.7;
 
 const _treeLoader = new GLTFLoader();
-let _treeTemplatesPromise = null;
+let _treeTemplatesPromise    = null;
+let _buildingTemplatesPromise = null;
+
+const _raycaster = new THREE.Raycaster();
+const _rayOrigin = new THREE.Vector3();
+const _rayDir    = new THREE.Vector3();
+const _refAxis   = new THREE.Vector3();
+const _lc        = new THREE.Vector3();
+const RAY_START  = 85;
 
 // Orienta un oggetto sulla sfera: "up" = verso l'esterno, "up world" = Y
-function orientOnSphere(obj, pos) {
+function orientOnSphere(obj, pos, radialOffset = 0) {
   const up = pos.clone().normalize();
-  obj.position.copy(pos);
+  obj.position.copy(pos).addScaledVector(up, radialOffset);
   const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
   obj.quaternion.copy(q);
-  // Rotazione casuale attorno alla normale per varietà
   obj.rotateOnAxis(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI * 2);
 }
 
+function raycastPlanetSurface(planetMesh, worldPointHint) {
+  const dir = worldPointHint.clone().normalize();
+  _rayOrigin.copy(dir).multiplyScalar(RAY_START);
+  _rayDir.copy(dir).negate();
+  _raycaster.set(_rayOrigin, _rayDir);
+  const hits = _raycaster.intersectObject(planetMesh, false);
+  return hits.length ? hits[0].point : null;
+}
+
+/** Normale poligono (Newell), coerente con l'ordine dei vertici. */
+function polygonNormalNewell(p0, p1, p2, p3) {
+  const n = new THREE.Vector3();
+  const pts = [p0, p1, p2, p3];
+  for (let i = 0; i < 4; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % 4];
+    n.x += (a.y - b.y) * (a.z + b.z);
+    n.y += (a.z - b.z) * (a.x + b.x);
+    n.z += (a.x - b.x) * (a.y + b.y);
+  }
+  return n.normalize();
+}
+
+/**
+ * Appoggia la base (piano Y=0 in locale) su un piano definito da 4 colpi sul terreno
+ * agli angoli dell'impronta in pianta. La rotazione allinea X/Z alla griglia locale.
+ */
+function placeBuildingBaseOnTerrain(building, pos, planetMesh, radialOffset) {
+  building.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(building);
+  const hw = (box.max.x - box.min.x) * 0.5;
+  const hd = (box.max.z - box.min.z) * 0.5;
+  if (hw < 1e-4 || hd < 1e-4) {
+    orientOnSphere(building, pos, radialOffset);
+    return;
+  }
+
+  const yaw = Math.random() * Math.PI * 2;
+  const up = pos.clone().normalize();
+  _refAxis.set(Math.abs(up.y) < 0.9 ? 0 : 1, Math.abs(up.y) < 0.9 ? 1 : 0, 0);
+  const t0 = new THREE.Vector3().crossVectors(up, _refAxis).normalize();
+  const b0 = new THREE.Vector3().crossVectors(up, t0).normalize();
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const u = t0.clone().multiplyScalar(cos).add(b0.clone().multiplyScalar(sin));
+  const v = t0.clone().multiplyScalar(-sin).add(b0.clone().multiplyScalar(cos));
+
+  const c0 = pos.clone().addScaledVector(u, -hw).addScaledVector(v, -hd);
+  const c1 = pos.clone().addScaledVector(u, hw).addScaledVector(v, -hd);
+  const c2 = pos.clone().addScaledVector(u, hw).addScaledVector(v, hd);
+  const c3 = pos.clone().addScaledVector(u, -hw).addScaledVector(v, hd);
+
+  const p0 = raycastPlanetSurface(planetMesh, c0);
+  const p1 = raycastPlanetSurface(planetMesh, c1);
+  const p2 = raycastPlanetSurface(planetMesh, c2);
+  const p3 = raycastPlanetSurface(planetMesh, c3);
+  if (!p0 || !p1 || !p2 || !p3) {
+    orientOnSphere(building, pos, radialOffset);
+    return;
+  }
+
+  let n = polygonNormalNewell(p0, p1, p2, p3);
+  if (n.dot(pos) < 0) n.negate();
+
+  let xAxis = new THREE.Vector3().subVectors(p1, p0);
+  xAxis.sub(n.clone().multiplyScalar(n.dot(xAxis)));
+  if (xAxis.lengthSq() < 1e-10) {
+    orientOnSphere(building, pos, radialOffset);
+    return;
+  }
+  xAxis.normalize();
+  const zAxis = new THREE.Vector3().crossVectors(xAxis, n).normalize();
+  xAxis.crossVectors(n, zAxis).normalize();
+
+  const rotMat = new THREE.Matrix4().makeBasis(xAxis, n, zAxis);
+  const q = new THREE.Quaternion().setFromRotationMatrix(rotMat);
+
+  const cornersLocal = [
+    new THREE.Vector3(-hw, 0, -hd),
+    new THREE.Vector3(hw, 0, -hd),
+    new THREE.Vector3(hw, 0, hd),
+    new THREE.Vector3(-hw, 0, hd),
+  ];
+  const hits = [p0, p1, p2, p3];
+  const T = new THREE.Vector3();
+  for (let k = 0; k < 4; k++) {
+    _lc.copy(cornersLocal[k]).applyQuaternion(q);
+    T.add(hits[k].clone().sub(_lc));
+  }
+  T.multiplyScalar(0.25);
+  T.addScaledVector(n, radialOffset);
+
+  building.position.copy(T);
+  building.quaternion.copy(q);
+}
+
 /** Normalizza pivot (base al centro, suolo Y=0) e scala per un ingombro coerente col terreno */
-function prepareTreeTemplate(sourceScene) {
+function prepareTemplate(sourceScene, targetSize) {
   const root = sourceScene.clone(true);
   root.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(root);
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z, 0.001);
-  const s = TREE_TEMPLATE_TARGET_SIZE / maxDim;
+  const s = targetSize / maxDim;
   root.scale.setScalar(s);
   root.updateMatrixWorld(true);
   const b2 = new THREE.Box3().setFromObject(root);
@@ -44,33 +158,38 @@ function prepareTreeTemplate(sourceScene) {
   return root;
 }
 
+function prepareTreeTemplate(sourceScene)     { return prepareTemplate(sourceScene, TREE_TEMPLATE_TARGET_SIZE); }
+function prepareBuildingTemplate(sourceScene) { return prepareTemplate(sourceScene, BUILDING_TEMPLATE_TARGET_SIZE); }
+
 /**
  * Carica i modelli albero da /public/models. Risolve a un array di template pronti al clone;
  * in caso di errori parziali usa solo i file riusciti; se nessuno ok → array vuoto.
  */
-export function loadTreeTemplates() {
-  if (_treeTemplatesPromise) return _treeTemplatesPromise;
-
-  _treeTemplatesPromise = Promise.all(
-    TREE_MODEL_URLS.map(
+function loadTemplates(urls, prepare) {
+  return Promise.all(
+    urls.map(
       (url) => new Promise((resolve) => {
         _treeLoader.load(
           url,
-          (gltf) => {
-            try {
-              resolve(prepareTreeTemplate(gltf.scene));
-            } catch {
-              resolve(null);
-            }
-          },
+          (gltf) => { try { resolve(prepare(gltf.scene)); } catch { resolve(null); } },
           undefined,
           () => resolve(null),
         );
       }),
     ),
   ).then((roots) => roots.filter(Boolean));
+}
 
+export function loadTreeTemplates() {
+  if (!_treeTemplatesPromise)
+    _treeTemplatesPromise = loadTemplates(TREE_MODEL_URLS, prepareTreeTemplate);
   return _treeTemplatesPromise;
+}
+
+export function loadBuildingTemplates() {
+  if (!_buildingTemplatesPromise)
+    _buildingTemplatesPromise = loadTemplates(BUILDING_MODEL_URLS, prepareBuildingTemplate);
+  return _buildingTemplatesPromise;
 }
 
 // ── Albero procedurale (fallback se i GLB non caricano) ───────────────────────
@@ -109,7 +228,7 @@ function makeTree(treeTemplates) {
 }
 
 // ── Edificio ──────────────────────────────────────────────────────────────────
-function makeBuilding() {
+function makeProceduralBuilding() {
   const w = 0.6 + Math.random() * 0.8;
   const h = 0.8 + Math.random() * 2.0;
   const d = 0.6 + Math.random() * 0.8;
@@ -138,10 +257,23 @@ function makeBuilding() {
   return building;
 }
 
+function makeBuilding(buildingTemplates) {
+  if (buildingTemplates.length > 0) {
+    const template = buildingTemplates[Math.floor(Math.random() * buildingTemplates.length)];
+    const inst = template.clone(true);
+    const jitter = 0.85 + Math.random() * 0.3;
+    inst.scale.multiplyScalar(jitter);
+    return inst;
+  }
+  return makeProceduralBuilding();
+}
+
 /**
- * @param {THREE.Object3D[]} [treeTemplates] - risultato di loadTreeTemplates(); se omesso usa solo procedurali
+ * @param {THREE.Mesh}         planetMesh         - mesh terreno per raycast agli angoli della base
+ * @param {THREE.Object3D[]} [treeTemplates]     - risultato di loadTreeTemplates()
+ * @param {THREE.Object3D[]} [buildingTemplates] - risultato di loadBuildingTemplates()
  */
-export function createTerrain(scene, heightData, posAttr, treeTemplates = []) {
+export function createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates = [], buildingTemplates = []) {
   const terrainGroup = new THREE.Group();
 
   const count = posAttr.count;
@@ -169,8 +301,8 @@ export function createTerrain(scene, heightData, posAttr, treeTemplates = []) {
       terrainGroup.add(tree);
       trees++;
     } else if (buildings < MAX_BUILDINGS && h > 0.04 && h < 0.20) {
-      const building = makeBuilding();
-      orientOnSphere(building, pos);
+      const building = makeBuilding(buildingTemplates);
+      placeBuildingBaseOnTerrain(building, pos, planetMesh, BUILDING_HEIGHT_OFFSET);
       terrainGroup.add(building);
       buildings++;
     }

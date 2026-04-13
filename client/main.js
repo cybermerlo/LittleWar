@@ -3,7 +3,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { createPlanet } from './scene/Planet.js';
-import { createTerrain, loadTreeTemplates } from './scene/Terrain.js';
+import { createTerrain, loadTreeTemplates, loadBuildingTemplates } from './scene/Terrain.js';
 import { createSky } from './scene/Sky.js';
 import { setupLighting } from './scene/Lighting.js';
 import { Airplane } from './entities/Airplane.js';
@@ -78,9 +78,9 @@ window.addEventListener('keydown', (e) => chat.handleKey(e));
 
 createSky(scene);
 setupLighting(scene);
-const { heightData, posAttr } = createPlanet(scene);
-loadTreeTemplates().then((treeTemplates) => {
-  createTerrain(scene, heightData, posAttr, treeTemplates);
+const { mesh: planetMesh, heightData, posAttr } = createPlanet(scene);
+Promise.all([loadTreeTemplates(), loadBuildingTemplates()]).then(([treeTemplates, buildingTemplates]) => {
+  createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates, buildingTemplates);
 });
 
 // ── Stato gioco ───────────────────────────────────────────────────────────────
@@ -464,6 +464,7 @@ function animate() {
 
     // Aggiorna volume motore
     AudioManager.updateEngine(movingForward, boostActive, delta);
+    if (boostActive) { AudioManager.startBoost(); } else { AudioManager.stopBoost(); }
     const accel = movingForward ? FORWARD_ACCEL : movingBackward ? BACKWARD_ACCEL : 1;
     const moved = moveOnSphere(theta, phi, heading, speed * accel * delta);
     theta = moved.theta;
