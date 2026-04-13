@@ -136,6 +136,7 @@ let boostEnergy = BOOST_MAX;
 
 const lobby = new LobbyScreen((nickname, color, model) => {
   AudioManager.startMusic();
+  AudioManager.startEngine();
   net.join(nickname, color, model);
   lobby.setMessage('Connessione…');
 });
@@ -148,6 +149,7 @@ const net = new NetworkManager({
 
   onDisconnect() {
     AudioManager.stopMusic();
+    AudioManager.stopEngine();
     lobby.show();
     lobby.setMessage('Disconnesso. Ricarica la pagina.');
     inGame = false;
@@ -334,19 +336,21 @@ const net = new NetworkManager({
     }
   },
 
-  onPlayerKilled({ killerId, victimId, theta: t, phi: p }) {
+  onPlayerKilled({ killerId, victimId, theta: t, phi: p, byTurret }) {
     spawnExplosion(scene, t, p, FLY_ALTITUDE);
     AudioManager.playExplosion();
 
     if (victimId === localPlayerId) {
       isAlive = false;
       const killer = allPlayerStates.find(pl => pl.id === killerId);
-      death.show(killer?.nickname ?? null, () => {
+      death.show(killer?.nickname ?? null, byTurret ?? false, () => {
         // Il respawn arriva dal server via onRespawned
       });
-    } else if (killerId === localPlayerId) {
+    }
+
+    if (killerId === localPlayerId) {
       const victim = allPlayerStates.find(pl => pl.id === victimId);
-      hud.showKillNotice(victim?.nickname ?? null);
+      hud.showKillNotice(victim?.nickname ?? null, byTurret ?? false);
     }
   },
 
@@ -383,6 +387,9 @@ const net = new NetworkManager({
   onBuildingDestroyed({ buildingId, theta, phi, destroyerId }) {
     spawnTurretDestruction(scene, theta, phi);
     AudioManager.playBomb();
+    if (destroyerId === localPlayerId) {
+      hud.showTowerDestroyedNotice();
+    }
   },
 
   onRespawned(state) {
@@ -440,6 +447,9 @@ function animate() {
     // Movimento in avanti sempre attivo
     const movingForward = input.isForward();
     const movingBackward = input.isBackward();
+
+    // Aggiorna volume motore
+    AudioManager.updateEngine(movingForward, boostActive, delta);
     const accel = movingForward ? FORWARD_ACCEL : movingBackward ? BACKWARD_ACCEL : 1;
     const moved = moveOnSphere(theta, phi, heading, speed * accel * delta);
     theta = moved.theta;

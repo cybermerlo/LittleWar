@@ -4,6 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LittleWar</title>
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/site.webmanifest" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,800&family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -427,6 +432,95 @@
       text-align: center;
     }
 
+    .lw-how-to-play {
+      background: color-mix(in srgb, var(--lw-surface-container-highest) 55%, transparent);
+      border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 20%, transparent);
+      border-radius: 0.75rem;
+      padding: 0.9rem 1.1rem;
+      text-align: left;
+      font-size: 0.8rem;
+      color: var(--lw-on-surface-variant);
+      line-height: 1.55;
+    }
+
+    .lw-how-to-play strong {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 0.7rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--lw-primary);
+      display: block;
+      margin-bottom: 0.45rem;
+    }
+
+    .lw-controls-grid {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.15rem 0.7rem;
+      margin-bottom: 0.6rem;
+    }
+
+    .lw-how-tips {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+    }
+
+    .lw-how-tips li {
+      display: grid;
+      grid-template-columns: 1.4rem 1fr;
+      gap: 0.45rem 0.65rem;
+      align-items: start;
+    }
+
+    .lw-how-tip-icon {
+      font-size: 1.05rem;
+      line-height: 1.45;
+      text-align: center;
+      filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
+    }
+
+    .lw-how-tip-text {
+      font-size: inherit;
+      line-height: 1.5;
+      color: inherit;
+    }
+
+    .lw-how-tip-text strong {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-weight: 700;
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--lw-on-surface);
+      display: block;
+      margin-bottom: 0.12rem;
+    }
+
+    .lw-key {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 0.72rem;
+      font-weight: 700;
+      background: color-mix(in srgb, var(--lw-surface-container-highest) 90%, var(--lw-primary));
+      border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 40%, transparent);
+      border-radius: 0.3rem;
+      padding: 0.05rem 0.4rem;
+      color: var(--lw-on-surface);
+      white-space: nowrap;
+      justify-self: start;
+    }
+
+    .lw-credits {
+      font-size: 0.7rem;
+      color: color-mix(in srgb, var(--lw-on-surface-variant) 55%, transparent);
+      text-align: center;
+      letter-spacing: 0.01em;
+    }
+
     /* ── HUD ───────────────────────────────────────── */
     #hud {
       position: fixed;
@@ -559,8 +653,9 @@
         0 0 7px color-mix(in srgb, var(--arrow-color, #60a5fa) 65%, transparent);
     }
 
+    /* Toast spostati fuori da #hud — visibili anche durante la schermata morte */
     #hud-bomb-toast {
-      position: absolute;
+      position: fixed;
       left: 50%;
       top: 20%;
       transform: translateX(-50%) translateY(-10px);
@@ -581,7 +676,7 @@
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.35s ease, transform 0.35s ease;
-      z-index: 25;
+      z-index: 60;
     }
 
     #hud-bomb-toast.hud-toast--visible {
@@ -590,7 +685,7 @@
     }
 
     #hud-kill-toast {
-      position: absolute;
+      position: fixed;
       left: 50%;
       top: 28%;
       transform: translateX(-50%) translateY(-10px);
@@ -611,10 +706,41 @@
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.35s ease, transform 0.35s ease;
-      z-index: 25;
+      z-index: 60;
     }
 
     #hud-kill-toast.hud-toast--visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* Toast torretta distrutta */
+    #hud-tower-toast {
+      position: fixed;
+      left: 50%;
+      top: 36%;
+      transform: translateX(-50%) translateY(-10px);
+      max-width: min(24rem, calc(100% - 2rem));
+      padding: 0.65rem 1.35rem;
+      border-radius: 9999px;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 0.95rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-align: center;
+      color: #0f172a;
+      background: linear-gradient(135deg, #86efac 0%, #22c55e 55%, #16a34a 100%);
+      border: 1px solid color-mix(in srgb, #bbf7d0 70%, transparent);
+      box-shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.08),
+        0 12px 40px rgba(22, 163, 74, 0.4);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.35s ease, transform 0.35s ease;
+      z-index: 60;
+    }
+
+    #hud-tower-toast.hud-toast--visible {
       opacity: 1;
       transform: translateX(-50%) translateY(0);
     }
@@ -706,6 +832,46 @@
           </div>
         </div>
 
+        <div class="lw-how-to-play">
+          <strong>Come si gioca</strong>
+          <div class="lw-controls-grid">
+            <span class="lw-key">W A S D</span><span>muovi l'aereo</span>
+            <span class="lw-key">Spazio</span><span>boost</span>
+            <span class="lw-key">Click ⬅</span><span>spara</span>
+            <span class="lw-key">Click ➡</span><span>sgancia bomba</span>
+          </div>
+          <ul class="lw-how-tips" aria-label="Obiettivi e meccaniche">
+            <li>
+              <span class="lw-how-tip-icon" aria-hidden="true">🔫</span>
+              <span class="lw-how-tip-text">
+                <strong>Combattimento aereo</strong>
+                Abbatti gli avversari col click sinistro. Più alto è il livello arma, più proiettili spari per raffica — ma voli più lento.
+              </span>
+            </li>
+            <li>
+              <span class="lw-how-tip-icon" aria-hidden="true">💣</span>
+              <span class="lw-how-tip-text">
+                <strong>Bombardamento</strong>
+                Click destro: colpisci l’obiettivo a terra 🎯 per fare punti e far comparire un nuovo bersaglio. Centra anche le basi nemiche per distruggerle e far smettere le loro torrette.
+              </span>
+            </li>
+            <li>
+              <span class="lw-how-tip-icon" aria-hidden="true">🏠</span>
+              <span class="lw-how-tip-text">
+                <strong>Conquista le basi</strong>
+                Stai sopra un edificio neutro <em>da solo</em> fino a completare la barra: diventa una torretta alleata che spara ai nemici.
+              </span>
+            </li>
+            <li>
+              <span class="lw-how-tip-icon" aria-hidden="true">✨</span>
+              <span class="lw-how-tip-text">
+                <strong>Powerup</strong>
+                Raccogli i bonus in volo: scudo (assorbe un colpo) o arma più potente. Senza scudo, un solo proiettile ti elimina.
+              </span>
+            </li>
+          </ul>
+        </div>
+
         <button type="button" id="play-btn">GIOCA</button>
 
         <div class="lw-online-pill">
@@ -713,6 +879,7 @@
           <span id="online-count">Online: …</span>
         </div>
         <div id="lobby-msg"></div>
+        <div class="lw-credits">Con la partecipazione allo sviluppo di Santo, Cybermerlo e Peku</div>
       </div>
     </div>
   </div>
@@ -735,9 +902,12 @@
     </div>
     <div id="target-arrow">🎯</div>
     <div id="player-arrows"></div>
-    <div id="hud-bomb-toast" role="status" aria-live="polite"></div>
-    <div id="hud-kill-toast" role="status" aria-live="polite"></div>
   </div>
+
+  <!-- Toast globali (visibili anche durante la schermata morte) -->
+  <div id="hud-bomb-toast"  role="status" aria-live="polite"></div>
+  <div id="hud-kill-toast"  role="status" aria-live="polite"></div>
+  <div id="hud-tower-toast" role="status" aria-live="polite"></div>
 
   <!-- Schermata morte -->
   <div id="death-screen">

@@ -54,7 +54,7 @@ export class Game {
     this.players = new Map();   // socketId → Player
     this.projectiles = new Map();
     this.powerups = new Map();
-    this.targets = new Map();   // playerId → Target
+    this.target = new Target(); // obiettivo condiviso unico
     this.bombs = [];
 
     this.buildings = generateBuildings(BUILDING_COUNT);
@@ -97,15 +97,11 @@ export class Game {
     const allPlayers = [...this.players.values()].map(p => p.toState());
     const allPowerups = [...this.powerups.values()].map(p => p.toState());
 
-    // Assegna un obiettivo bombardamento
-    const target = new Target(player.id);
-    this.targets.set(player.id, target);
-
     socket.emit('joined', {
       playerId: player.id,
       players: allPlayers,
       powerups: allPowerups,
-      target: target.toState(),
+      target: this.target.toState(),
       buildings: [...this.buildings.values()].map(b => b.toState()),
     });
 
@@ -121,7 +117,6 @@ export class Game {
     const player = this.players.get(socketId);
     if (!player) return;
 
-    this.targets.delete(player.id);
     this.players.delete(socketId);
 
     // Rimuovi i proiettili del giocatore
@@ -257,7 +252,7 @@ export class Game {
         const dist = proj.distanceTo(player.theta, player.phi);
         if (dist < BULLET_HIT_RADIUS) {
           this.projectiles.delete(id);
-          this.hitPlayer(proj.buildingOwnerId || proj.ownerId, player);
+          this.hitPlayer(proj.buildingOwnerId || proj.ownerId, player, !!proj.buildingOwnerId);
           break;
         }
       }
@@ -313,7 +308,7 @@ export class Game {
 
   // ── Logica colpi ──────────────────────────────────────────────────────────
 
-  hitPlayer(killerId, victim) {
+  hitPlayer(killerId, victim, isTurret = false) {
     if (victim.shieldInvincible) return;
 
     if (victim.hasShield) {
@@ -341,6 +336,7 @@ export class Game {
       victimId: victim.id,
       theta: victim.theta,
       phi: victim.phi,
+      byTurret: isTurret,
     });
 
     // Drop powerup
@@ -374,41 +370,38 @@ export class Game {
     // Controlla collisione con edifici conquistati (non propri)
     for (const building of this.buildings.values()) {
       if (!building.ownerId) continue;
-      if (building.ownerId === bomb.ownerId) continue; // non puoi bombardare le tue torri
       const dist = this.distanceSphere(bomb.theta, bomb.phi, building.theta, building.phi, PLANET_RADIUS);
       if (dist < BOMB_HIT_RADIUS) {
         building.reset();
+        const destroyer = this.getPlayerById(bomb.ownerId);
+        if (destroyer) destroyer.kills++;
         this.io.emit('building-destroyed', {
           buildingId: building.id,
           theta: building.theta,
           phi: building.phi,
           destroyerId: bomb.ownerId,
+          destroyerNickname: destroyer?.nickname ?? null,
         });
       }
     }
 
-    const target = this.targets.get(bomb.ownerId);
-    if (!target) return;
-
-    const dist = this.distanceSphere(bomb.theta, bomb.phi, target.theta, target.phi, PLANET_RADIUS);
+    const dist = this.distanceSphere(bomb.theta, bomb.phi, this.target.theta, this.target.phi, PLANET_RADIUS);
+    const hit = dist < BOMB_HIT_RADIUS;
 
     this.io.emit('bomb-exploded', {
       theta: bomb.theta,
       phi: bomb.phi,
       ownerId: bomb.ownerId,
-      hit: dist < BOMB_HIT_RADIUS,
+      hit,
     });
 
-    if (dist < BOMB_HIT_RADIUS) {
+    if (hit) {
       const player = this.getPlayerById(bomb.ownerId);
       if (player) player.bombPoints++;
 
-      // Nuovo obiettivo
-      const newTarget = new Target(bomb.ownerId);
-      this.targets.set(bomb.ownerId, newTarget);
-
-      const socket = this.getSocketByPlayerId(bomb.ownerId);
-      if (socket) socket.emit('new-target', newTarget.toState());
+      // Nuovo obiettivo condiviso — visibile a tutti
+      this.target = new Target();
+      this.io.emit('new-target', this.target.toState());
     }
   }
 

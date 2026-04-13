@@ -6,11 +6,15 @@ export class DeathScreen {
     this._timer    = null;
   }
 
-  show(killerNickname, onDone) {
+  show(killerNickname, byTurret, onDone) {
     this._el.style.display = 'flex';
-    this._msg.textContent  = killerNickname
-      ? `Eliminato da ${killerNickname}`
-      : 'Sei stato eliminato!';
+    if (killerNickname && byTurret) {
+      this._msg.textContent = `Abbattuto dalla torretta di ${killerNickname}`;
+    } else if (killerNickname) {
+      this._msg.textContent = `Eliminato da ${killerNickname}`;
+    } else {
+      this._msg.textContent = 'Sei stato eliminato!';
+    }
 
     let remaining = 3;
     this._countdown.textContent = `Respawn in ${remaining}…`;

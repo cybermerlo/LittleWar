@@ -5,21 +5,23 @@ import { WEAPON_CONFIGS, FLY_ALTITUDE } from '../../shared/constants.js';
 export class HUD {
   constructor() {
     this.el = {
-      hud:        document.getElementById('hud'),
-      kills:      document.getElementById('hud-kills'),
-      bombs:      document.getElementById('hud-bombs'),
-      weapon:     document.getElementById('hud-weapon'),
-      shield:     document.getElementById('hud-shield'),
-      speed:      document.getElementById('hud-speed'),
-      boost:      document.getElementById('hud-boost'),
-      playerList: document.getElementById('player-list'),
-      arrow:      document.getElementById('target-arrow'),
+      hud:         document.getElementById('hud'),
+      kills:       document.getElementById('hud-kills'),
+      bombs:       document.getElementById('hud-bombs'),
+      weapon:      document.getElementById('hud-weapon'),
+      shield:      document.getElementById('hud-shield'),
+      speed:       document.getElementById('hud-speed'),
+      boost:       document.getElementById('hud-boost'),
+      playerList:  document.getElementById('player-list'),
+      arrow:       document.getElementById('target-arrow'),
       playerArrows: document.getElementById('player-arrows'),
-      bombToast:  document.getElementById('hud-bomb-toast'),
-      killToast:  document.getElementById('hud-kill-toast'),
+      bombToast:   document.getElementById('hud-bomb-toast'),
+      killToast:   document.getElementById('hud-kill-toast'),
+      towerToast:  document.getElementById('hud-tower-toast'),
     };
-    this._bombToastTimer = null;
-    this._killToastTimer = null;
+    this._bombToastTimer  = null;
+    this._killToastTimer  = null;
+    this._towerToastTimer = null;
     this._playerArrowMap = new Map();
     this._tmpRemote = new THREE.Vector3();
     this._tmpProj = new THREE.Vector3();
@@ -28,16 +30,33 @@ export class HUD {
   show() { this.el.hud.style.display = 'block'; }
   hide() { this.el.hud.style.display = 'none'; }
 
-  /** Avviso quando elimini un avversario */
-  showKillNotice(nickname) {
+  /** Avviso quando elimini un avversario (diretto o via torretta tua) */
+  showKillNotice(nickname, byTurret = false) {
     const el = this.el.killToast;
     if (!el) return;
-    el.textContent = nickname ? `Eliminato ${nickname}!` : 'Eliminazione!';
+    if (byTurret) {
+      el.textContent = nickname ? `La tua torretta ha abbattuto ${nickname}!` : 'La tua torretta ha abbattuto un nemico!';
+    } else {
+      el.textContent = nickname ? `Eliminato ${nickname}!` : 'Eliminazione!';
+    }
     el.classList.add('hud-toast--visible');
     if (this._killToastTimer) clearTimeout(this._killToastTimer);
     this._killToastTimer = setTimeout(() => {
       el.classList.remove('hud-toast--visible');
       this._killToastTimer = null;
+    }, 3200);
+  }
+
+  /** Avviso quando distruggi una torretta nemica */
+  showTowerDestroyedNotice() {
+    const el = this.el.towerToast;
+    if (!el) return;
+    el.textContent = 'Torretta nemica distrutta! +1';
+    el.classList.add('hud-toast--visible');
+    if (this._towerToastTimer) clearTimeout(this._towerToastTimer);
+    this._towerToastTimer = setTimeout(() => {
+      el.classList.remove('hud-toast--visible');
+      this._towerToastTimer = null;
     }, 3200);
   }
 
