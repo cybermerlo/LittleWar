@@ -87,6 +87,9 @@ export class BuildingEntity {
     this.progressFill.position.z = 0.01;
     this.progressGroup.add(this.progressFill);
 
+    // Billboard stabile: usa la direzione radiale come "up" hint per lookAt
+    this.progressGroup.up.copy(new THREE.Vector3(pos.x, pos.y, pos.z).normalize());
+
     this.group.add(this.progressGroup);
 
     // ── Cerchio zona conquista (indicatore a terra) ──
@@ -150,7 +153,7 @@ export class BuildingEntity {
       const g = 0.5 + p * 0.5;
       this.progressFillMat.color.setRGB(r, g, 0.2);
 
-      // Barra guarda sempre la camera
+      // Billboard: punta verso la camera con up radiale stabile
       if (camera) {
         this.progressGroup.lookAt(camera.position);
       }

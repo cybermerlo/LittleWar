@@ -66,6 +66,14 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      height: 100vh;
+      height: 100dvh;
+      max-height: 100dvh;
+      box-sizing: border-box;
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-right: env(safe-area-inset-right, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      padding-left: env(safe-area-inset-left, 0px);
     }
 
     .lw-lobby-bg {
@@ -126,13 +134,13 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 1.5rem 2rem;
+      padding: 0.85rem 1.25rem 0.65rem;
       flex-shrink: 0;
     }
 
     .lw-brand {
       font-family: 'Plus Jakarta Sans', sans-serif;
-      font-size: 1.75rem;
+      font-size: clamp(1.35rem, 3.5vw, 1.55rem);
       font-weight: 800;
       font-style: italic;
       letter-spacing: -0.03em;
@@ -143,58 +151,69 @@
     .lw-lobby-main {
       position: relative;
       z-index: 1;
-      flex: 1;
+      flex: 1 1 0;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
-      padding: 1.5rem;
+      padding: 0.35rem 1rem 0.65rem;
       min-height: 0;
+      overflow: hidden;
+    }
+
+    @supports (align-items: safe center) {
+      .lw-lobby-main {
+        align-items: safe center;
+      }
     }
 
     #lobby-box {
       width: 100%;
       max-width: 36rem;
+      max-height: 100%;
+      overflow: hidden;
       background: color-mix(in srgb, var(--lw-surface-container-low) 80%, transparent);
       backdrop-filter: blur(24px);
       -webkit-backdrop-filter: blur(24px);
       border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 15%, transparent);
       border-radius: 1rem;
-      padding: 2.25rem 2.5rem;
+      padding: 1.35rem 1.5rem 1.1rem;
       text-align: center;
       color: var(--lw-on-surface);
       box-shadow: 0 40px 80px rgba(0, 0, 0, 0.5);
       display: flex;
       flex-direction: column;
       align-items: stretch;
-      gap: 1.75rem;
+      gap: 0.95rem;
+      flex: 0 1 auto;
     }
 
     #lobby-box .lw-hero-title {
       font-family: 'Plus Jakarta Sans', sans-serif;
       font-weight: 900;
       font-style: italic;
-      font-size: clamp(2.5rem, 8vw, 4rem);
+      font-size: clamp(1.85rem, 5.5vw, 3rem);
       letter-spacing: -0.04em;
       line-height: 1.05;
       color: var(--lw-title-blue);
       filter: drop-shadow(0 10px 10px rgba(75, 142, 255, 0.3));
       margin: 0;
+      padding-top: 0.2rem;
     }
 
     #lobby-box .lw-hero-sub {
       font-family: 'Plus Jakarta Sans', sans-serif;
       font-weight: 700;
-      font-size: 1.05rem;
+      font-size: clamp(0.72rem, 1.8vw, 0.95rem);
       color: var(--lw-primary);
       text-transform: uppercase;
       letter-spacing: 0.12em;
-      margin: 0.35rem 0 0;
+      margin: 0.2rem 0 0;
     }
 
     #lobby-box .lw-fields {
       display: flex;
       flex-direction: column;
-      gap: 1.5rem;
+      gap: 0.85rem;
       text-align: left;
     }
 
@@ -215,13 +234,13 @@
 
     #lobby-box input[type="text"] {
       width: 100%;
-      padding: 1rem 3rem 1rem 1.5rem;
-      border-radius: 1rem;
+      padding: 0.7rem 2.75rem 0.7rem 1.1rem;
+      border-radius: 0.85rem;
       border: none;
       background: var(--lw-surface-container-highest);
       color: var(--lw-on-surface);
       font-family: 'Be Vietnam Pro', sans-serif;
-      font-size: 1.05rem;
+      font-size: 0.95rem;
       font-weight: 700;
       outline: none;
       transition: box-shadow 0.2s;
@@ -285,8 +304,8 @@
     }
 
     .color-btn {
-      width: 3rem;
-      height: 3rem;
+      width: 2.5rem;
+      height: 2.5rem;
       border-radius: 9999px;
       border: none;
       cursor: pointer;
@@ -329,21 +348,32 @@
     }
 
     #play-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
       width: 100%;
       position: relative;
       overflow: hidden;
-      padding: 1.35rem 1rem;
-      border-radius: 1rem;
+      padding: 0.85rem 1rem;
+      border-radius: 0.85rem;
       border: none;
       cursor: pointer;
       font-family: 'Plus Jakarta Sans', sans-serif;
       font-weight: 900;
-      font-size: 1.75rem;
+      font-size: clamp(1.2rem, 4vw, 1.45rem);
+      line-height: 1;
       letter-spacing: 0.02em;
       color: var(--lw-on-primary);
       background: linear-gradient(135deg, var(--lw-primary), var(--lw-primary-container));
       box-shadow: 0 20px 40px rgba(75, 142, 255, 0.4);
       transition: transform 0.15s ease;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+
+    #play-btn::-moz-focus-inner {
+      border: 0;
+      padding: 0;
     }
 
     #play-btn::before {
@@ -426,8 +456,8 @@
     }
 
     #lobby-msg {
-      min-height: 1.25rem;
-      font-size: 0.85rem;
+      min-height: 0.85rem;
+      font-size: 0.78rem;
       color: var(--lw-error);
       text-align: center;
     }
@@ -435,30 +465,30 @@
     .lw-how-to-play {
       background: color-mix(in srgb, var(--lw-surface-container-highest) 55%, transparent);
       border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 20%, transparent);
-      border-radius: 0.75rem;
-      padding: 0.9rem 1.1rem;
+      border-radius: 0.65rem;
+      padding: 0.55rem 0.75rem;
       text-align: left;
-      font-size: 0.8rem;
+      font-size: 0.72rem;
       color: var(--lw-on-surface-variant);
-      line-height: 1.55;
+      line-height: 1.42;
     }
 
     .lw-how-to-play strong {
       font-family: 'Plus Jakarta Sans', sans-serif;
-      font-size: 0.7rem;
+      font-size: 0.62rem;
       font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0.12em;
       color: var(--lw-primary);
       display: block;
-      margin-bottom: 0.45rem;
+      margin-bottom: 0.3rem;
     }
 
     .lw-controls-grid {
       display: grid;
       grid-template-columns: auto 1fr;
-      gap: 0.15rem 0.7rem;
-      margin-bottom: 0.6rem;
+      gap: 0.08rem 0.55rem;
+      margin-bottom: 0.35rem;
     }
 
     .lw-how-tips {
@@ -467,43 +497,43 @@
       padding: 0;
       display: flex;
       flex-direction: column;
-      gap: 0.55rem;
+      gap: 0.28rem;
     }
 
     .lw-how-tips li {
       display: grid;
-      grid-template-columns: 1.4rem 1fr;
-      gap: 0.45rem 0.65rem;
+      grid-template-columns: 1.15rem 1fr;
+      gap: 0.2rem 0.45rem;
       align-items: start;
     }
 
     .lw-how-tip-icon {
-      font-size: 1.05rem;
-      line-height: 1.45;
+      font-size: 0.88rem;
+      line-height: 1.35;
       text-align: center;
       filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
     }
 
     .lw-how-tip-text {
       font-size: inherit;
-      line-height: 1.5;
+      line-height: 1.38;
       color: inherit;
     }
 
     .lw-how-tip-text strong {
       font-family: 'Plus Jakarta Sans', sans-serif;
       font-weight: 700;
-      font-size: 0.72rem;
+      font-size: 0.65rem;
       letter-spacing: 0.04em;
       text-transform: uppercase;
       color: var(--lw-on-surface);
       display: block;
-      margin-bottom: 0.12rem;
+      margin-bottom: 0.06rem;
     }
 
     .lw-key {
       font-family: 'Plus Jakarta Sans', sans-serif;
-      font-size: 0.72rem;
+      font-size: 0.65rem;
       font-weight: 700;
       background: color-mix(in srgb, var(--lw-surface-container-highest) 90%, var(--lw-primary));
       border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 40%, transparent);
@@ -515,10 +545,107 @@
     }
 
     .lw-credits {
-      font-size: 0.7rem;
+      font-size: 0.62rem;
       color: color-mix(in srgb, var(--lw-on-surface-variant) 55%, transparent);
       text-align: center;
       letter-spacing: 0.01em;
+      line-height: 1.25;
+    }
+
+    /* Lobby: schermate basse (niente scroll, solo compattazione) */
+    @media (max-height: 760px) {
+      .lw-lobby-header {
+        padding: 0.55rem 1rem 0.45rem;
+      }
+
+      #lobby-box {
+        padding: 0.85rem 1.15rem 0.75rem;
+        gap: 0.65rem;
+        border-radius: 0.75rem;
+      }
+
+      #lobby-box .lw-hero-title {
+        font-size: clamp(1.55rem, 5vw, 2.35rem);
+        padding-top: 0.1rem;
+      }
+
+      #lobby-box .lw-fields {
+        gap: 0.55rem;
+      }
+
+      .lw-label {
+        margin-bottom: 0.3rem;
+      }
+
+      #lobby-box input[type="text"] {
+        padding: 0.55rem 2.5rem 0.55rem 0.95rem;
+        font-size: 0.88rem;
+      }
+
+      .color-btn {
+        width: 2.15rem;
+        height: 2.15rem;
+      }
+
+      #color-options,
+      #model-options {
+        gap: 0.45rem;
+      }
+
+      .model-btn {
+        padding: 0.4rem 0.75rem;
+        font-size: 0.78rem;
+      }
+
+      .lw-how-to-play {
+        padding: 0.4rem 0.55rem;
+        font-size: 0.66rem;
+        line-height: 1.35;
+      }
+
+      .lw-how-to-play strong {
+        margin-bottom: 0.2rem;
+      }
+
+      .lw-how-tips {
+        gap: 0.18rem;
+      }
+
+      .lw-how-tip-text {
+        line-height: 1.32;
+      }
+
+      #play-btn {
+        padding: 0.65rem 0.85rem;
+      }
+
+      .lw-online-pill {
+        padding: 0.28rem 0.9rem;
+        font-size: 0.72rem;
+      }
+
+      .lw-credits {
+        font-size: 0.55rem;
+      }
+    }
+
+    @media (max-height: 640px) {
+      .lw-lobby-main {
+        padding: 0.2rem 0.75rem 0.45rem;
+      }
+
+      #lobby-box {
+        padding: 0.65rem 0.9rem 0.55rem;
+        gap: 0.5rem;
+      }
+
+      #lobby-box .lw-hero-sub {
+        margin-top: 0.1rem;
+      }
+
+      .lw-how-tip-icon {
+        font-size: 0.75rem;
+      }
     }
 
     /* ── HUD ───────────────────────────────────────── */
@@ -928,6 +1055,9 @@
             <span class="lw-key">Spazio</span><span>boost</span>
             <span class="lw-key">Click ⬅</span><span>spara</span>
             <span class="lw-key">Click ➡</span><span>sgancia bomba</span>
+            <span class="lw-key">T</span><span>apre la chat (Invio invia, Esc chiude)</span>
+            <span class="lw-key">L</span><span>messaggio rapido di esultazione</span>
+            <span class="lw-key">P</span><span>messaggio rapido di rammarico</span>
           </div>
           <ul class="lw-how-tips" aria-label="Obiettivi e meccaniche">
             <li>

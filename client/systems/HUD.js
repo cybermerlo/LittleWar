@@ -87,7 +87,7 @@ export class HUD {
 
     // Lista giocatori
     this.el.playerList.innerHTML = allPlayers
-      .map(p => `<div class="player-entry" style="color:${p.color}">${p.nickname} — ${p.kills}k</div>`)
+      .map(p => `<div class="player-entry" style="color:${p.color}">${p.nickname} — ${p.kills}</div>`)
       .join('');
 
     // Freccia obiettivo

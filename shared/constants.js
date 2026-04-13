@@ -65,5 +65,5 @@ export const BUILDING_CONQUEST_RADIUS = 8;   // unità cartesiane (raggio zona c
 export const BUILDING_CONQUEST_TIME = 10;    // secondi per conquistare
 export const TURRET_RANGE = 25;              // unità cartesiane (raggio tiro torretta)
 export const TURRET_FIRE_RATE = 1.5;         // secondi tra uno sparo e l'altro
-export const TURRET_BULLET_SPEED = 0.95;     // uguale ai proiettili normali (rad/s)
+export const TURRET_BULLET_SPEED = 0.7125;   // ~25% più lenti dei proiettili giocatore (rad/s)
 export const TURRET_BULLET_LIFETIME = 1800;  // ms (leggermente superiore ai normali)
