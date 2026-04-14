@@ -17,12 +17,13 @@ const _modelLoader = new GLTFLoader();
 const _modelTemplateCache = new Map();
 
 const MODEL_PATHS = {
-  airplane: '/models/Airplane.glb',
+  airplane: '/models/biplane.glb',
   spaceship: '/models/Spaceship.glb',
 };
 
 const MODEL_VISUAL_CONFIG = {
-  airplane: { yaw: 0, size: 2.2 },
+  // biplane ha il naso verso +Z locale → ruotiamo di π/2 attorno Y per far puntare verso +X
+  airplane: { yaw: Math.PI / 2, size: 2.2 },
   spaceship: { yaw: Math.PI / 2, size: 2.2 },
 };
 const BOOST_PARTICLE_COUNT = 84;
@@ -74,7 +75,7 @@ function getModelTemplate(modelName) {
   const templatePromise = new Promise((resolve) => {
     _modelLoader.load(
       MODEL_PATHS[safeModelName],
-      (gltf) => resolve(gltf.scene),
+      (gltf) => resolve({ scene: gltf.scene, animations: gltf.animations }),
       undefined,
       () => resolve(null),
     );
@@ -140,7 +141,7 @@ function buildAirplaneMesh(color, modelName) {
   getModelTemplate(modelName).then((template) => {
     if (!template || group.userData.disposed) return;
 
-    const model = template.clone(true);
+    const model = template.scene.clone(true);
     tintModel(model, color);
     fitModelToSize(model, modelName);
 
@@ -150,6 +151,20 @@ function buildAirplaneMesh(color, modelName) {
     }
     group.add(model);
     group.userData.visualModel = model;
+
+    // Configura AnimationMixer per le animazioni del modello (es. elica biplane)
+    if (template.animations && template.animations.length > 0) {
+      const mixer = new THREE.AnimationMixer(model);
+      group.userData.mixer = mixer;
+
+      const propClip = THREE.AnimationClip.findByName(template.animations, 'PropellerAction');
+      if (propClip) {
+        const action = mixer.clipAction(propClip);
+        action.setLoop(THREE.LoopRepeat, Infinity);
+        action.play();
+        group.userData.propellerAction = action;
+      }
+    }
   });
 
   return group;
@@ -352,6 +367,16 @@ export class Airplane {
     if (this.mesh.userData.shield) {
       this.mesh.userData.shield.visible = hasShield;
     }
+
+    // Aggiorna AnimationMixer (elica biplane e altri modelli animati)
+    if (this.mesh.userData.mixer) {
+      this.mesh.userData.mixer.update(delta);
+      if (this.mesh.userData.propellerAction) {
+        // Elica sempre in movimento: 6× a riposo, fino a 12× durante boost pieno
+        this.mesh.userData.propellerAction.timeScale = 6.0 + boostAmount * 6.0;
+      }
+    }
+
     this._updateBoostParticles(delta, boostAmount);
   }
 
@@ -410,6 +435,7 @@ export class Airplane {
 
   dispose(scene) {
     this.mesh.userData.disposed = true;
+    if (this.mesh.userData.mixer) this.mesh.userData.mixer.stopAllAction();
     if (this._boostPoints) this._scene.remove(this._boostPoints);
     if (this._boostGeometry) this._boostGeometry.dispose();
     if (this._boostMaterial) this._boostMaterial.dispose();
