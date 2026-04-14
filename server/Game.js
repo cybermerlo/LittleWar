@@ -512,6 +512,16 @@ export class Game {
     });
   }
 
+  tryCollectPowerup(socketId, powerupId) {
+    const player = this.players.get(socketId);
+    if (!player || !player.alive) return;
+    const id = String(powerupId);
+    const pu = this.powerups.get(id);
+    if (!pu) return;
+    this.collectPowerup(player, pu);
+    this.powerups.delete(id);
+  }
+
   broadcastChat(socketId, text) {
     const player = this.players.get(socketId);
     if (!player) return;

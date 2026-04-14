@@ -26,7 +26,16 @@ import {
   BOOST_MAX, BOOST_SPEED_MULT, BOOST_DRAIN_PER_SEC, BOOST_REGEN_PER_SEC,
   FORWARD_ACCEL, BACKWARD_ACCEL,
   WEAPON_CONFIGS, FLY_ALTITUDE, MAX_PLAYERS, CLIENT_INPUT_SEND_MS,
+  POWERUP_COLLECT_RADIUS,
 } from '../shared/constants.js';
+
+/** Distanza 3D tra due punti sferici allo stesso raggio — stessa formula del server. */
+function sphereDist(t1, p1, t2, p2, r) {
+  const dx = r * Math.sin(t1) * Math.cos(p1) - r * Math.sin(t2) * Math.cos(p2);
+  const dy = r * Math.cos(t1) - r * Math.cos(t2);
+  const dz = r * Math.sin(t1) * Math.sin(p1) - r * Math.sin(t2) * Math.sin(p2);
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
 
 /** Intensità visiva turbo per aerei remoti (0..1) dal game-state. */
 function remoteBoostAmount(p) {
@@ -126,6 +135,10 @@ let   targetEntity       = null;
 let   currentTarget      = null;
 let   allPlayerStates    = [];
 
+// Powerup: posizioni note (da game-state) + IDs già inviati al server come try-collect
+const powerupPositions = new Map(); // powerupId → {theta, phi}
+const triedPowerups    = new Set(); // IDs per cui abbiamo già inviato try-collect
+
 // Throttle invio input (allineato al tick server)
 let lastInputSend = 0;
 
@@ -201,10 +214,13 @@ const net = new NetworkManager({
     });
 
     // Powerup già presenti
+    powerupPositions.clear();
+    triedPowerups.clear();
     powerups.forEach(pu => {
       const id = powerupKey(pu.id);
       const e = new PowerUpEntity(scene, id, pu.type, pu.theta, pu.phi);
       powerupEntities.set(id, e);
+      powerupPositions.set(id, { theta: pu.theta, phi: pu.phi });
     });
 
     // Obiettivo bombardamento
@@ -323,6 +339,8 @@ const net = new NetworkManager({
       if (!serverPuIds.has(id)) {
         e.dispose(scene);
         powerupEntities.delete(id);
+        powerupPositions.delete(id);
+        triedPowerups.delete(id);
       }
     }
     state.powerups.forEach(p => {
@@ -332,6 +350,7 @@ const net = new NetworkManager({
       } else {
         powerupEntities.get(id).update(p.theta, p.phi);
       }
+      powerupPositions.set(id, { theta: p.theta, phi: p.phi });
     });
 
     // Edifici conquistabili
@@ -373,10 +392,14 @@ const net = new NetworkManager({
     if (!powerupEntities.has(id)) {
       powerupEntities.set(id, new PowerUpEntity(scene, id, pu.type, pu.theta, pu.phi));
     }
+    powerupPositions.set(id, { theta: pu.theta, phi: pu.phi });
   },
 
   onPowerupCollected({ playerId, powerupId }) {
+    const id = powerupKey(powerupId);
     removePowerupEntity(scene, powerupId);
+    powerupPositions.delete(id);
+    triedPowerups.delete(id);
     if (playerId === localPlayerId) AudioManager.playPowerup();
   },
 
@@ -499,6 +522,18 @@ function animate() {
     if (input.consumeBomb() && now - lastBombTime > BOMB_COOLDOWN) {
       net.sendBomb(theta, phi);
       lastBombTime = now;
+    }
+
+    // Rilevamento powerup lato client — fix per ritardo HTTP polling.
+    // Con WebSocket il server lo rileva già via arc-check; con polling la posizione
+    // predetta diverge e il server manca la collisione. Il client, che conosce la
+    // posizione esatta, avvisa il server con try-collect.
+    for (const [id, pos] of powerupPositions) {
+      if (triedPowerups.has(id)) continue;
+      if (sphereDist(theta, phi, pos.theta, pos.phi, FLY_ALTITUDE) < POWERUP_COLLECT_RADIUS) {
+        net.sendTryCollect(id);
+        triedPowerups.add(id);
+      }
     }
   }
 

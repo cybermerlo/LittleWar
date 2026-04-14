@@ -48,4 +48,8 @@ export class NetworkManager {
   sendChat(text) {
     this.socket.emit('chat', { text });
   }
+
+  sendTryCollect(powerupId) {
+    this.socket.emit('try-collect', { powerupId });
+  }
 }

@@ -81,3 +81,21 @@ In sviluppo aprire **due terminali**: uno per `npm start` (server), uno per `npm
 - Keep the game lightweight — it runs in the browser for casual sessions with friends
 - Prefer simple, readable code over premature optimization
 - Game logic decisions are still being finalized — wait for explicit instructions before implementing features
+
+## Bug Log
+
+### Powerup non raccoglibili in multiplayer (intermittente)
+
+**Sintomo:** In multiplayer il giocatore vede il powerup, ci passa attraverso, nessun suono né arma data. In solo non accade.
+
+**Causa radice (tre failure mode sovrapposti):**
+1. **Divergenza posizione con HTTP polling (causa principale):** Su Railway, Socket.IO ricade su HTTP polling (~1 req/s). Il server predice il movimento dell'aereo in base all'ultimo heading ricevuto, ma se il client ha girato nel frattempo la posizione predetta diverge di ~11 unità (base speed × 1s). Il check tick-based usa la posizione sbagliata e non rileva la collisione.
+2. **Miss geometrico dell'arc-check:** `_checkPowerupCollectionAlongPath` fa uno sweep sull'arco tra la posizione precedente e quella nuova del client. Se il giocatore ha curvato per avvicinarsi al powerup e poi ha curvato di nuovo (approach da lato), il powerup non cade sull'arco di cerchio massimo tra A e B → miss.
+3. **Competizione con altri giocatori + ritardo evento:** Un altro giocatore raccoglie il powerup; l'evento `powerup-collected` arriva con ritardo polling → il powerup rimane visibile per ~1s e poi sparisce senza suono né effetto.
+
+**Soluzione applicata (2026-04-14):** Rilevamento lato client + evento `try-collect`.
+- `client/main.js`: ogni frame, quando vivo, controlla distanza sferica tra posizione locale e tutti i powerup noti. Se entro `POWERUP_COLLECT_RADIUS`, invia `try-collect { powerupId }` al server (una sola volta per ID tramite `triedPowerups` Set).
+- `server/Game.js`: `tryCollectPowerup()` — se il powerup esiste ancora, lo raccoglie (no check di distanza: inutile con polling lag, gioco casual con amici).
+- Server-side collection esistente rimane come backup per chi usa WebSocket.
+
+**Se il problema persiste:** Verificare se Railway sta effettivamente usando WebSocket o polling. Se polling, i `try-collect` potrebbero comunque arrivare in ritardo. In quel caso valutare: (a) aumentare il polling frequency nelle opzioni socket.io, oppure (b) fare collection ottimistica lato client con rollback.

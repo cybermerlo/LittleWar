@@ -48,6 +48,10 @@ io.on('connection', (socket) => {
     game.broadcastChat(socket.id, text);
   });
 
+  socket.on('try-collect', ({ powerupId }) => {
+    game.tryCollectPowerup(socket.id, powerupId);
+  });
+
   socket.on('disconnect', () => {
     console.log(`[-] Socket disconnesso: ${socket.id}`);
     game.removePlayer(socket.id);
