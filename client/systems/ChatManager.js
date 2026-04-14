@@ -2,25 +2,25 @@
 // Messaggi liberi (T) e messaggi rapidi (L = esultazione, P = rammarico)
 
 const QUICK_L = [
-  'GOAT in volo! 🐐',
-  'Non c\'era storia!',
-  'Troppo forte per voi!',
-  'Chi ferma un carro armato?',
-  'Sto volando alto oggi!',
-  'Ineguagliabile!',
-  'Questo è il mio cielo!',
-  'Nessuno come me!',
+  'Haha Coglionazzo inferiore! 🐐',
+  'Incapace, hai visto chi è l alfa?',
+  'Io sono io e voi non siete un cazzo!',
+  'Ti rullo, rullo, rullo!',
+  'Sborrooooooooooooo!',
+  'Le mie balle sono piu grandi di te!',
+  'Piero Angela mi fa una sega!',
+  'Yeeeeeeeeeee!',
 ];
 
 const QUICK_P = [
-  'Mannaggia...',
-  'Ma dai! :(',
-  'Ci stavo quasi!',
-  'Riconquisterò il cielo!',
-  'La lag, giuro.',
-  'Sono stato tradito dalla torretta!',
-  'Rivincita immediata!',
-  'Poteva andare peggio... no in realtà no.',
+  'Ora atterro a casa dei tuoi ed incapacito tua sorella!!',
+  'Maurizio Costanzo Incapace!',
+  'Ti buco cane di merda!',
+  'Ti prendo e ti detono l ano!',
+  'Faccia di merda muori',
+  'Tua madre cagna da pochi soldi',
+  'I tuo AVI incapaci e sterili',
+  'Tutti i tuoi redditi in medicine!',
 ];
 
 function randomFrom(arr) {

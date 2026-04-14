@@ -17,14 +17,15 @@ const _modelLoader = new GLTFLoader();
 const _modelTemplateCache = new Map();
 
 const MODEL_PATHS = {
-  airplane: '/models/biplane.glb',
-  spaceship: '/models/Spaceship.glb',
+  airplane: '/models/biplane_classic.glb',
+  spaceship: '/models/biplane.glb',
 };
 
 const MODEL_VISUAL_CONFIG = {
-  // biplane ha il naso verso +Z locale → ruotiamo di π/2 attorno Y per far puntare verso +X
-  airplane: { yaw: Math.PI / 2, size: 2.2 },
-  spaceship: { yaw: Math.PI / 2, size: 2.2 },
+  // biplane_classic: naso verso +Z → yaw = +π/2; colore giocatore solo su PlaneBody
+  airplane: { yaw: Math.PI / 2, size: 2.2, tintMaterials: ['PlaneBody'], propSpeed: 8.0 },
+  // Corsair biplane: naso verso -Z → yaw = -π/2; colore giocatore solo su "blue"
+  spaceship: { yaw: -Math.PI / 2, size: 2.2, tintMaterials: ['blue'], propSpeed: 4.5 },
 };
 const BOOST_PARTICLE_COUNT = 84;
 const BOOST_PARTICLE_SPAWN_RATE = 180; // particelle/s a boost pieno
@@ -84,17 +85,26 @@ function getModelTemplate(modelName) {
   return templatePromise;
 }
 
-function tintModel(instance, color) {
+/**
+ * Applica il colore giocatore ai materiali del modello.
+ * @param {THREE.Object3D} instance
+ * @param {string} color  - colore giocatore (#rrggbb)
+ * @param {string[]|null} tintMaterials - lista di nomi materiale da tingere; null = tutti
+ */
+function tintModel(instance, color, tintMaterials) {
   const tintColor = new THREE.Color(color);
+  const shouldTint = (mat) => !tintMaterials || tintMaterials.includes(mat.name);
   instance.traverse((obj) => {
     if (!obj.isMesh || !obj.material) return;
     if (Array.isArray(obj.material)) {
-      obj.material = obj.material.map((material) => {
-        const cloned = material.clone();
+      obj.material = obj.material.map((mat) => {
+        if (!shouldTint(mat)) return mat;
+        const cloned = mat.clone();
         if (cloned.color) cloned.color.copy(tintColor);
         return cloned;
       });
     } else {
+      if (!shouldTint(obj.material)) return;
       const cloned = obj.material.clone();
       if (cloned.color) cloned.color.copy(tintColor);
       obj.material = cloned;
@@ -142,7 +152,8 @@ function buildAirplaneMesh(color, modelName) {
     if (!template || group.userData.disposed) return;
 
     const model = template.scene.clone(true);
-    tintModel(model, color);
+    const cfg = MODEL_VISUAL_CONFIG[modelName] ?? MODEL_VISUAL_CONFIG.airplane;
+    tintModel(model, color, cfg.tintMaterials ?? null);
     fitModelToSize(model, modelName);
 
     if (group.userData.fallbackMesh) {
@@ -157,12 +168,15 @@ function buildAirplaneMesh(color, modelName) {
       const mixer = new THREE.AnimationMixer(model);
       group.userData.mixer = mixer;
 
-      const propClip = THREE.AnimationClip.findByName(template.animations, 'PropellerAction');
+      const propClip =
+        THREE.AnimationClip.findByName(template.animations, 'PropellerAction') ??
+        template.animations[0];
       if (propClip) {
         const action = mixer.clipAction(propClip);
         action.setLoop(THREE.LoopRepeat, Infinity);
         action.play();
         group.userData.propellerAction = action;
+        group.userData.propSpeed = cfg.propSpeed ?? 6.0;
       }
     }
   });
@@ -372,8 +386,8 @@ export class Airplane {
     if (this.mesh.userData.mixer) {
       this.mesh.userData.mixer.update(delta);
       if (this.mesh.userData.propellerAction) {
-        // Elica sempre in movimento: 6× a riposo, fino a 12× durante boost pieno
-        this.mesh.userData.propellerAction.timeScale = 6.0 + boostAmount * 6.0;
+        const base = this.mesh.userData.propSpeed ?? 6.0;
+        this.mesh.userData.propellerAction.timeScale = base + boostAmount * base;
       }
     }
 

@@ -5,7 +5,7 @@ const COLORS = [
 
 const MODELS = [
   { id: 'airplane', label: 'Airplane' },
-  { id: 'spaceship', label: 'Spaceship' },
+  { id: 'spaceship', label: 'Biplane' },
 ];
 
 export class LobbyScreen {
