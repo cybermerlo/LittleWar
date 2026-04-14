@@ -23,6 +23,7 @@ import {
   POWERUP_RANDOM_INTERVAL,
   POWERUP_DROP_CHANCE,
   RESPAWN_DELAY,
+  RESPAWN_INVINCIBILITY,
   SHIELD_INVINCIBILITY,
   BULLET_HIT_RADIUS,
   BOMB_HIT_RADIUS,
@@ -316,6 +317,7 @@ export class Game {
   // ── Logica colpi ──────────────────────────────────────────────────────────
 
   hitPlayer(killerId, victim, isTurret = false) {
+    if (victim.respawnInvincibleUntil && Date.now() < victim.respawnInvincibleUntil) return;
     if (victim.shieldInvincible) return;
 
     if (victim.hasShield) {
@@ -329,6 +331,7 @@ export class Game {
     // Morte
     victim.alive = false;
     victim.respawnAt = Date.now() + RESPAWN_DELAY;
+    victim.respawnInvincibleUntil = 0;
     victim.weaponLevel = 0;
     victim.hasShield = false;
     victim.boostPressed = false;
@@ -357,6 +360,7 @@ export class Game {
   respawnPlayer(player) {
     player.alive = true;
     player.respawnAt = null;
+    player.respawnInvincibleUntil = Date.now() + RESPAWN_INVINCIBILITY;
     player.theta = Math.acos(2 * Math.random() - 1);
     player.phi = Math.random() * Math.PI * 2;
     player.heading = Math.random() * Math.PI * 2;

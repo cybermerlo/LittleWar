@@ -55,6 +55,7 @@ export const POWERUP_DROP_CHANCE = 0.5;      // 50% alla morte
 
 // Respawn
 export const RESPAWN_DELAY = 3000;           // ms
+export const RESPAWN_INVINCIBILITY = 2000;   // ms di invulnerabilità dopo il respawn
 
 // Scudo
 export const SHIELD_INVINCIBILITY = 500;     // ms dopo aver perso lo scudo

@@ -24,6 +24,7 @@ export class Player {
     this.bombPoints = 0;
     this.alive = true;
     this.respawnAt = null;
+    this.respawnInvincibleUntil = 0;
     this.boostEnergy = BOOST_MAX;
     this.boostPressed = false;
     this.moveForward = false;
