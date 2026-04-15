@@ -40,6 +40,10 @@ const _refAxis   = new THREE.Vector3();
 const _lc        = new THREE.Vector3();
 const RAY_START  = 85;
 
+// ── Anti-compenetrazione edifici (stima footprint su sfera) ───────────────────
+const BUILDING_CLEARANCE = 0.55;      // padding in unità mondo tra impronte
+const MAX_BUILDING_TRIES = 28;        // tentativi per trovare una posizione libera
+
 // Orienta un oggetto sulla sfera: "up" = verso l'esterno, "up world" = Y
 function orientOnSphere(obj, pos, radialOffset = 0) {
   const up = pos.clone().normalize();
@@ -167,6 +171,26 @@ function prepareTemplate(sourceScene, targetSize) {
 function prepareTreeTemplate(sourceScene)     { return prepareTemplate(sourceScene, TREE_TEMPLATE_TARGET_SIZE); }
 function prepareBuildingTemplate(sourceScene) { return prepareTemplate(sourceScene, BUILDING_TEMPLATE_TARGET_SIZE); }
 function prepareHospitalTemplate(sourceScene) { return prepareTemplate(sourceScene, HOSPITAL_TEMPLATE_TARGET_SIZE); }
+
+function estimateFootprintRadiusXZ(obj) {
+  // Stima dell'impronta in pianta (XZ) usando la bounding box, prima di appoggiare sul terreno.
+  obj.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(obj);
+  const hw = Math.max((box.max.x - box.min.x) * 0.5, 0.01);
+  const hd = Math.max((box.max.z - box.min.z) * 0.5, 0.01);
+  // raggio del cerchio che contiene il rettangolo hw×hd
+  return Math.sqrt(hw * hw + hd * hd);
+}
+
+function canPlaceOnSphere(dir, footprintRadius, placed, planetRadius) {
+  const R = Math.max(planetRadius, 1e-6);
+  for (const p of placed) {
+    const sep = dir.angleTo(p.dir);
+    const minSepAngle = (footprintRadius + p.footprintRadius + BUILDING_CLEARANCE * 2) / R;
+    if (sep < minSepAngle) return false;
+  }
+  return true;
+}
 
 /**
  * Carica i modelli albero da /public/models. Risolve a un array di template pronti al clone;
@@ -347,6 +371,41 @@ export function createTerrain(scene, heightData, posAttr, planetMesh, treeTempla
   const MAX_HOSPITALS = 12;
   let hospitals = 0;
 
+  // Per edifici/ospedali: registro delle "impronte" già piazzate, in angolo su sfera
+  const placedBuildings = [];
+  const planetRadius = (() => {
+    // raggio stimato del pianeta: la maggior parte dei vertici ha lunghezza ~R
+    if (count <= 0) return 50;
+    const x0 = posAttr.getX(0), y0 = posAttr.getY(0), z0 = posAttr.getZ(0);
+    return Math.max(new THREE.Vector3(x0, y0, z0).length(), 1);
+  })();
+
+  function getPosFromIndex(idx) {
+    return new THREE.Vector3(posAttr.getX(idx), posAttr.getY(idx), posAttr.getZ(idx));
+  }
+
+  function tryPlaceBuildingLike(makeFn, placeFn, heightMin, heightMax) {
+    const obj = makeFn();
+    const footprint = estimateFootprintRadiusXZ(obj);
+
+    for (let attempt = 0; attempt < MAX_BUILDING_TRIES; attempt++) {
+      const idx = indices[Math.floor(Math.random() * indices.length)];
+      const h = heightData[idx];
+      if (h <= heightMin || h >= heightMax) continue;
+
+      const pos = getPosFromIndex(idx);
+      const dir = pos.clone().normalize();
+      if (!canPlaceOnSphere(dir, footprint, placedBuildings, planetRadius)) continue;
+
+      placeFn(obj, pos);
+      terrainGroup.add(obj);
+      placedBuildings.push({ dir, footprintRadius: footprint });
+      return true;
+    }
+
+    return false;
+  }
+
   for (const i of indices) {
     const h = heightData[i];
     const x = posAttr.getX(i);
@@ -364,15 +423,21 @@ export function createTerrain(scene, heightData, posAttr, planetMesh, treeTempla
       const wantsHospital = canPlaceHospital && (Math.random() < 0.18) && (buildings < MAX_BUILDINGS);
 
       if (wantsHospital) {
-        const hospital = makeHospital(hospitalTemplates);
-        placeBuildingBaseOnTerrain(hospital, pos, planetMesh, BUILDING_HEIGHT_OFFSET);
-        terrainGroup.add(hospital);
-        hospitals++;
+        const ok = tryPlaceBuildingLike(
+          () => makeHospital(hospitalTemplates),
+          (obj, p) => placeBuildingBaseOnTerrain(obj, p, planetMesh, BUILDING_HEIGHT_OFFSET),
+          0.04,
+          0.20,
+        );
+        if (ok) hospitals++;
       } else if (buildings < MAX_BUILDINGS) {
-        const building = makeBuilding(buildingTemplates);
-        placeBuildingBaseOnTerrain(building, pos, planetMesh, BUILDING_HEIGHT_OFFSET);
-        terrainGroup.add(building);
-        buildings++;
+        const ok = tryPlaceBuildingLike(
+          () => makeBuilding(buildingTemplates),
+          (obj, p) => placeBuildingBaseOnTerrain(obj, p, planetMesh, BUILDING_HEIGHT_OFFSET),
+          0.04,
+          0.20,
+        );
+        if (ok) buildings++;
       }
     }
 

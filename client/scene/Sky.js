@@ -117,6 +117,85 @@ export function createSky(scene, lights) {
   const baseRim  = lights?.rim?.intensity  ?? 0;
   const maxLightInt = skyStates.reduce((m, s) => Math.max(m, s.lightInt), 0);
 
+  // ── Stelle cadenti ──────────────────────────────────────────────────────────
+  const shootingStars = [];
+  let shootingStarTimer = 2 + Math.random() * 3;
+
+  function spawnShootingStar() {
+    const R = 348;
+    const phi   = Math.acos(2 * Math.random() - 1);
+    const theta = 2 * Math.PI * Math.random();
+    const start = new THREE.Vector3(
+      R * Math.sin(phi) * Math.cos(theta),
+      R * Math.cos(phi),
+      R * Math.sin(phi) * Math.sin(theta)
+    );
+
+    // Direzione tangente casuale alla sfera
+    const radial = start.clone().normalize();
+    const up = Math.abs(radial.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+    const t1 = up.clone().cross(radial).normalize();
+    const t2 = radial.clone().cross(t1).normalize();
+    const a   = Math.random() * 2 * Math.PI;
+    const dir = t1.clone().multiplyScalar(Math.cos(a)).addScaledVector(t2, Math.sin(a));
+
+    const speed       = 140 + Math.random() * 100;
+    const trailLength = 18  + Math.random() * 22;
+    const duration    = 0.9 + Math.random() * 0.6;
+
+    const geo = new THREE.BufferGeometry().setFromPoints([start.clone(), start.clone()]);
+    const mat = new THREE.LineBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
+    });
+    const line = new THREE.Line(geo, mat);
+    line.frustumCulled = false;
+    line.renderOrder = 0;
+    scene.add(line);
+
+    shootingStars.push({ line, geo, mat, start, dir, speed, trailLength, duration, age: 0 });
+  }
+
+  function updateShootingStars(delta, nightFactor) {
+    shootingStarTimer -= delta;
+    if (shootingStarTimer <= 0) {
+      spawnShootingStar();
+      shootingStarTimer = 7 + Math.random() * 10;
+    }
+
+    for (let i = shootingStars.length - 1; i >= 0; i--) {
+      const s = shootingStars[i];
+      s.age += delta;
+      const t = s.age / s.duration;
+
+      if (t >= 1) {
+        scene.remove(s.line);
+        s.geo.dispose();
+        s.mat.dispose();
+        shootingStars.splice(i, 1);
+        continue;
+      }
+
+      const head = s.start.clone().addScaledVector(s.dir, s.speed * s.age);
+      const tailOffset = Math.min(s.trailLength, s.speed * s.age);
+      const tail = head.clone().addScaledVector(s.dir, -tailOffset);
+
+      const pos = s.geo.attributes.position;
+      pos.setXYZ(0, tail.x, tail.y, tail.z);
+      pos.setXYZ(1, head.x, head.y, head.z);
+      pos.needsUpdate = true;
+
+      // fade-in rapido, fade-out sull'ultimo 35%
+      const fadeIn  = Math.min(t * 8, 1);
+      const fadeOut = t > 0.65 ? Math.max(1 - (t - 0.65) / 0.35, 0) : 1;
+      s.mat.opacity = fadeIn * fadeOut * 0.9 * Math.max(nightFactor, 0.45);
+    }
+  }
+
   let time = 0;
 
   function update(delta) {
@@ -152,6 +231,8 @@ export function createSky(scene, lights) {
     // Lenta rotazione della volta stellata (frame-rate independent)
     stars.rotation.y += 0.012 * delta;
     stars.rotation.x += 0.006 * delta;
+
+    updateShootingStars(delta, starsMat.opacity);
   }
 
   return { sky, stars, update };
