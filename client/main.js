@@ -471,6 +471,7 @@ function animate() {
   const now = performance.now();
 
   sky.update(delta);
+  const nightFactor = typeof sky.getNightFactor === 'function' ? sky.getNightFactor() : 0;
 
   if (inGame && isAlive && localState) {
     ensureLocalAirplane(localState.color ?? '#ff4444', localState.model ?? 'airplane');
@@ -507,6 +508,7 @@ function animate() {
     phi   = moved.phi;
     heading = moved.heading;
 
+    localAirplane.setNightFactor(nightFactor);
     localAirplane.update(
       theta,
       phi,
@@ -558,6 +560,7 @@ function animate() {
       if (!plane) continue;
       if (p.alive) {
         plane.mesh.visible = true;
+        plane.setNightFactor(nightFactor);
         plane.tickRemote(delta);
       } else {
         plane.mesh.visible = false;

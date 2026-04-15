@@ -197,6 +197,7 @@ export function createSky(scene, lights) {
   }
 
   let time = 0;
+  let lastNightFactor = 0;
 
   function update(delta) {
     time += delta * CYCLE_SPEED;
@@ -224,6 +225,7 @@ export function createSky(scene, lights) {
     if (lights?.rim)  lights.rim.intensity  = baseRim  * dayFactor;
 
     starsMat.opacity = THREE.MathUtils.lerp(cur.starOpacity, nxt.starOpacity, t);
+    lastNightFactor = starsMat.opacity;
 
     // Fog color segue il bordo del cielo per transizione fluida sull'orizzonte
     if (scene.fog) scene.fog.color.copy(skyUniforms.topColor.value);
@@ -235,5 +237,11 @@ export function createSky(scene, lights) {
     updateShootingStars(delta, starsMat.opacity);
   }
 
-  return { sky, stars, update };
+  return {
+    sky,
+    stars,
+    update,
+    /** 0..1: 0=giorno, 1=notte (derivato da opacità stelle) */
+    getNightFactor: () => lastNightFactor,
+  };
 }

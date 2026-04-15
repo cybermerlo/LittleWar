@@ -40,6 +40,28 @@ const _leftTipLocal = new THREE.Vector3(0, 0, -1.1);
 const _rightTipLocal = new THREE.Vector3(0, 0, 1.1);
 const _tipTemp = new THREE.Vector3();
 
+const NAVLIGHT_SPHERE_R = 0.06;
+const NAVLIGHT_Y_OFFSET = 0.03;
+const NAVLIGHT_POINT_DISTANCE = 0.55;
+const NAVLIGHT_POINT_DECAY = 2.0;
+const NAVLIGHT_POINT_INTENSITY = 2.4;
+const NAVLIGHT_BLINK_HZ = 0.55; // lampeggio lento
+
+function smooth01(x) {
+  return THREE.MathUtils.smoothstep(THREE.MathUtils.clamp(x, 0, 1), 0, 1);
+}
+
+function blinkGate(t) {
+  // onda quadra smussata: 0..1
+  const phase = (t * NAVLIGHT_BLINK_HZ) % 1;
+  // smussa i bordi per evitare "pop" duro con bloom/tonemapping
+  const edge = 0.08;
+  if (phase >= 0.5) return 0;
+  const up = THREE.MathUtils.smoothstep(phase, 0, edge);
+  const down = 1 - THREE.MathUtils.smoothstep(phase, 0.5 - edge, 0.5);
+  return up * down;
+}
+
 function createWingtipTrail() {
   const N = WINGTIP_TRAIL_LENGTH;
   const positions = new Float32Array(N * 3);
@@ -295,6 +317,27 @@ export class Airplane {
     this._netBoostAmount = 0;
     this._remoteNetReady = false;
 
+    // Luci alari (solo notte)
+    this._nightFactor = 0;
+    this._navTime = Math.random() * 10; // desincronizza leggermente tra player
+    this._navGeo = new THREE.SphereGeometry(NAVLIGHT_SPHERE_R, 10, 10);
+    this._navLeftMat = new THREE.MeshBasicMaterial({ color: 0xff3344, transparent: true, opacity: 0 });
+    this._navRightMat = new THREE.MeshBasicMaterial({ color: 0x33ff66, transparent: true, opacity: 0 });
+    this._navGroup = new THREE.Group();
+    this._navGroup.name = 'navLights';
+
+    this._navLeftMesh = new THREE.Mesh(this._navGeo, this._navLeftMat);
+    this._navRightMesh = new THREE.Mesh(this._navGeo, this._navRightMat);
+    this._navLeftMesh.renderOrder = 5;
+    this._navRightMesh.renderOrder = 5;
+    this._navLeftMesh.frustumCulled = false;
+    this._navRightMesh.frustumCulled = false;
+
+    this._navLeftLight = new THREE.PointLight(0xff3344, 0, NAVLIGHT_POINT_DISTANCE, NAVLIGHT_POINT_DECAY);
+    this._navRightLight = new THREE.PointLight(0x33ff66, 0, NAVLIGHT_POINT_DISTANCE, NAVLIGHT_POINT_DECAY);
+    this._navGroup.add(this._navLeftMesh, this._navRightMesh, this._navLeftLight, this._navRightLight);
+    this.mesh.add(this._navGroup);
+
     // Coda particellare turbo (world space): locale e remoti.
     this._boostPoints = null;
     this._boostGeometry = null;
@@ -400,6 +443,10 @@ export class Airplane {
     }
   }
 
+  setNightFactor(nightFactor) {
+    this._nightFactor = THREE.MathUtils.clamp(nightFactor ?? 0, 0, 1);
+  }
+
   update(theta, phi, heading, weaponLevel, hasShield, delta = 1 / 60, boostAmount = 0) {
     this.theta = theta;
     this.phi = phi;
@@ -446,6 +493,41 @@ export class Airplane {
 
     this._updateBoostParticles(delta, boostAmount);
     this._updateWingtipTrails();
+    this._updateNavLights(delta);
+  }
+
+  _updateNavLights(delta) {
+    if (!this._navGroup) return;
+
+    this._navTime += Math.max(0, delta);
+
+    // Fade-in durante crepuscolo; di giorno resta a 0.
+    const nightVis = smooth01((this._nightFactor - 0.55) / 0.25);
+    if (nightVis <= 0.001) {
+      this._navGroup.visible = false;
+      this._navLeftMat.opacity = 0;
+      this._navRightMat.opacity = 0;
+      this._navLeftLight.intensity = 0;
+      this._navRightLight.intensity = 0;
+      return;
+    }
+    this._navGroup.visible = true;
+
+    // Posiziona alle punte ali (coordinate locali già calcolate per fallback/GLB)
+    const left = this.mesh.userData.leftTipLocal ?? _leftTipLocal;
+    const right = this.mesh.userData.rightTipLocal ?? _rightTipLocal;
+    this._navLeftMesh.position.set(left.x, left.y + NAVLIGHT_Y_OFFSET, left.z);
+    this._navRightMesh.position.set(right.x, right.y + NAVLIGHT_Y_OFFSET, right.z);
+    this._navLeftLight.position.copy(this._navLeftMesh.position);
+    this._navRightLight.position.copy(this._navRightMesh.position);
+
+    const blink = blinkGate(this._navTime);
+    const intensity = nightVis * blink;
+
+    this._navLeftMat.opacity = intensity;
+    this._navRightMat.opacity = intensity;
+    this._navLeftLight.intensity = intensity * NAVLIGHT_POINT_INTENSITY;
+    this._navRightLight.intensity = intensity * NAVLIGHT_POINT_INTENSITY;
   }
 
   _updateBoostParticles(delta, boostAmount) {
@@ -552,6 +634,13 @@ export class Airplane {
     if (this._boostMaterial) this._boostMaterial.dispose();
     if (this._leftTrail) { this._scene.remove(this._leftTrail.line); this._leftTrail.geo.dispose(); this._leftTrail.mat.dispose(); }
     if (this._rightTrail) { this._scene.remove(this._rightTrail.line); this._rightTrail.geo.dispose(); this._rightTrail.mat.dispose(); }
+    if (this._navGroup) {
+      this.mesh.remove(this._navGroup);
+      this._navGroup = null;
+    }
+    if (this._navGeo) this._navGeo.dispose();
+    if (this._navLeftMat) this._navLeftMat.dispose();
+    if (this._navRightMat) this._navRightMat.dispose();
     scene.remove(this.mesh);
   }
 }
