@@ -13,9 +13,14 @@ const BUILDING_MODEL_URLS = [
   '/models/building-house.glb',
 ];
 
+const HOSPITAL_MODEL_URLS = [
+  '/models/hospital.glb',
+];
+
 /** Altezza tipica in unità mondo (pianeta raggio ~50), allineata agli alberi procedurali precedenti */
 const TREE_TEMPLATE_TARGET_SIZE = 1.65;
 const BUILDING_TEMPLATE_TARGET_SIZE = 3.2;
+const HOSPITAL_TEMPLATE_TARGET_SIZE = 4.0;
 
 /**
  * Micro-spostamento lungo la normale locale del piano d'appoggio (dopo il fit a 4 punti).
@@ -26,6 +31,7 @@ const BUILDING_HEIGHT_OFFSET = 0.7;
 const _treeLoader = new GLTFLoader();
 let _treeTemplatesPromise    = null;
 let _buildingTemplatesPromise = null;
+let _hospitalTemplatesPromise = null;
 
 const _raycaster = new THREE.Raycaster();
 const _rayOrigin = new THREE.Vector3();
@@ -160,6 +166,7 @@ function prepareTemplate(sourceScene, targetSize) {
 
 function prepareTreeTemplate(sourceScene)     { return prepareTemplate(sourceScene, TREE_TEMPLATE_TARGET_SIZE); }
 function prepareBuildingTemplate(sourceScene) { return prepareTemplate(sourceScene, BUILDING_TEMPLATE_TARGET_SIZE); }
+function prepareHospitalTemplate(sourceScene) { return prepareTemplate(sourceScene, HOSPITAL_TEMPLATE_TARGET_SIZE); }
 
 /**
  * Carica i modelli albero da /public/models. Risolve a un array di template pronti al clone;
@@ -190,6 +197,12 @@ export function loadBuildingTemplates() {
   if (!_buildingTemplatesPromise)
     _buildingTemplatesPromise = loadTemplates(BUILDING_MODEL_URLS, prepareBuildingTemplate);
   return _buildingTemplatesPromise;
+}
+
+export function loadHospitalTemplates() {
+  if (!_hospitalTemplatesPromise)
+    _hospitalTemplatesPromise = loadTemplates(HOSPITAL_MODEL_URLS, prepareHospitalTemplate);
+  return _hospitalTemplatesPromise;
 }
 
 // ── Albero procedurale (fallback se i GLB non caricano) ───────────────────────
@@ -268,12 +281,56 @@ function makeBuilding(buildingTemplates) {
   return makeProceduralBuilding();
 }
 
+function makeProceduralHospital() {
+  const group = new THREE.Group();
+
+  const base = new THREE.Mesh(
+    new THREE.BoxGeometry(1.8, 1.2, 1.4),
+    new THREE.MeshLambertMaterial({ color: 0xf2f2f2, flatShading: true }),
+  );
+  base.position.y = 0.6;
+
+  const roof = new THREE.Mesh(
+    new THREE.BoxGeometry(1.9, 0.18, 1.5),
+    new THREE.MeshLambertMaterial({ color: 0xd9d9d9, flatShading: true }),
+  );
+  roof.position.y = 1.26;
+
+  const sign = new THREE.Mesh(
+    new THREE.BoxGeometry(0.55, 0.55, 0.08),
+    new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }),
+  );
+  sign.position.set(0, 1.05, 0.75);
+
+  const crossMat = new THREE.MeshLambertMaterial({ color: 0xdd3333, flatShading: true });
+  const crossA = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.10, 0.02), crossMat);
+  const crossB = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.32, 0.02), crossMat);
+  crossA.position.set(0, 0, 0.05);
+  crossB.position.set(0, 0, 0.05);
+  sign.add(crossA, crossB);
+
+  group.add(base, roof, sign);
+  return group;
+}
+
+function makeHospital(hospitalTemplates) {
+  if (hospitalTemplates.length > 0) {
+    const template = hospitalTemplates[Math.floor(Math.random() * hospitalTemplates.length)];
+    const inst = template.clone(true);
+    const jitter = 0.92 + Math.random() * 0.22;
+    inst.scale.multiplyScalar(jitter);
+    return inst;
+  }
+  return makeProceduralHospital();
+}
+
 /**
  * @param {THREE.Mesh}         planetMesh         - mesh terreno per raycast agli angoli della base
  * @param {THREE.Object3D[]} [treeTemplates]     - risultato di loadTreeTemplates()
  * @param {THREE.Object3D[]} [buildingTemplates] - risultato di loadBuildingTemplates()
+ * @param {THREE.Object3D[]} [hospitalTemplates] - risultato di loadHospitalTemplates()
  */
-export function createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates = [], buildingTemplates = []) {
+export function createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates = [], buildingTemplates = [], hospitalTemplates = []) {
   const terrainGroup = new THREE.Group();
 
   const count = posAttr.count;
@@ -286,7 +343,9 @@ export function createTerrain(scene, heightData, posAttr, planetMesh, treeTempla
 
   let trees = 0, buildings = 0;
   const MAX_TREES = 180;
-  const MAX_BUILDINGS = 60;
+  const MAX_BUILDINGS = 80;
+  const MAX_HOSPITALS = 12;
+  let hospitals = 0;
 
   for (const i of indices) {
     const h = heightData[i];
@@ -300,14 +359,24 @@ export function createTerrain(scene, heightData, posAttr, planetMesh, treeTempla
       orientOnSphere(tree, pos);
       terrainGroup.add(tree);
       trees++;
-    } else if (buildings < MAX_BUILDINGS && h > 0.04 && h < 0.20) {
-      const building = makeBuilding(buildingTemplates);
-      placeBuildingBaseOnTerrain(building, pos, planetMesh, BUILDING_HEIGHT_OFFSET);
-      terrainGroup.add(building);
-      buildings++;
+    } else if ((buildings < MAX_BUILDINGS || hospitals < MAX_HOSPITALS) && h > 0.04 && h < 0.20) {
+      const canPlaceHospital = hospitals < MAX_HOSPITALS && buildings > 6;
+      const wantsHospital = canPlaceHospital && (Math.random() < 0.18) && (buildings < MAX_BUILDINGS);
+
+      if (wantsHospital) {
+        const hospital = makeHospital(hospitalTemplates);
+        placeBuildingBaseOnTerrain(hospital, pos, planetMesh, BUILDING_HEIGHT_OFFSET);
+        terrainGroup.add(hospital);
+        hospitals++;
+      } else if (buildings < MAX_BUILDINGS) {
+        const building = makeBuilding(buildingTemplates);
+        placeBuildingBaseOnTerrain(building, pos, planetMesh, BUILDING_HEIGHT_OFFSET);
+        terrainGroup.add(building);
+        buildings++;
+      }
     }
 
-    if (trees >= MAX_TREES && buildings >= MAX_BUILDINGS) break;
+    if (trees >= MAX_TREES && buildings >= MAX_BUILDINGS && hospitals >= MAX_HOSPITALS) break;
   }
 
   scene.add(terrainGroup);

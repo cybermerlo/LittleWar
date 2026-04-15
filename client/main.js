@@ -3,7 +3,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { createPlanet } from './scene/Planet.js';
-import { createTerrain, loadTreeTemplates, loadBuildingTemplates } from './scene/Terrain.js';
+import { createTerrain, loadTreeTemplates, loadBuildingTemplates, loadHospitalTemplates } from './scene/Terrain.js';
 import { createSky } from './scene/Sky.js';
 import { setupLighting } from './scene/Lighting.js';
 import { Airplane } from './entities/Airplane.js';
@@ -88,8 +88,8 @@ window.addEventListener('keydown', (e) => chat.handleKey(e));
 const lights = setupLighting(scene);
 const sky = createSky(scene, lights);
 const { mesh: planetMesh, heightData, posAttr } = createPlanet(scene);
-Promise.all([loadTreeTemplates(), loadBuildingTemplates()]).then(([treeTemplates, buildingTemplates]) => {
-  createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates, buildingTemplates);
+Promise.all([loadTreeTemplates(), loadBuildingTemplates(), loadHospitalTemplates()]).then(([treeTemplates, buildingTemplates, hospitalTemplates]) => {
+  createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates, buildingTemplates, hospitalTemplates);
 });
 
 // ── Stato gioco ───────────────────────────────────────────────────────────────
