@@ -10,6 +10,7 @@ import {
 } from '../../shared/constants.js';
 
 const _rollQuat = new THREE.Quaternion();
+const _bankOnlyQuat = new THREE.Quaternion();
 const _axisX = new THREE.Vector3(1, 0, 0);
 /** Smussatura posizione aerei remoti (1/s, verso lo stato rete). */
 const REMOTE_NET_SMOOTH = 14;
@@ -46,6 +47,7 @@ const NAVLIGHT_POINT_DISTANCE = 0.55;
 const NAVLIGHT_POINT_DECAY = 2.0;
 const NAVLIGHT_POINT_INTENSITY = 2.4;
 const NAVLIGHT_BLINK_HZ = 0.55; // lampeggio lento
+const SPIN_DURATION = 0.48;
 
 function smooth01(x) {
   return THREE.MathUtils.smoothstep(THREE.MathUtils.clamp(x, 0, 1), 0, 1);
@@ -306,6 +308,7 @@ export class Airplane {
     this._bankRoll = 0;
     this._lastHeading = undefined;
     this.sphereQuaternion = new THREE.Quaternion();
+    this.flightQuaternion = new THREE.Quaternion();
 
     this._targetPos = new THREE.Vector3(0, 1, 0);
     this._displayPos = new THREE.Vector3(0, 1, 0);
@@ -316,6 +319,9 @@ export class Airplane {
     /** Boost visivo remoto 0..1 (da game-state server). */
     this._netBoostAmount = 0;
     this._remoteNetReady = false;
+    this._spinDirection = 0;
+    this._spinProgress = 0;
+    this._spinRoll = 0;
 
     // Luci alari (solo notte)
     this._nightFactor = 0;
@@ -447,6 +453,34 @@ export class Airplane {
     this._nightFactor = THREE.MathUtils.clamp(nightFactor ?? 0, 0, 1);
   }
 
+  triggerSpin(direction = 1) {
+    const dir = direction >= 0 ? 1 : -1;
+    this._spinDirection = dir;
+    this._spinProgress = 0;
+    this._spinRoll = 0;
+  }
+
+  _updateSpin(delta) {
+    if (this._spinDirection === 0) return;
+    this._spinProgress = Math.min(1, this._spinProgress + delta / SPIN_DURATION);
+    // Ease-out: inizio rapido, chiusura morbida.
+    const t = 1 - Math.pow(1 - this._spinProgress, 3);
+    this._spinRoll = this._spinDirection * t * Math.PI * 2;
+    if (this._spinProgress >= 1) {
+      this._spinDirection = 0;
+      this._spinProgress = 0;
+      this._spinRoll = 0;
+    }
+  }
+
+  isSpinning() {
+    return this._spinDirection !== 0;
+  }
+
+  getSpinDirection() {
+    return this._spinDirection;
+  }
+
   update(theta, phi, heading, weaponLevel, hasShield, delta = 1 / 60, boostAmount = 0) {
     this.theta = theta;
     this.phi = phi;
@@ -472,10 +506,13 @@ export class Airplane {
     );
     const k = 1 - Math.exp(-BANK_SMOOTH * delta);
     this._bankRoll += (bankTarget - this._bankRoll) * k;
+    this._updateSpin(delta);
 
     this.sphereQuaternion.copy(q);
+    _bankOnlyQuat.setFromAxisAngle(_axisX, this._bankRoll);
+    this.flightQuaternion.copy(q).multiply(_bankOnlyQuat);
 
-    _rollQuat.setFromAxisAngle(_axisX, this._bankRoll);
+    _rollQuat.setFromAxisAngle(_axisX, this._bankRoll + this._spinRoll);
     this.mesh.quaternion.copy(q).multiply(_rollQuat);
 
     if (this.mesh.userData.shield) {

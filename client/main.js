@@ -149,6 +149,7 @@ const SHOOT_COOLDOWN = 200; // ms
 // Bomb cooldown
 let lastBombTime = 0;
 const BOMB_COOLDOWN = 1500; // ms
+const SPIN_TURN_BOOST_MULT = 1.35;
 
 // Boost locale
 let boostEnergy = BOOST_MAX;
@@ -494,10 +495,21 @@ function animate() {
     const speedMult = boostActive ? BOOST_SPEED_MULT : 1;
     const speed = baseSpeed * speedMult;
 
+    if (input.consumeLeftDoubleTap()) localAirplane.triggerSpin(-1);
+    if (input.consumeRightDoubleTap()) localAirplane.triggerSpin(1);
+
     // Input → aggiorna heading e posizione (tutto * delta)
     const turnSpeed = 1.8; // rad/s
-    if (input.isLeft())  heading -= turnSpeed * delta;
-    if (input.isRight()) heading += turnSpeed * delta;
+    const turnInput = (input.isRight() ? 1 : 0) - (input.isLeft() ? 1 : 0);
+    let turnDelta = turnInput * turnSpeed * delta;
+    if (
+      turnInput !== 0 &&
+      localAirplane.isSpinning() &&
+      Math.sign(turnInput) === localAirplane.getSpinDirection()
+    ) {
+      turnDelta *= SPIN_TURN_BOOST_MULT;
+    }
+    heading += turnDelta;
 
     // Movimento in avanti sempre attivo
     const movingForward = input.isForward();
@@ -522,7 +534,7 @@ function animate() {
       delta,
       boostActive ? (boostEnergy / BOOST_MAX) : 0,
     );
-    camCtrl.update(localAirplane.mesh, localAirplane.sphereQuaternion);
+    camCtrl.update(localAirplane.mesh, localAirplane.sphereQuaternion, localAirplane.flightQuaternion);
 
     // Invia input al server (throttled)
     if (now - lastInputSend >= CLIENT_INPUT_SEND_MS) {

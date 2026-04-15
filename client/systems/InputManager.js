@@ -3,6 +3,10 @@ export class InputManager {
     this.keys = {};
     this.mouseLeft  = false;
     this.mouseRight = false;
+    this.leftDoubleTap = false;
+    this.rightDoubleTap = false;
+    this._lastLeftTapAt = -Infinity;
+    this._lastRightTapAt = -Infinity;
     this._onMouseDown = this._onMouseDown.bind(this);
     this._onMouseUp   = this._onMouseUp.bind(this);
     this._onKeyDown   = this._onKeyDown.bind(this);
@@ -18,6 +22,17 @@ export class InputManager {
 
   _onKeyDown(e) {
     if (e.code === 'Space') e.preventDefault();
+    if (!e.repeat) {
+      const now = performance.now();
+      if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
+        if (now - this._lastLeftTapAt <= 260) this.leftDoubleTap = true;
+        this._lastLeftTapAt = now;
+      }
+      if (e.code === 'KeyD' || e.code === 'ArrowRight') {
+        if (now - this._lastRightTapAt <= 260) this.rightDoubleTap = true;
+        this._lastRightTapAt = now;
+      }
+    }
     this.keys[e.code] = true;
   }
   _onKeyUp(e)   { this.keys[e.code] = false; }
@@ -43,6 +58,16 @@ export class InputManager {
 
   consumeBomb() {
     if (this.mouseRight) { this.mouseRight = false; return true; }
+    return false;
+  }
+
+  consumeLeftDoubleTap() {
+    if (this.leftDoubleTap) { this.leftDoubleTap = false; return true; }
+    return false;
+  }
+
+  consumeRightDoubleTap() {
+    if (this.rightDoubleTap) { this.rightDoubleTap = false; return true; }
     return false;
   }
 
