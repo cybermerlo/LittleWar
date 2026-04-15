@@ -348,6 +348,20 @@ export class Game {
       phi: victim.phi,
       byTurret: isTurret,
     });
+    const killerLabel = killer?.nickname ?? 'Sconosciuto';
+    const sourceLabel = isTurret ? `${killerLabel} [Torretta]` : killerLabel;
+    this.emitKillFeedMessage(`${sourceLabel} ha abbattuto ${victim.nickname}`, {
+      kind: 'player-kill',
+      killer: {
+        nickname: killerLabel,
+        color: killer?.color ?? '#ffb86b',
+        byTurret: isTurret,
+      },
+      victim: {
+        nickname: victim.nickname ?? 'Sconosciuto',
+        color: victim.color ?? '#adc6ff',
+      },
+    });
 
     // Drop powerup
     if (Math.random() < POWERUP_DROP_CHANCE) {
@@ -415,6 +429,13 @@ export class Game {
       // Nuovo obiettivo condiviso — visibile a tutti
       this.target = new Target();
       this.io.emit('new-target', this.target.toState());
+      this.emitKillFeedMessage(`${player?.nickname ?? 'Sconosciuto'} ha distrutto l'obiettivo principale!`, {
+        kind: 'main-objective-destroyed',
+        actor: {
+          nickname: player?.nickname ?? 'Sconosciuto',
+          color: player?.color ?? '#ffb86b',
+        },
+      });
     }
   }
 
@@ -528,6 +549,18 @@ export class Game {
     const safeText = String(text ?? '').trim().slice(0, 120);
     if (!safeText) return;
     this.io.emit('chat-message', { nickname: player.nickname, color: player.color, text: safeText });
+  }
+
+  emitKillFeedMessage(text, meta = null) {
+    const safeText = String(text ?? '').trim().slice(0, 160);
+    if (!safeText) return;
+    this.io.emit('chat-message', {
+      nickname: 'KILL FEED',
+      color: '#ffb86b',
+      text: safeText,
+      variant: 'kill-feed',
+      meta,
+    });
   }
 
   spawnRandomPowerup() {

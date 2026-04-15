@@ -134,20 +134,33 @@ export class ChatManager {
 
   // ── Ricezione messaggi ─────────────────────────────────────────────────────
 
-  receive({ nickname, color, text }) {
+  receive({ nickname, color, text, variant, meta }) {
     this._onAudio();
 
     const entry = document.createElement('div');
     entry.className = 'chat-entry';
+    if (variant === 'kill-feed') {
+      entry.classList.add('chat-entry--killfeed');
+    }
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'chat-nick';
+    if (variant === 'kill-feed') {
+      nameSpan.classList.add('chat-nick--killfeed');
+    }
     nameSpan.style.color = color ?? '#adc6ff';
     nameSpan.textContent = nickname ?? '?';
 
     const textSpan = document.createElement('span');
     textSpan.className = 'chat-text';
-    textSpan.textContent = text;
+    if (variant === 'kill-feed') {
+      textSpan.classList.add('chat-text--killfeed');
+    }
+    if (variant === 'kill-feed') {
+      this._renderKillFeedText(textSpan, text, meta);
+    } else {
+      textSpan.textContent = text;
+    }
 
     entry.appendChild(nameSpan);
     entry.appendChild(textSpan);
@@ -161,5 +174,41 @@ export class ChatManager {
       entry.classList.remove('chat-entry--visible');
       entry.addEventListener('transitionend', () => entry.remove(), { once: true });
     }, 6000);
+  }
+
+  _renderKillFeedText(textSpan, fallbackText, meta) {
+    if (!meta || typeof meta !== 'object') {
+      textSpan.textContent = fallbackText;
+      return;
+    }
+
+    if (meta.kind === 'player-kill' && meta.killer && meta.victim) {
+      textSpan.appendChild(this._createPlayerNameSpan(meta.killer.nickname, meta.killer.color));
+      if (meta.killer.byTurret) {
+        const turretTag = document.createElement('span');
+        turretTag.className = 'chat-killfeed-tag';
+        turretTag.textContent = ' [Torretta]';
+        textSpan.appendChild(turretTag);
+      }
+      textSpan.appendChild(document.createTextNode(' ha abbattuto '));
+      textSpan.appendChild(this._createPlayerNameSpan(meta.victim.nickname, meta.victim.color));
+      return;
+    }
+
+    if (meta.kind === 'main-objective-destroyed' && meta.actor) {
+      textSpan.appendChild(this._createPlayerNameSpan(meta.actor.nickname, meta.actor.color));
+      textSpan.appendChild(document.createTextNode(" ha distrutto l'obiettivo principale!"));
+      return;
+    }
+
+    textSpan.textContent = fallbackText;
+  }
+
+  _createPlayerNameSpan(name, color) {
+    const span = document.createElement('span');
+    span.className = 'chat-killfeed-name';
+    span.style.color = color ?? '#ffb86b';
+    span.textContent = name ?? 'Sconosciuto';
+    return span;
   }
 }
