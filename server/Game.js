@@ -394,20 +394,24 @@ export class Game {
   // ── Bomba atterrata ───────────────────────────────────────────────────────
 
   bombLanded(bomb) {
-    // Controlla collisione con edifici conquistati (non propri)
+    // Edifici conquistati: reset se colpiti; kill solo se la torretta non è tua
     for (const building of this.buildings.values()) {
       if (!building.ownerId) continue;
       const dist = this.distanceSphere(bomb.theta, bomb.phi, building.theta, building.phi, PLANET_RADIUS);
       if (dist < BOMB_HIT_RADIUS) {
+        const turretOwnerId = building.ownerId;
         building.reset();
         const destroyer = this.getPlayerById(bomb.ownerId);
-        if (destroyer) destroyer.kills++;
+        const awardedKill = !!(destroyer && bomb.ownerId !== turretOwnerId);
+        if (awardedKill) destroyer.kills++;
         this.io.emit('building-destroyed', {
           buildingId: building.id,
           theta: building.theta,
           phi: building.phi,
           destroyerId: bomb.ownerId,
           destroyerNickname: destroyer?.nickname ?? null,
+          turretOwnerId,
+          awardedKill,
         });
       }
     }

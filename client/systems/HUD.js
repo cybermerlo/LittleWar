@@ -11,6 +11,7 @@ export class HUD {
       weapon:      document.getElementById('hud-weapon'),
       speed:       document.getElementById('hud-speed'),
       boost:       document.getElementById('hud-boost'),
+      boostFill:   document.getElementById('hud-boost-fill'),
       playerList:  document.getElementById('player-list'),
       arrow:       document.getElementById('target-arrow'),
       playerArrows: document.getElementById('player-arrows'),
@@ -59,6 +60,34 @@ export class HUD {
     }, 3200);
   }
 
+  /** Avviso quando distruggi la tua stessa torretta (nessun punto) */
+  showOwnTowerDestroyedNotice() {
+    const el = this.el.towerToast;
+    if (!el) return;
+    el.textContent = 'Hai distrutto la tua torretta — nessun punto';
+    el.classList.add('hud-toast--visible');
+    if (this._towerToastTimer) clearTimeout(this._towerToastTimer);
+    this._towerToastTimer = setTimeout(() => {
+      el.classList.remove('hud-toast--visible');
+      this._towerToastTimer = null;
+    }, 3200);
+  }
+
+  /** Avviso al proprietario quando un altro giocatore distrugge la sua torretta */
+  showMyTurretDestroyedNotice(destroyerNickname) {
+    const el = this.el.towerToast;
+    if (!el) return;
+    el.textContent = destroyerNickname
+      ? `La tua torretta è stata distrutta da ${destroyerNickname}!`
+      : 'La tua torretta è stata distrutta!';
+    el.classList.add('hud-toast--visible');
+    if (this._towerToastTimer) clearTimeout(this._towerToastTimer);
+    this._towerToastTimer = setTimeout(() => {
+      el.classList.remove('hud-toast--visible');
+      this._towerToastTimer = null;
+    }, 3200);
+  }
+
   /** Avviso quando la tua bomba colpisce il bersaglio bombardamento */
   showBombHitNotice() {
     const el = this.el.bombToast;
@@ -82,12 +111,30 @@ export class HUD {
     this.el.bombs.textContent  = `Bombe: ${localPlayer.bombPoints}`;
     this.el.weapon.textContent = `Arma: Lv.${wl}`;
     this.el.speed.textContent  = `Velocità: ${speedPct}%`;
-    const boostPct = Math.round(Math.max(0, Math.min(1, boostRatio)) * 100);
-    this.el.boost.textContent = `Boost: ${boostPct}%${boostPressed && boostPct > 0 ? ' ⚡' : ''}`;
+    const r = Math.max(0, Math.min(1, boostRatio));
+    const boostPct = Math.round(r * 100);
+    if (this.el.boostFill) {
+      this.el.boostFill.style.transform = `scaleX(${r})`;
+    }
+    const boostPill = this.el.boost;
+    if (boostPill) {
+      boostPill.classList.toggle('hud-boost--active', boostPressed && r > 0.01);
+      boostPill.classList.toggle('hud-boost--empty', r < 0.04);
+      boostPill.setAttribute('aria-valuenow', String(boostPct));
+    }
 
-    // Lista giocatori
-    this.el.playerList.innerHTML = allPlayers
-      .map(p => `<div class="player-entry" style="color:${p.color}">${p.nickname} — ${p.kills}</div>`)
+    // Lista giocatori: ordine per punteggio totale (kill + bombe), decrescente
+    const byScore = [...allPlayers].sort((a, b) => {
+      const sa = (a.kills || 0) + (a.bombPoints || 0);
+      const sb = (b.kills || 0) + (b.bombPoints || 0);
+      if (sb !== sa) return sb - sa;
+      return (a.nickname || '').localeCompare(b.nickname || '', undefined, { sensitivity: 'base' });
+    });
+    this.el.playerList.innerHTML = byScore
+      .map((p) => {
+        const pts = (p.kills || 0) + (p.bombPoints || 0);
+        return `<div class="player-entry" style="color:${p.color}">${p.nickname} — ${pts}</div>`;
+      })
       .join('');
 
     // Freccia obiettivo

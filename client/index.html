@@ -741,6 +741,69 @@
       letter-spacing: 0.02em;
     }
 
+    .hud-boost-pill {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.35rem;
+      min-width: 6.75rem;
+      padding: 0.4rem 0.9rem 0.48rem;
+    }
+
+    .hud-boost-label {
+      font-size: 0.65rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--lw-on-surface-variant);
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+
+    .hud-boost-pill.hud-boost--active .hud-boost-label::after {
+      content: '⚡';
+      font-size: 0.8rem;
+      line-height: 1;
+      filter: drop-shadow(0 0 4px rgba(34, 211, 238, 0.65));
+    }
+
+    .hud-boost-track {
+      height: 0.44rem;
+      border-radius: 9999px;
+      background: color-mix(in srgb, var(--lw-on-surface) 10%, transparent);
+      overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 14%, transparent);
+    }
+
+    .hud-boost-fill {
+      height: 100%;
+      width: 100%;
+      border-radius: inherit;
+      transform-origin: left center;
+      transform: scaleX(1);
+      background: linear-gradient(
+        90deg,
+        #06b6d4 0%,
+        #22d3ee 35%,
+        #38bdf8 65%,
+        #c084fc 100%
+      );
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    }
+
+    .hud-boost-pill.hud-boost--active .hud-boost-fill {
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        0 0 10px rgba(34, 211, 238, 0.55);
+      filter: brightness(1.12) saturate(1.15);
+    }
+
+    .hud-boost-pill.hud-boost--empty .hud-boost-fill {
+      opacity: 0.4;
+      filter: grayscale(0.35) brightness(0.85);
+    }
+
     #hud-bottom {
       position: absolute;
       bottom: 1rem;
@@ -1113,7 +1176,7 @@
       <div id="lobby-box">
         <div>
           <img class="lw-hero-logo" src="/littlewar-logo.png" alt="LittleWar" draggable="false" />
-          <p class="lw-hero-sub">Sali a bordo e Giacomo muore</p>
+          <p class="lw-hero-sub">Sali a bordo e Conquista la Spagna</p>
         </div>
 
         <div class="lw-fields">
@@ -1202,7 +1265,20 @@
     <div id="hud-bottom">
       <div class="hud-pill" id="hud-weapon">Arma: Lv.0</div>
       <div class="hud-pill" id="hud-speed">Velocità: 100%</div>
-      <div class="hud-pill" id="hud-boost">Boost: 100%</div>
+      <div
+        class="hud-pill hud-boost-pill"
+        id="hud-boost"
+        role="progressbar"
+        aria-label="Energia boost"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="100"
+      >
+        <span class="hud-boost-label">Boost</span>
+        <div class="hud-boost-track">
+          <div class="hud-boost-fill" id="hud-boost-fill"></div>
+        </div>
+      </div>
     </div>
     <div id="hud-players">
       <h3>Giocatori</h3>

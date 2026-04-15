@@ -417,11 +417,22 @@ const net = new NetworkManager({
     targetEntity = new TargetEntity(scene, target.theta, target.phi);
   },
 
-  onBuildingDestroyed({ buildingId, theta, phi, destroyerId }) {
+  onBuildingDestroyed({
+    buildingId,
+    theta,
+    phi,
+    destroyerId,
+    destroyerNickname,
+    turretOwnerId,
+    awardedKill = true,
+  }) {
     spawnTurretDestruction(scene, theta, phi);
     AudioManager.playBomb();
     if (destroyerId === localPlayerId) {
-      hud.showTowerDestroyedNotice();
+      if (awardedKill) hud.showTowerDestroyedNotice();
+      else hud.showOwnTowerDestroyedNotice();
+    } else if (turretOwnerId === localPlayerId) {
+      hud.showMyTurretDestroyedNotice(destroyerNickname);
     }
   },
 
