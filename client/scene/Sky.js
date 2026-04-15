@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FLY_ALTITUDE } from '../../shared/constants.js';
 
 /**
  * Velocità del ciclo giorno/notte.
@@ -59,7 +60,7 @@ const skyStates = [
  * @param {THREE.Scene} scene
  * @param {{ambient:THREE.Light, sun:THREE.Light, fill?:THREE.Light, rim?:THREE.Light}} lights
  *        Restituite da `setupLighting(scene)` — necessarie per il ciclo giorno/notte.
- * @returns {{sky:THREE.Mesh, stars:THREE.Points, update:(delta:number)=>void}}
+ * @returns {{sky:THREE.Mesh, stars:THREE.Points, cloudRoot:THREE.Group, update:(delta:number)=>void}}
  */
 export function createSky(scene, lights) {
   // Il cielo shader copre tutta la vista: niente scene.background.
@@ -111,6 +112,62 @@ export function createSky(scene, lights) {
   stars.frustumCulled = false;
   stars.renderOrder = -1;
   scene.add(stars);
+
+  // ── Nuvole low-poly (poco sopra il raggio di volo, così restano “basse”) ───
+  const CLOUD_SHELL_R = FLY_ALTITUDE + 12;
+  const puffGeo = new THREE.SphereGeometry(1, 7, 5);
+  const cloudMat = new THREE.MeshBasicMaterial({
+    color: 0xeef2fb,
+    transparent: true,
+    opacity: 0.48,
+    depthWrite: false,
+    fog: true,
+  });
+  const cloudTintScratch = new THREE.Color();
+  const cloudRoot = new THREE.Group();
+  cloudRoot.frustumCulled = false;
+  cloudRoot.renderOrder = 0;
+
+  const _cloudNormal = new THREE.Vector3();
+  const _qAlignCloud = new THREE.Quaternion();
+  const _qSpinCloud = new THREE.Quaternion();
+
+  function addCumulusCloud(parent) {
+    const group = new THREE.Group();
+    const phi = Math.acos(2 * Math.random() - 1);
+    const theta = Math.random() * Math.PI * 2;
+    const sinP = Math.sin(phi);
+    group.position.set(
+      CLOUD_SHELL_R * sinP * Math.cos(theta),
+      CLOUD_SHELL_R * Math.cos(phi),
+      CLOUD_SHELL_R * sinP * Math.sin(theta)
+    );
+    // Asse locale +Y = normale uscente dal pianeta → nuvola “sdraiata” sul tangente
+    _cloudNormal.copy(group.position).normalize();
+    _qAlignCloud.setFromUnitVectors(new THREE.Vector3(0, 1, 0), _cloudNormal);
+    _qSpinCloud.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI * 2);
+    group.quaternion.copy(_qAlignCloud).multiply(_qSpinCloud);
+
+    const blobs = 3 + Math.floor(Math.random() * 3);
+    for (let b = 0; b < blobs; b++) {
+      const mesh = new THREE.Mesh(puffGeo, cloudMat);
+      mesh.position.set(
+        (Math.random() - 0.5) * 3.2,
+        (Math.random() - 0.5) * 0.75,
+        (Math.random() - 0.5) * 3.2
+      );
+      const sWide = 2.4 + Math.random() * 4.2;
+      const sThin = sWide * (0.28 + Math.random() * 0.16);
+      const sWideB = sWide * (0.75 + Math.random() * 0.35);
+      mesh.scale.set(sWideB, sThin, sWide);
+      group.add(mesh);
+    }
+    parent.add(group);
+  }
+
+  const cloudCount = 12;
+  for (let c = 0; c < cloudCount; c++) addCumulusCloud(cloudRoot);
+  scene.add(cloudRoot);
 
   // Intensità base di fill/rim per poterle scalare col "giorno"
   const baseFill = lights?.fill?.intensity ?? 0;
@@ -234,12 +291,25 @@ export function createSky(scene, lights) {
     stars.rotation.y += 0.012 * delta;
     stars.rotation.x += 0.006 * delta;
 
+    // Nuvole: tint verso il cielo, quasi invisibili quando le stelle sono al massimo
+    // Stessa “notte” delle stelle (0=giorno, 1=notte): nuvole spariscono in morbida
+    const nf = starsMat.opacity;
+    // smoothstep(x, min, max): 0 se x<=min, 1 se x>=max — x deve essere nf
+    const cloudNightFade = 1.0 - THREE.MathUtils.smoothstep(nf, 0.2, 0.9);
+    cloudMat.opacity = 0.52 * cloudNightFade;
+    cloudTintScratch.set(0xf0f5ff).lerp(skyUniforms.topColor.value, 0.2 + nf * 0.14);
+    cloudMat.color.copy(cloudTintScratch);
+
+    cloudRoot.rotation.y += 0.005 * delta;
+    cloudRoot.rotation.x += 0.0025 * delta;
+
     updateShootingStars(delta, starsMat.opacity);
   }
 
   return {
     sky,
     stars,
+    cloudRoot,
     update,
     /** 0..1: 0=giorno, 1=notte (derivato da opacità stelle) */
     getNightFactor: () => lastNightFactor,
