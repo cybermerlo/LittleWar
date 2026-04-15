@@ -35,12 +35,12 @@ const _right = new THREE.Vector3(0, 0, 1);
 const _up = new THREE.Vector3(0, 1, 0);
 
 // Wingtip vortex trails
-const WINGTIP_TRAIL_LENGTH = 48;
+const WINGTIP_TRAIL_LENGTH = 32;
 const _leftTipLocal = new THREE.Vector3(0, 0, -1.1);
 const _rightTipLocal = new THREE.Vector3(0, 0, 1.1);
 const _tipTemp = new THREE.Vector3();
 
-const NAVLIGHT_SPHERE_R = 0.06;
+const NAVLIGHT_SPHERE_R = 0.045;
 const NAVLIGHT_Y_OFFSET = 0.03;
 const NAVLIGHT_POINT_DISTANCE = 0.55;
 const NAVLIGHT_POINT_DECAY = 2.0;

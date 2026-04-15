@@ -6,6 +6,7 @@ import { Building, generateBuildings } from './Building.js';
 import { moveOnSphere } from '../shared/movement.js';
 import {
   MAX_PLAYERS,
+  PLAYER_COLORS,
   TICK_INTERVAL,
   WEAPON_CONFIGS,
   MAX_WEAPON_LEVEL,
@@ -35,6 +36,7 @@ import {
 
 const TICK_DT = TICK_INTERVAL / 1000; // secondi per tick
 const VALID_MODELS = new Set(['spitfire']);
+const VALID_PLAYER_COLORS = new Set(PLAYER_COLORS);
 const TAU = Math.PI * 2;
 
 function wrapAngle01(a) {
@@ -83,6 +85,11 @@ export class Game {
   addPlayer(socket, nickname, color, model) {
     if (this.players.size >= MAX_PLAYERS) {
       socket.emit('server-full');
+      return;
+    }
+
+    if (!VALID_PLAYER_COLORS.has(color)) {
+      socket.emit('color-taken', { takenColors: this.getTakenColors(), invalidColor: true });
       return;
     }
 

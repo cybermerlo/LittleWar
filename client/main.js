@@ -188,9 +188,13 @@ const net = new NetworkManager({
     lobby.setOnlineCount(online, MAX_PLAYERS);
   },
 
-  onColorTaken({ takenColors }) {
+  onColorTaken({ takenColors, invalidColor }) {
     lobby.setTakenColors(takenColors);
-    lobby.setMessage('Quel colore è già in uso! Scegline un altro.');
+    lobby.setMessage(
+      invalidColor
+        ? 'Scegli uno dei colori della lista.'
+        : 'Quel colore è già in uso! Scegline un altro.',
+    );
   },
 
   onJoined({ playerId, players, powerups, target, buildings }) {

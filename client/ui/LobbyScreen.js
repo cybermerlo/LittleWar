@@ -1,7 +1,4 @@
-const COLORS = [
-  '#e74c3c', '#3498db', '#2ecc71', '#f1c40f',
-  '#9b59b6', '#ffffff', '#e67e22', '#1abc9c',
-];
+import { PLAYER_COLORS } from '../../shared/constants.js';
 
 const MODELS = [
   { id: 'spitfire', label: 'Spitfire' },
@@ -10,7 +7,7 @@ const MODELS = [
 export class LobbyScreen {
   constructor(onPlay) {
     this.onPlay = onPlay;
-    this.selectedColor = COLORS[0];
+    this.selectedColor = PLAYER_COLORS[0];
     this.selectedModel = MODELS[0].id;
 
     this._lobbyEl   = document.getElementById('lobby');
@@ -27,7 +24,7 @@ export class LobbyScreen {
   }
 
   _buildColorPicker() {
-    COLORS.forEach((c, i) => {
+    PLAYER_COLORS.forEach((c, i) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'color-btn' + (i === 0 ? ' selected' : '');
