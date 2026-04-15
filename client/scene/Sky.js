@@ -38,6 +38,118 @@ const skyFragmentShader = /* glsl */ `
   }
 `;
 
+/** Nebulose / polvere galattica dietro alle stelle (solo notte, blending additivo). */
+const nebulaVertexShader = /* glsl */ `
+  varying vec3 vWorldDir;
+  void main() {
+    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+    vWorldDir = normalize(worldPosition.xyz);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const nebulaFragmentShader = /* glsl */ `
+  uniform float uOpacity;
+  uniform float uTime;
+  uniform vec3 uGalaxyPole;
+  varying vec3 vWorldDir;
+
+  float hash13(vec3 p3) {
+    p3 = fract(p3 * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+  }
+
+  float vnoise(vec3 x) {
+    vec3 i = floor(x);
+    vec3 f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    float n = i.x + i.y * 57.0 + 113.0 * i.z;
+    return mix(
+      mix(mix(hash13(vec3(n + 0.0)), hash13(vec3(n + 1.0)), f.x),
+          mix(hash13(vec3(n + 57.0)), hash13(vec3(n + 58.0)), f.x), f.y),
+      mix(mix(hash13(vec3(n + 113.0)), hash13(vec3(n + 114.0)), f.x),
+          mix(hash13(vec3(n + 170.0)), hash13(vec3(n + 171.0)), f.x), f.y),
+      f.z);
+  }
+
+  float fbm(vec3 p) {
+    float v = 0.0;
+    float a = 0.55;
+    vec3 shift = vec3(100.0, 31.0, 67.0);
+    for (int i = 0; i < 4; i++) {
+      v += a * vnoise(p);
+      p = p * 2.12 + shift;
+      a *= 0.5;
+    }
+    return v;
+  }
+
+  void main() {
+    vec3 d = normalize(vWorldDir);
+    float galLat = abs(dot(d, uGalaxyPole));
+    float band = smoothstep(0.92, 0.35, galLat);
+    vec3 drift = d * 1.7 + vec3(0.11, 0.07, 0.13) * uTime;
+    float n1 = fbm(drift);
+    float n2 = fbm(drift.yzx * 1.4 + 2.1);
+    float n3 = fbm(d * 3.3 + uTime * 0.02);
+    float clouds = pow(n1 * 0.55 + n2 * 0.35 + n3 * 0.25, 1.35);
+    float veil = pow(max(0.0, fbm(d * 1.1 + uTime * 0.015)), 2.2) * 0.65;
+
+    vec3 deep = vec3(0.08, 0.04, 0.22);
+    vec3 dustCyan = vec3(0.12, 0.42, 0.55);
+    vec3 dustRose = vec3(0.42, 0.15, 0.32);
+    vec3 core = vec3(0.55, 0.38, 0.72);
+    float hue = fract(n2 * 0.37 + n3 * 0.21);
+    vec3 col = mix(deep, dustCyan, smoothstep(0.15, 0.75, n1));
+    col = mix(col, dustRose, smoothstep(0.35, 0.9, n2) * 0.55);
+    col = mix(col, core, smoothstep(0.5, 0.95, n3) * 0.4);
+    col += vec3(0.15, 0.12, 0.22) * hue * 0.35;
+
+    float intensity = (clouds * 0.85 + veil * 0.45) * band;
+    intensity = smoothstep(0.08, 1.0, intensity) * 0.55;
+    vec3 outRgb = col * intensity * uOpacity;
+    gl_FragColor = vec4(outRgb, 1.0);
+  }
+`;
+
+const starsVertexShader = /* glsl */ `
+  attribute vec3 starColor;
+  attribute float starSize;
+  varying vec3 vStarColor;
+  varying float vTwinkle;
+  uniform float uTime;
+
+  void main() {
+    vStarColor = starColor;
+    float id = abs(position.x * 0.13 + position.y * 0.37 + position.z * 0.21);
+    vTwinkle = sin(uTime * (2.0 + fract(id) * 3.0) + id * 6.28) * 0.5 + 0.5;
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    float dist = max(10.0, -mvPosition.z);
+    gl_PointSize = starSize * (280.0 / dist);
+    gl_PointSize = clamp(gl_PointSize, 1.2, 18.0);
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+const starsFragmentShader = /* glsl */ `
+  varying vec3 vStarColor;
+  varying float vTwinkle;
+  uniform float uOpacity;
+
+  void main() {
+    vec2 c = gl_PointCoord - vec2(0.5);
+    float r = length(c);
+    if (r > 0.52) discard;
+    float core = 1.0 - smoothstep(0.0, 0.22, r);
+    float halo = 1.0 - smoothstep(0.12, 0.5, r);
+    float glow = mix(0.75, 1.15, vTwinkle);
+    vec3 rgb = vStarColor * glow * (core * 1.15 + halo * 0.35);
+    float a = (core * 0.95 + halo * 0.45) * uOpacity;
+    gl_FragColor = vec4(rgb, a);
+  }
+`;
+
 // top = bordi schermo, bottom = epicentro luminoso dietro al pianeta
 const skyStates = [
   // 1. Giorno Alieno (viola scuro ai bordi, ottanio neon al centro)
@@ -85,10 +197,41 @@ export function createSky(scene, lights) {
   sky.renderOrder = -1;
   scene.add(sky);
 
-  // ── Campo stellare uniforme sulla sfera ──────────────────────────────────
-  const starsCount = 1500;
+  // ── Nebulosa / via lattea stilizzata (sfera dietro alle stelle) ───────────
+  const nebulaGeo = new THREE.SphereGeometry(368, 40, 40);
+  const galaxyPole = new THREE.Vector3(0.22, 0.91, 0.12).normalize();
+  const nebulaUniforms = {
+    uOpacity: { value: 0 },
+    uTime: { value: 0 },
+    uGalaxyPole: { value: galaxyPole.clone() },
+  };
+  const nebulaMat = new THREE.ShaderMaterial({
+    vertexShader: nebulaVertexShader,
+    fragmentShader: nebulaFragmentShader,
+    uniforms: nebulaUniforms,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.BackSide,
+    fog: false,
+  });
+  const nebula = new THREE.Mesh(nebulaGeo, nebulaMat);
+  nebula.frustumCulled = false;
+  nebula.renderOrder = -1;
+  scene.add(nebula);
+
+  // ── Campo stellare: colori e dimensioni variabili + twinkle in shader ─────
+  const starsCount = 1800;
   const starPos = new Float32Array(starsCount * 3);
+  const starColors = new Float32Array(starsCount * 3);
+  const starSizes = new Float32Array(starsCount);
   const starRadius = 360;
+  const _c = new THREE.Color();
+  const starPalette = [
+    0xffffff, 0xe8f4ff, 0xd4e8ff, 0xfff8f0, 0xffeedd,
+    0xaaccff, 0x88ddff, 0xffcc88, 0xffaa99, 0xdd99ff,
+    0xaaeecc, 0xffb6c8, 0x9fb7ff, 0x7fdfff,
+  ];
   for (let i = 0; i < starsCount; i++) {
     const theta = 2 * Math.PI * Math.random();
     const phi = Math.acos(2 * Math.random() - 1);
@@ -96,14 +239,35 @@ export function createSky(scene, lights) {
     starPos[j]     = starRadius * Math.sin(phi) * Math.cos(theta);
     starPos[j + 1] = starRadius * Math.cos(phi);
     starPos[j + 2] = starRadius * Math.sin(phi) * Math.sin(theta);
+    const roll = Math.random();
+    let hex;
+    if (roll < 0.58) hex = starPalette[Math.floor(Math.random() * 4)];
+    else if (roll < 0.88) hex = starPalette[4 + Math.floor(Math.random() * 6)];
+    else hex = starPalette[10 + Math.floor(Math.random() * 4)];
+    _c.setHex(hex);
+    const sat = 0.88 + Math.random() * 0.12;
+    _c.multiplyScalar(sat);
+    starColors[j]     = _c.r;
+    starColors[j + 1] = _c.g;
+    starColors[j + 2] = _c.b;
+    const sRoll = Math.random();
+    if (sRoll < 0.72) starSizes[i] = 1.0 + Math.random() * 1.35;
+    else if (sRoll < 0.94) starSizes[i] = 2.2 + Math.random() * 1.8;
+    else starSizes[i] = 4.0 + Math.random() * 2.5;
   }
   const starsGeo = new THREE.BufferGeometry();
   starsGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-  const starsMat = new THREE.PointsMaterial({
-    size: 1.4,
-    color: 0xffffff,
+  starsGeo.setAttribute('starColor', new THREE.BufferAttribute(starColors, 3));
+  starsGeo.setAttribute('starSize', new THREE.BufferAttribute(starSizes, 1));
+  const starUniforms = {
+    uOpacity: { value: 0 },
+    uTime: { value: 0 },
+  };
+  const starsMat = new THREE.ShaderMaterial({
+    vertexShader: starsVertexShader,
+    fragmentShader: starsFragmentShader,
+    uniforms: starUniforms,
     transparent: true,
-    opacity: 0,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     fog: false,
@@ -201,8 +365,9 @@ export function createSky(scene, lights) {
     const duration    = 0.9 + Math.random() * 0.6;
 
     const geo = new THREE.BufferGeometry().setFromPoints([start.clone(), start.clone()]);
+    const trailHue = [0xffffff, 0xcceeff, 0xaaffff, 0xffe8f8, 0xeeccff][Math.floor(Math.random() * 5)];
     const mat = new THREE.LineBasicMaterial({
-      color: 0xffffff,
+      color: trailHue,
       transparent: true,
       opacity: 0,
       blending: THREE.AdditiveBlending,
@@ -281,8 +446,14 @@ export function createSky(scene, lights) {
     if (lights?.fill) lights.fill.intensity = baseFill * dayFactor;
     if (lights?.rim)  lights.rim.intensity  = baseRim  * dayFactor;
 
-    starsMat.opacity = THREE.MathUtils.lerp(cur.starOpacity, nxt.starOpacity, t);
-    lastNightFactor = starsMat.opacity;
+    const fieldOpacity = THREE.MathUtils.lerp(cur.starOpacity, nxt.starOpacity, t);
+    starUniforms.uOpacity.value = fieldOpacity;
+    lastNightFactor = fieldOpacity;
+    // Soglie alte: la nebulosa sale solo in tarda sera / notte piena
+    nebulaUniforms.uOpacity.value = THREE.MathUtils.smoothstep(fieldOpacity, 0.78, 1.0) * 0.95;
+
+    starUniforms.uTime.value += delta;
+    nebulaUniforms.uTime.value += delta * 0.4;
 
     // Fog color segue il bordo del cielo per transizione fluida sull'orizzonte
     if (scene.fog) scene.fog.color.copy(skyUniforms.topColor.value);
@@ -290,10 +461,12 @@ export function createSky(scene, lights) {
     // Lenta rotazione della volta stellata (frame-rate independent)
     stars.rotation.y += 0.012 * delta;
     stars.rotation.x += 0.006 * delta;
+    nebula.rotation.y += 0.0055 * delta;
+    nebula.rotation.x -= 0.003 * delta;
 
     // Nuvole: tint verso il cielo, quasi invisibili quando le stelle sono al massimo
     // Stessa “notte” delle stelle (0=giorno, 1=notte): nuvole spariscono in morbida
-    const nf = starsMat.opacity;
+    const nf = fieldOpacity;
     // smoothstep(x, min, max): 0 se x<=min, 1 se x>=max — x deve essere nf
     const cloudNightFade = 1.0 - THREE.MathUtils.smoothstep(nf, 0.2, 0.9);
     cloudMat.opacity = 0.52 * cloudNightFade;
@@ -303,7 +476,7 @@ export function createSky(scene, lights) {
     cloudRoot.rotation.y += 0.005 * delta;
     cloudRoot.rotation.x += 0.0025 * delta;
 
-    updateShootingStars(delta, starsMat.opacity);
+    updateShootingStars(delta, fieldOpacity);
   }
 
   return {
