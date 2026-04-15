@@ -1,55 +1,158 @@
 import * as THREE from 'three';
 
-function createPastelSkyGradientTexture() {
-  const w = 4;
-  const h = 512;
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  const grd = ctx.createLinearGradient(0, 0, 0, h);
-  // Gradiente cartoon/pastello con azzurro piu' pieno, evitando il bianco in basso.
-  grd.addColorStop(0.0, '#428fcd');
-  grd.addColorStop(0.2, '#5fa8dc');
-  grd.addColorStop(0.46, '#7ec0e7');
-  grd.addColorStop(0.7, '#9bd2ef');
-  grd.addColorStop(0.9, '#b6e0f5');
-  grd.addColorStop(1.0, '#c4e6f8');
-  ctx.fillStyle = grd;
-  ctx.fillRect(0, 0, w, h);
+/**
+ * Velocità del ciclo giorno/notte.
+ * Unità: "transizioni di stato al secondo". Con 5 stati in skyStates:
+ *  - 0.015 → ciclo completo ~5:30 min
+ *  - 0.03  → ciclo completo ~2:45 min  (default)
+ *  - 0.06  → ciclo completo ~1:20 min
+ *  - 0.09  → ciclo completo ~55 sec    (frenetico)
+ * Modifica questo valore per regolare la velocità del cielo/luci/stelle.
+ */
+const CYCLE_SPEED = 0.03;
 
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.minFilter = THREE.LinearFilter;
-  tex.magFilter = THREE.LinearFilter;
-  tex.generateMipmaps = false;
-  return tex;
-}
+const skyVertexShader = /* glsl */ `
+  varying vec3 vWorldPosition;
+  void main() {
+    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+    vWorldPosition = worldPosition.xyz;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const skyFragmentShader = /* glsl */ `
+  uniform vec3 topColor;    // bordi esterni schermo
+  uniform vec3 bottomColor; // epicentro (dietro al pianeta)
+  varying vec3 vWorldPosition;
+
+  void main() {
+    vec3 viewDir = normalize(vWorldPosition - cameraPosition);
+    vec3 centerDir = normalize(-cameraPosition); // direzione verso (0,0,0) dove c'è il pianeta
+    float dotProduct = dot(viewDir, centerDir);
+    float angle = acos(clamp(dotProduct, -1.0, 1.0));
+    // regola l'ampiezza del gradiente: valori più alti = transizione più larga e visibile
+    float mixFactor = clamp(angle / 1.8, 0.0, 1.0);
+    mixFactor = smoothstep(0.0, 1.0, mixFactor);
+    gl_FragColor = vec4(mix(bottomColor, topColor, mixFactor), 1.0);
+  }
+`;
+
+// top = bordi schermo, bottom = epicentro luminoso dietro al pianeta
+const skyStates = [
+  // 1. Giorno Alieno (viola scuro ai bordi, ottanio neon al centro)
+  { top: new THREE.Color(0x2b0f4c), bottom: new THREE.Color(0x00f2fe), lightInt: 1.2, ambInt: 0.6, starOpacity: 0.2 },
+  // 2. Tramonto Synthwave (magenta ai bordi, arancio al centro)
+  { top: new THREE.Color(0xd500f9), bottom: new THREE.Color(0xff9100), lightInt: 1.0, ambInt: 0.5, starOpacity: 0.4 },
+  // 3. Crepuscolo Scarlatto (cremisi ai bordi, rosso al centro)
+  { top: new THREE.Color(0x5d001e), bottom: new THREE.Color(0xff1744), lightInt: 0.6, ambInt: 0.3, starOpacity: 0.8 },
+  // 4. Notte Abissale (blu cosmico ai bordi, smeraldo oscuro al centro)
+  { top: new THREE.Color(0x050514), bottom: new THREE.Color(0x00332a), lightInt: 0.1, ambInt: 0.2, starOpacity: 1.0 },
+  // 5. Alba Eterea (indaco ai bordi, menta tenue al centro)
+  { top: new THREE.Color(0x1a237e), bottom: new THREE.Color(0x64ffda), lightInt: 0.8, ambInt: 0.4, starOpacity: 0.5 },
+];
 
 /**
- * Cielo a cupola con gradiente pastello (texture + materiale base, compatibile WebGL2).
- * `scene.background` evita buchi neri se la cupola non copre un pixel.
+ * Cielo con gradiente radiale dinamico + campo stellare.
+ * Il ciclo passa tra `skyStates` interpolando top/bottom color, intensità luci
+ * (ambient/sun, con fill/rim scalati proporzionalmente), opacità stelle e fog.
+ *
+ * @param {THREE.Scene} scene
+ * @param {{ambient:THREE.Light, sun:THREE.Light, fill?:THREE.Light, rim?:THREE.Light}} lights
+ *        Restituite da `setupLighting(scene)` — necessarie per il ciclo giorno/notte.
+ * @returns {{sky:THREE.Mesh, stars:THREE.Points, update:(delta:number)=>void}}
  */
-export function createSky(scene) {
-  scene.background = new THREE.Color(0x96cfee);
+export function createSky(scene, lights) {
+  // Il cielo shader copre tutta la vista: niente scene.background.
+  scene.background = null;
 
-  const geo = new THREE.SphereGeometry(400, 48, 32);
-  geo.scale(-1, 1, 1);
+  const skyUniforms = {
+    topColor:    { value: skyStates[0].top.clone() },
+    bottomColor: { value: skyStates[0].bottom.clone() },
+  };
 
-  const map = createPastelSkyGradientTexture();
-  const mat = new THREE.MeshBasicMaterial({
-    map,
+  const skyGeo = new THREE.SphereGeometry(400, 32, 32);
+  const skyMat = new THREE.ShaderMaterial({
+    vertexShader: skyVertexShader,
+    fragmentShader: skyFragmentShader,
+    uniforms: skyUniforms,
     side: THREE.BackSide,
     depthWrite: false,
-    depthTest: true,
     fog: false,
-    toneMapped: false,
   });
-
-  const sky = new THREE.Mesh(geo, mat);
+  const sky = new THREE.Mesh(skyGeo, skyMat);
   sky.frustumCulled = false;
   sky.renderOrder = -1;
   scene.add(sky);
 
-  return { sky, map };
+  // ── Campo stellare uniforme sulla sfera ──────────────────────────────────
+  const starsCount = 1500;
+  const starPos = new Float32Array(starsCount * 3);
+  const starRadius = 360;
+  for (let i = 0; i < starsCount; i++) {
+    const theta = 2 * Math.PI * Math.random();
+    const phi = Math.acos(2 * Math.random() - 1);
+    const j = i * 3;
+    starPos[j]     = starRadius * Math.sin(phi) * Math.cos(theta);
+    starPos[j + 1] = starRadius * Math.cos(phi);
+    starPos[j + 2] = starRadius * Math.sin(phi) * Math.sin(theta);
+  }
+  const starsGeo = new THREE.BufferGeometry();
+  starsGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+  const starsMat = new THREE.PointsMaterial({
+    size: 1.4,
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    fog: false,
+  });
+  const stars = new THREE.Points(starsGeo, starsMat);
+  stars.frustumCulled = false;
+  stars.renderOrder = -1;
+  scene.add(stars);
+
+  // Intensità base di fill/rim per poterle scalare col "giorno"
+  const baseFill = lights?.fill?.intensity ?? 0;
+  const baseRim  = lights?.rim?.intensity  ?? 0;
+  const maxLightInt = skyStates.reduce((m, s) => Math.max(m, s.lightInt), 0);
+
+  let time = 0;
+
+  function update(delta) {
+    time += delta * CYCLE_SPEED;
+    const total = skyStates.length;
+    const phase = ((time % total) + total) % total;
+    const idx = Math.floor(phase);
+    const next = (idx + 1) % total;
+    let t = phase - idx;
+    t = THREE.MathUtils.smoothstep(t, 0, 1);
+
+    const cur = skyStates[idx];
+    const nxt = skyStates[next];
+
+    skyUniforms.topColor.value.lerpColors(cur.top, nxt.top, t);
+    skyUniforms.bottomColor.value.lerpColors(cur.bottom, nxt.bottom, t);
+
+    const sunInt = THREE.MathUtils.lerp(cur.lightInt, nxt.lightInt, t);
+    const ambInt = THREE.MathUtils.lerp(cur.ambInt,   nxt.ambInt,   t);
+    if (lights?.sun)     lights.sun.intensity     = sunInt;
+    if (lights?.ambient) lights.ambient.intensity = ambInt;
+
+    // Scala fill/rim proporzionalmente al sole per coerenza visiva
+    const dayFactor = sunInt / maxLightInt;
+    if (lights?.fill) lights.fill.intensity = baseFill * dayFactor;
+    if (lights?.rim)  lights.rim.intensity  = baseRim  * dayFactor;
+
+    starsMat.opacity = THREE.MathUtils.lerp(cur.starOpacity, nxt.starOpacity, t);
+
+    // Fog color segue il bordo del cielo per transizione fluida sull'orizzonte
+    if (scene.fog) scene.fog.color.copy(skyUniforms.topColor.value);
+
+    // Lenta rotazione della volta stellata (frame-rate independent)
+    stars.rotation.y += 0.012 * delta;
+    stars.rotation.x += 0.006 * delta;
+  }
+
+  return { sky, stars, update };
 }

@@ -85,8 +85,8 @@ window.addEventListener('keydown', (e) => chat.handleKey(e));
 
 // ── Costruzione mondo ─────────────────────────────────────────────────────────
 
-createSky(scene);
-setupLighting(scene);
+const lights = setupLighting(scene);
+const sky = createSky(scene, lights);
 const { mesh: planetMesh, heightData, posAttr } = createPlanet(scene);
 Promise.all([loadTreeTemplates(), loadBuildingTemplates()]).then(([treeTemplates, buildingTemplates]) => {
   createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates, buildingTemplates);
@@ -469,6 +469,8 @@ function animate() {
   requestAnimationFrame(animate);
   const delta = clock.getDelta();
   const now = performance.now();
+
+  sky.update(delta);
 
   if (inGame && isAlive && localState) {
     ensureLocalAirplane(localState.color ?? '#ff4444', localState.model ?? 'airplane');
