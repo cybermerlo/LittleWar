@@ -17,15 +17,12 @@ const _modelLoader = new GLTFLoader();
 const _modelTemplateCache = new Map();
 
 const MODEL_PATHS = {
-  airplane: '/models/biplane_classic.glb',
-  spaceship: '/models/biplane.glb',
+  spitfire: '/models/spitfire.glb',
 };
 
 const MODEL_VISUAL_CONFIG = {
-  // biplane_classic: naso verso +Z → yaw = +π/2; colore giocatore solo su PlaneBody
-  airplane: { yaw: Math.PI / 2, size: 2.2, tintMaterials: ['PlaneBody'], propSpeed: 8.0 },
-  // Corsair biplane: naso verso -Z → yaw = -π/2; colore giocatore solo su "blue"
-  spaceship: { yaw: -Math.PI / 2, size: 2.2, tintMaterials: ['blue'], propSpeed: 4.5 },
+  // spitfire: naso verso -Z → yaw = -π/2; colore giocatore solo su "blue"
+  spitfire: { yaw: -Math.PI / 2, size: 2.2, tintMaterials: ['blue'], propSpeed: 4.5 },
 };
 const BOOST_PARTICLE_COUNT = 84;
 const BOOST_PARTICLE_SPAWN_RATE = 180; // particelle/s a boost pieno
@@ -36,6 +33,30 @@ const _forward = new THREE.Vector3(1, 0, 0);
 const _backward = new THREE.Vector3();
 const _right = new THREE.Vector3(0, 0, 1);
 const _up = new THREE.Vector3(0, 1, 0);
+
+// Wingtip vortex trails
+const WINGTIP_TRAIL_LENGTH = 48;
+const _leftTipLocal = new THREE.Vector3(0, 0, -1.1);
+const _rightTipLocal = new THREE.Vector3(0, 0, 1.1);
+const _tipTemp = new THREE.Vector3();
+
+function createWingtipTrail() {
+  const N = WINGTIP_TRAIL_LENGTH;
+  const positions = new Float32Array(N * 3);
+  const colors = new Float32Array(N * 3);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const mat = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const line = new THREE.Line(geo, mat);
+  line.frustumCulled = false;
+  line.renderOrder = 3;
+  return { line, geo, mat, positions, colors, initialized: false };
+}
 
 function wrapAngle(a) {
   let x = a;
@@ -68,7 +89,7 @@ function buildFallbackAirplaneMesh(color) {
 }
 
 function getModelTemplate(modelName) {
-  const safeModelName = MODEL_PATHS[modelName] ? modelName : 'airplane';
+  const safeModelName = MODEL_PATHS[modelName] ? modelName : 'spitfire';
   if (_modelTemplateCache.has(safeModelName)) {
     return _modelTemplateCache.get(safeModelName);
   }
@@ -147,6 +168,9 @@ function buildAirplaneMesh(color, modelName) {
 
   group.userData.shield = shieldMesh;
   group.userData.fallbackMesh = fallbackMesh;
+  // Posizioni punte ali di default (fallback mesh: BoxGeometry wings a (-0.1, 0, ±1.1))
+  group.userData.leftTipLocal = new THREE.Vector3(-0.1, 0, -1.1);
+  group.userData.rightTipLocal = new THREE.Vector3(-0.1, 0, 1.1);
 
   getModelTemplate(modelName).then((template) => {
     if (!template || group.userData.disposed) return;
@@ -156,6 +180,18 @@ function buildAirplaneMesh(color, modelName) {
     tintModel(model, color, cfg.tintMaterials ?? null);
     fitModelToSize(model, modelName);
 
+    // Calcola le punte ali PRIMA di aggiungere il modello al gruppo,
+    // così setFromObject usa solo la matrice locale del modello (scale/rot/pos da fitModelToSize)
+    // e non include la posizione world del gruppo (aereo già posizionato sulla sfera).
+    model.updateMatrixWorld(true);
+    const bbox = new THREE.Box3().setFromObject(model);
+    const midX = (bbox.min.x + bbox.max.x) / 2;
+    const midY = (bbox.min.y + bbox.max.y) / 2;
+    group.userData.leftTipLocal = new THREE.Vector3(midX, midY, bbox.min.z);
+    group.userData.rightTipLocal = new THREE.Vector3(midX, midY, bbox.max.z);
+    if (group.userData.leftTrailRef) group.userData.leftTrailRef.initialized = false;
+    if (group.userData.rightTrailRef) group.userData.rightTrailRef.initialized = false;
+
     if (group.userData.fallbackMesh) {
       group.remove(group.userData.fallbackMesh);
       group.userData.fallbackMesh = null;
@@ -163,7 +199,7 @@ function buildAirplaneMesh(color, modelName) {
     group.add(model);
     group.userData.visualModel = model;
 
-    // Configura AnimationMixer per le animazioni del modello (es. elica biplane)
+    // Configura AnimationMixer per le animazioni del modello (es. elica spitfire)
     if (template.animations && template.animations.length > 0) {
       const mixer = new THREE.AnimationMixer(model);
       group.userData.mixer = mixer;
@@ -276,6 +312,15 @@ export class Airplane {
     this._boostLife = ps.life;
     this._boostVel = new Float32Array(BOOST_PARTICLE_COUNT * 3);
     scene.add(this._boostPoints);
+
+    // Wingtip vortex trails
+    this._leftTrail = createWingtipTrail();
+    this._rightTrail = createWingtipTrail();
+    scene.add(this._leftTrail.line);
+    scene.add(this._rightTrail.line);
+    // Espone i trail al callback asincrono del loader per resettarli al caricamento del modello
+    this.mesh.userData.leftTrailRef = this._leftTrail;
+    this.mesh.userData.rightTrailRef = this._rightTrail;
   }
 
   /**
@@ -337,13 +382,21 @@ export class Airplane {
     );
   }
 
-  /** Nasconde le particelle turbo (oggetto separato dalla mesh; es. giocatore morto). */
+  /** Nasconde le particelle turbo e le wingtip trails (oggetti separati dalla mesh; es. giocatore morto). */
   setBoostParticlesVisible(visible) {
     if (!this._boostPoints) return;
     this._boostPoints.visible = visible;
     if (!visible && this._boostLife) {
       for (let i = 0; i < BOOST_PARTICLE_COUNT; i++) this._boostLife[i] = 0;
       this._boostSpawnAcc = 0;
+    }
+    if (this._leftTrail) {
+      this._leftTrail.line.visible = visible;
+      if (!visible) this._leftTrail.initialized = false;
+    }
+    if (this._rightTrail) {
+      this._rightTrail.line.visible = visible;
+      if (!visible) this._rightTrail.initialized = false;
     }
   }
 
@@ -382,7 +435,7 @@ export class Airplane {
       this.mesh.userData.shield.visible = hasShield;
     }
 
-    // Aggiorna AnimationMixer (elica biplane e altri modelli animati)
+    // Aggiorna AnimationMixer (elica spitfire e altri modelli animati)
     if (this.mesh.userData.mixer) {
       this.mesh.userData.mixer.update(delta);
       if (this.mesh.userData.propellerAction) {
@@ -392,6 +445,7 @@ export class Airplane {
     }
 
     this._updateBoostParticles(delta, boostAmount);
+    this._updateWingtipTrails();
   }
 
   _updateBoostParticles(delta, boostAmount) {
@@ -447,12 +501,57 @@ export class Airplane {
     lifeAttr.needsUpdate = true;
   }
 
+  _updateWingtipTrails() {
+    this.mesh.updateMatrixWorld(true);
+    this._updateSingleTrail(this._leftTrail, this.mesh.userData.leftTipLocal);
+    this._updateSingleTrail(this._rightTrail, this.mesh.userData.rightTipLocal);
+  }
+
+  _updateSingleTrail(trail, localPos) {
+    const N = WINGTIP_TRAIL_LENGTH;
+    const { positions, colors, geo } = trail;
+
+    _tipTemp.copy(localPos).applyMatrix4(this.mesh.matrixWorld);
+
+    if (!trail.initialized) {
+      for (let i = 0; i < N; i++) {
+        positions[i * 3] = _tipTemp.x;
+        positions[i * 3 + 1] = _tipTemp.y;
+        positions[i * 3 + 2] = _tipTemp.z;
+      }
+      trail.initialized = true;
+    } else {
+      for (let i = N - 1; i > 0; i--) {
+        positions[i * 3] = positions[(i - 1) * 3];
+        positions[i * 3 + 1] = positions[(i - 1) * 3 + 1];
+        positions[i * 3 + 2] = positions[(i - 1) * 3 + 2];
+      }
+      positions[0] = _tipTemp.x;
+      positions[1] = _tipTemp.y;
+      positions[2] = _tipTemp.z;
+    }
+
+    // Quadratic fade: bianco vicino all'ala, invisibile in coda
+    for (let i = 0; i < N; i++) {
+      const t = 1 - i / (N - 1);
+      const b = t * t * 0.55;
+      colors[i * 3] = b;
+      colors[i * 3 + 1] = b;
+      colors[i * 3 + 2] = b;
+    }
+
+    geo.getAttribute('position').needsUpdate = true;
+    geo.getAttribute('color').needsUpdate = true;
+  }
+
   dispose(scene) {
     this.mesh.userData.disposed = true;
     if (this.mesh.userData.mixer) this.mesh.userData.mixer.stopAllAction();
     if (this._boostPoints) this._scene.remove(this._boostPoints);
     if (this._boostGeometry) this._boostGeometry.dispose();
     if (this._boostMaterial) this._boostMaterial.dispose();
+    if (this._leftTrail) { this._scene.remove(this._leftTrail.line); this._leftTrail.geo.dispose(); this._leftTrail.mat.dispose(); }
+    if (this._rightTrail) { this._scene.remove(this._rightTrail.line); this._rightTrail.geo.dispose(); this._rightTrail.mat.dispose(); }
     scene.remove(this.mesh);
   }
 }

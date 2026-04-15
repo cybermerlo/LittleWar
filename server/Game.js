@@ -34,7 +34,7 @@ import {
 } from '../shared/constants.js';
 
 const TICK_DT = TICK_INTERVAL / 1000; // secondi per tick
-const VALID_MODELS = new Set(['airplane', 'spaceship']);
+const VALID_MODELS = new Set(['spitfire']);
 const TAU = Math.PI * 2;
 
 function wrapAngle01(a) {

@@ -4,8 +4,7 @@ const COLORS = [
 ];
 
 const MODELS = [
-  { id: 'airplane', label: 'Airplane' },
-  { id: 'spaceship', label: 'Biplane' },
+  { id: 'spitfire', label: 'Spitfire' },
 ];
 
 export class LobbyScreen {
