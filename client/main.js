@@ -135,9 +135,15 @@ let   targetEntity       = null;
 let   currentTarget      = null;
 let   allPlayerStates    = [];
 
-// Powerup: posizioni note (da game-state) + IDs già inviati al server come try-collect
-const powerupPositions = new Map(); // powerupId → {theta, phi}
-const triedPowerups    = new Set(); // IDs per cui abbiamo già inviato try-collect
+// Powerup: posizioni note (da game-state) + timestamp ultimo try-collect per ID.
+// Non marchiamo più i powerup come "tentati una volta" — se la prima richiesta
+// viene persa (packet drop con polling, disconnect transiente, player morto per
+// un istante sul server) i retry garantiscono che la collection venga confermata
+// appena possibile. Il server è idempotente (`if (!pu) return`) quindi retry
+// multipli sono sicuri.
+const powerupPositions   = new Map(); // powerupId → {theta, phi}
+const powerupLastTryAt   = new Map(); // powerupId → ms dell'ultimo try-collect inviato
+const TRY_COLLECT_RETRY_MS = 300;     // ~3 retry/s finché in range e powerup presente
 
 // Throttle invio input (allineato al tick server)
 let lastInputSend = 0;
@@ -215,7 +221,7 @@ const net = new NetworkManager({
 
     // Powerup già presenti
     powerupPositions.clear();
-    triedPowerups.clear();
+    powerupLastTryAt.clear();
     powerups.forEach(pu => {
       const id = powerupKey(pu.id);
       const e = new PowerUpEntity(scene, id, pu.type, pu.theta, pu.phi);
@@ -340,7 +346,7 @@ const net = new NetworkManager({
         e.dispose(scene);
         powerupEntities.delete(id);
         powerupPositions.delete(id);
-        triedPowerups.delete(id);
+        powerupLastTryAt.delete(id);
       }
     }
     state.powerups.forEach(p => {
@@ -399,7 +405,7 @@ const net = new NetworkManager({
     const id = powerupKey(powerupId);
     removePowerupEntity(scene, powerupId);
     powerupPositions.delete(id);
-    triedPowerups.delete(id);
+    powerupLastTryAt.delete(id);
     if (playerId === localPlayerId) AudioManager.playPowerup();
   },
 
@@ -541,12 +547,18 @@ function animate() {
     // Con WebSocket il server lo rileva già via arc-check; con polling la posizione
     // predetta diverge e il server manca la collisione. Il client, che conosce la
     // posizione esatta, avvisa il server con try-collect.
+    //
+    // IMPORTANTE: riproviamo ogni TRY_COLLECT_RETRY_MS finché siamo in range e il
+    // powerup esiste ancora. Una singola richiesta può perdersi (packet drop con
+    // polling, disconnect transiente) oppure essere rifiutata temporaneamente
+    // (es. giocatore morto per un istante sul server). Il retry garantisce che
+    // appena le condizioni sono valide la collection venga confermata.
     for (const [id, pos] of powerupPositions) {
-      if (triedPowerups.has(id)) continue;
-      if (sphereDist(theta, phi, pos.theta, pos.phi, FLY_ALTITUDE) < POWERUP_COLLECT_RADIUS) {
-        net.sendTryCollect(id);
-        triedPowerups.add(id);
-      }
+      if (sphereDist(theta, phi, pos.theta, pos.phi, FLY_ALTITUDE) >= POWERUP_COLLECT_RADIUS) continue;
+      const last = powerupLastTryAt.get(id) ?? 0;
+      if (now - last < TRY_COLLECT_RETRY_MS) continue;
+      net.sendTryCollect(id);
+      powerupLastTryAt.set(id, now);
     }
   }
 
