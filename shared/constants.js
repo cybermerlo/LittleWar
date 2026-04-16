@@ -1,6 +1,20 @@
 export const PLANET_RADIUS = 50;
 export const FLY_ALTITUDE = 56;       // altitudine volo sopra la superficie
 export const MAX_PLAYERS = 10;
+
+/** Colori selezionabili in lobby (uno per slot giocatore; stessa cardinalità di MAX_PLAYERS). */
+export const PLAYER_COLORS = [
+  '#e53935', // rosso
+  '#1e88e5', // blu
+  '#43a047', // verde
+  '#fdd835', // giallo
+  '#8e24aa', // viola
+  '#fb8c00', // arancione
+  '#00acc1', // ciano
+  '#d81b60', // magenta
+  '#3949ab', // indaco
+  '#6d4c41', // marrone
+];
 export const TICK_RATE = 40;          // Hz server broadcast / simulazione
 export const TICK_INTERVAL = 1000 / TICK_RATE;
 /** Allinea l’invio input al tick server (evita ritardo extra tra client e broadcast). */

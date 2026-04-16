@@ -41,16 +41,18 @@ export class CameraController {
   /**
    * @param {THREE.Object3D} airplaneMesh
    * @param {THREE.Quaternion} [sphereQuaternion] orientamento senza banking (per mescolare il roll sulla camera)
+   * @param {THREE.Quaternion} [flightQuaternion] orientamento con banking ma senza spin
    */
-  update(airplaneMesh, sphereQuaternion) {
+  update(airplaneMesh, sphereQuaternion, flightQuaternion) {
     if (!airplaneMesh) return;
+    const followQuat = flightQuaternion ?? sphereQuaternion ?? airplaneMesh.quaternion;
 
     // ── 1. Posizione target ──────────────────────────────────────────────────
     // L'offset nel sistema locale dell'aereo è (-BACK, UP, 0):
     // -X perché il naso è +X, +Y perché "su" è Y locale.
     const upOffset = CAMERA_UP * (this._cameraBack / CAMERA_BACK);
     _offset.set(-this._cameraBack, upOffset, 0);
-    _offset.applyQuaternion(airplaneMesh.quaternion); // → world space
+    _offset.applyQuaternion(followQuat); // → world space
     _targetPos.copy(airplaneMesh.position).add(_offset);
 
     if (isNaN(_targetPos.x)) return;
@@ -66,8 +68,8 @@ export class CameraController {
     // ── 2. Orientamento camera ───────────────────────────────────────────────
     // Up della lookAt: mix tra "su" senza rollio (stabile sulla sfera) e "su"
     // con banking, così la camera sente l'inclinazione in virata ma resta più leggibile.
-    _upSphere.set(0, 1, 0).applyQuaternion(sphereQuaternion ?? airplaneMesh.quaternion);
-    _upFull.set(0, 1, 0).applyQuaternion(airplaneMesh.quaternion);
+    _upSphere.set(0, 1, 0).applyQuaternion(sphereQuaternion ?? followQuat);
+    _upFull.set(0, 1, 0).applyQuaternion(followQuat);
     _worldUp.lerpVectors(_upSphere, _upFull, CAMERA_BANK_FOLLOW).normalize();
 
     // Punto di mira = centro dell'aereo

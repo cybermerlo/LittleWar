@@ -64,16 +64,9 @@
       inset: 0;
       z-index: 100;
       display: flex;
-      flex-direction: column;
+      align-items: stretch;
+      justify-content: center;
       overflow: hidden;
-      height: 100vh;
-      height: 100dvh;
-      max-height: 100dvh;
-      box-sizing: border-box;
-      padding-top: env(safe-area-inset-top, 0px);
-      padding-right: env(safe-area-inset-right, 0px);
-      padding-bottom: env(safe-area-inset-bottom, 0px);
-      padding-left: env(safe-area-inset-left, 0px);
     }
 
     .lw-lobby-bg {
@@ -93,22 +86,17 @@
     .lw-lobby-orb {
       position: absolute;
       border-radius: 50%;
-      opacity: 1;
     }
 
     .lw-lobby-orb--1 {
-      bottom: -5rem;
-      left: -5rem;
-      width: 600px;
-      height: 600px;
-      background: color-mix(in srgb, var(--lw-primary) 5%, transparent);
+      bottom: -5rem; left: -5rem;
+      width: 600px; height: 600px;
+      background: color-mix(in srgb, var(--lw-primary) 6%, transparent);
     }
 
     .lw-lobby-orb--2 {
-      top: 25%;
-      right: -10rem;
-      width: 800px;
-      height: 800px;
+      top: 20%; right: -8rem;
+      width: 700px; height: 700px;
       background: color-mix(in srgb, var(--lw-secondary-fixed-dim) 5%, transparent);
     }
 
@@ -118,126 +106,183 @@
       pointer-events: none;
     }
 
-    .lw-lobby-star--1 { top: 5rem; left: 25%; width: 8px; height: 8px; background: #fff; opacity: 0.4; animation: lw-pulse 2s ease-in-out infinite; }
-    .lw-lobby-star--2 { top: 10rem; right: 33%; width: 12px; height: 12px; background: #ffdf9e; opacity: 0.6; }
-    .lw-lobby-star--3 { bottom: 28%; left: 2.5rem; width: 8px; height: 8px; background: var(--lw-primary); opacity: 0.3; }
-    .lw-lobby-star--4 { top: 50%; right: 2.5rem; width: 8px; height: 8px; background: var(--lw-tertiary); opacity: 0.4; animation: lw-pulse 2.5s ease-in-out infinite; }
+    .lw-lobby-star--1 { top: 5rem;  left: 22%;  width: 8px;  height: 8px;  background: #fff;                    opacity: 0.4; animation: lw-pulse 2s ease-in-out infinite; }
+    .lw-lobby-star--2 { top: 12rem; right: 30%; width: 12px; height: 12px; background: #ffdf9e;                  opacity: 0.55; }
+    .lw-lobby-star--3 { bottom: 30%; left: 3rem; width: 8px; height: 8px;  background: var(--lw-primary);       opacity: 0.3; }
+    .lw-lobby-star--4 { top: 55%;  right: 3rem; width: 8px;  height: 8px;  background: var(--lw-tertiary);      opacity: 0.4; animation: lw-pulse 2.5s ease-in-out infinite; }
 
     @keyframes lw-pulse {
-      0%, 100% { opacity: 0.25; transform: scale(1); }
-      50% { opacity: 0.55; transform: scale(1.05); }
+      0%, 100% { opacity: 0.2; transform: scale(1); }
+      50%       { opacity: 0.6; transform: scale(1.1); }
     }
 
-    .lw-lobby-header {
+    /* ── Two-column content layout ─────────────────── */
+    .lw-lobby-content {
       position: relative;
       z-index: 2;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 0.85rem 1.25rem 0.65rem;
-      flex-shrink: 0;
-    }
-
-    .lw-brand {
-      font-family: 'Plus Jakarta Sans', sans-serif;
-      font-size: clamp(1.35rem, 3.5vw, 1.55rem);
-      font-weight: 800;
-      font-style: italic;
-      letter-spacing: -0.03em;
-      color: var(--lw-title-blue);
-      text-shadow: 0 0 20px rgba(173, 198, 255, 0.35);
-    }
-
-    .lw-brand-logo {
-      width: clamp(2.4rem, 6vw, 3.25rem);
-      height: auto;
-      display: block;
-      filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.35));
-      user-select: none;
-    }
-
-    .lw-lobby-main {
-      position: relative;
-      z-index: 1;
-      flex: 1 1 0;
-      display: flex;
-      align-items: flex-start;
-      justify-content: center;
-      padding: 0.35rem 1rem 0.65rem;
-      min-height: 0;
-      overflow-y: auto;
-      overscroll-behavior: contain;
-      scrollbar-width: none;
-    }
-
-    .lw-lobby-main::-webkit-scrollbar {
-      display: none;
-    }
-
-    @supports (align-items: safe center) {
-      .lw-lobby-main {
-        align-items: safe center;
-      }
-    }
-
-    #lobby-box {
+      display: grid;
+      grid-template-columns: 1fr 390px;
+      gap: 2.75rem;
+      max-width: 1080px;
       width: 100%;
-      max-width: 36rem;
-      overflow: visible;
-      background: color-mix(in srgb, var(--lw-surface-container-low) 80%, transparent);
-      backdrop-filter: blur(24px);
-      -webkit-backdrop-filter: blur(24px);
-      border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 15%, transparent);
-      border-radius: 1rem;
-      padding: 1.35rem 1.5rem 1.1rem;
-      text-align: center;
-      color: var(--lw-on-surface);
-      box-shadow: 0 40px 80px rgba(0, 0, 0, 0.5);
+      padding: 2rem 3rem;
+      align-items: stretch;
+      box-sizing: border-box;
+    }
+
+    /* ── Left column ── */
+    .lw-lobby-left {
       display: flex;
       flex-direction: column;
-      align-items: stretch;
-      gap: 0.95rem;
-      flex: 0 1 auto;
+      gap: 1.5rem;
+      padding: 1.5rem 0;
+      overflow: hidden;
+      min-height: 0;
     }
 
-    #lobby-box .lw-hero-title {
-      font-family: 'Plus Jakarta Sans', sans-serif;
-      font-weight: 900;
-      font-style: italic;
-      font-size: clamp(1.85rem, 5.5vw, 3rem);
-      letter-spacing: -0.04em;
-      line-height: 1.05;
-      color: var(--lw-title-blue);
-      filter: drop-shadow(0 10px 10px rgba(75, 142, 255, 0.3));
-      margin: 0;
-      padding-top: 0.2rem;
+    .lw-brand-area {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
     }
 
-    #lobby-box .lw-hero-logo {
-      width: min(18rem, 70vw);
+    .lw-hero-logo {
+      width: clamp(120px, 14vw, 190px);
       height: auto;
       display: block;
-      margin: 0 auto;
-      max-height: 22vh;
-      object-fit: contain;
-      filter: drop-shadow(0 16px 22px rgba(0, 0, 0, 0.35));
+      filter: drop-shadow(0 16px 32px rgba(0, 0, 0, 0.55));
       user-select: none;
     }
 
-    #lobby-box .lw-hero-sub {
+    .lw-hero-sub {
       font-family: 'Plus Jakarta Sans', sans-serif;
       font-weight: 700;
-      font-size: clamp(0.72rem, 1.8vw, 0.95rem);
+      font-size: clamp(0.7rem, 1.2vw, 0.88rem);
       color: var(--lw-primary);
       text-transform: uppercase;
-      letter-spacing: 0.12em;
-      margin: 0.2rem 0 0;
+      letter-spacing: 0.15em;
     }
 
-    #lobby-box .lw-fields {
+    /* ── How to play (left panel) ── */
+    .lw-how-to-play {
+      flex: 1 1 0;
+      min-height: 0;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in srgb, var(--lw-outline-variant) 30%, transparent) transparent;
+      background: color-mix(in srgb, var(--lw-surface-container-highest) 40%, transparent);
+      border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 28%, transparent);
+      border-radius: 0.85rem;
+      padding: 1rem 1.2rem;
+      font-size: 0.74rem;
+      color: var(--lw-on-surface-variant);
+      line-height: 1.45;
+    }
+
+    .lw-how-to-play strong {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 0.6rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--lw-primary);
+      display: block;
+      margin-bottom: 0.65rem;
+    }
+
+    .lw-how-columns {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.7rem 1.5rem;
+      align-items: start;
+    }
+
+    .lw-controls-grid {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.18rem 0.6rem;
+      align-items: center;
+    }
+
+    .lw-how-tips {
+      list-style: none;
+      margin: 0;
+      padding: 0;
       display: flex;
       flex-direction: column;
-      gap: 0.85rem;
+      gap: 0.45rem;
+    }
+
+    .lw-how-tips li {
+      display: grid;
+      grid-template-columns: 1.1rem 1fr;
+      gap: 0 0.45rem;
+      align-items: start;
+    }
+
+    .lw-how-tip-icon {
+      font-size: 0.85rem;
+      line-height: 1.4;
+      text-align: center;
+    }
+
+    .lw-how-tip-text {
+      font-size: inherit;
+      line-height: 1.4;
+    }
+
+    .lw-how-tip-text strong {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-weight: 700;
+      font-size: 0.64rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--lw-on-surface);
+      display: block;
+      margin-bottom: 0.04rem;
+    }
+
+    .lw-key {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 0.63rem;
+      font-weight: 700;
+      background: color-mix(in srgb, var(--lw-surface-container-highest) 90%, var(--lw-primary));
+      border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 40%, transparent);
+      border-radius: 0.3rem;
+      padding: 0.06rem 0.42rem;
+      color: var(--lw-on-surface);
+      white-space: nowrap;
+      justify-self: start;
+      align-self: center;
+    }
+
+    .lw-credits {
+      font-size: 0.6rem;
+      color: color-mix(in srgb, var(--lw-on-surface-variant) 40%, transparent);
+      letter-spacing: 0.01em;
+      line-height: 1.3;
+    }
+
+    /* ── Right column: form card ── */
+    #lobby-box {
+      align-self: center;
+      background: color-mix(in srgb, var(--lw-surface-container-low) 82%, transparent);
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 15%, transparent);
+      border-radius: 1.35rem;
+      padding: 1.85rem 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.05rem;
+      box-shadow: 0 48px 96px rgba(0, 0, 0, 0.55);
+      color: var(--lw-on-surface);
+    }
+
+    .lw-fields {
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
       text-align: left;
     }
 
@@ -245,11 +290,11 @@
       display: block;
       font-family: 'Plus Jakarta Sans', sans-serif;
       font-weight: 700;
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       text-transform: uppercase;
       letter-spacing: 0.15em;
       color: var(--lw-on-surface-variant);
-      margin: 0 0 0.5rem 0.5rem;
+      margin: 0 0 0.45rem 0.45rem;
     }
 
     .lw-input-wrap {
@@ -258,7 +303,7 @@
 
     #lobby-box input[type="text"] {
       width: 100%;
-      padding: 0.7rem 2.75rem 0.7rem 1.1rem;
+      padding: 0.72rem 2.75rem 0.72rem 1.1rem;
       border-radius: 0.85rem;
       border: none;
       background: var(--lw-surface-container-highest);
@@ -271,7 +316,7 @@
     }
 
     #lobby-box input[type="text"]::placeholder {
-      color: color-mix(in srgb, var(--lw-on-surface-variant) 40%, transparent);
+      color: color-mix(in srgb, var(--lw-on-surface-variant) 38%, transparent);
     }
 
     #lobby-box input[type="text"]:focus {
@@ -284,16 +329,19 @@
       top: 50%;
       transform: translateY(-50%);
       color: var(--lw-primary);
-      opacity: 0.45;
+      opacity: 0.4;
       pointer-events: none;
-      font-size: 1.35rem;
+      font-size: 1.3rem;
     }
 
     #color-options {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 0.75rem;
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 0.4rem 0.35rem;
+      width: 100%;
+      max-width: 100%;
+      box-sizing: border-box;
+      justify-items: center;
     }
 
     #model-options {
@@ -308,7 +356,7 @@
       background: color-mix(in srgb, var(--lw-surface-container-highest) 85%, transparent);
       color: var(--lw-on-surface);
       border-radius: 9999px;
-      padding: 0.55rem 1rem;
+      padding: 0.5rem 1.05rem;
       font-family: 'Plus Jakarta Sans', sans-serif;
       font-weight: 700;
       font-size: 0.85rem;
@@ -328,27 +376,23 @@
     }
 
     .color-btn {
-      width: 2.5rem;
-      height: 2.5rem;
+      width: min(2.05rem, 100%);
+      aspect-ratio: 1;
+      height: auto;
+      max-width: 100%;
       border-radius: 9999px;
       border: none;
       cursor: pointer;
-      box-shadow: 0 0 0 4px var(--lw-surface-container-low);
-      outline: 4px solid transparent;
-      outline-offset: 4px;
+      box-sizing: border-box;
+      box-shadow: 0 0 0 2px var(--lw-surface-container-low);
+      outline: 2px solid transparent;
+      outline-offset: 2px;
       transition: transform 0.12s ease, outline-color 0.2s ease;
     }
 
-    .color-btn:hover {
-      outline-color: color-mix(in srgb, var(--lw-primary) 45%, transparent);
-    }
-
-    .color-btn.selected {
-      outline-color: var(--lw-primary-container);
-      transform: scale(1.05);
-    }
-
-    .color-btn:active { transform: scale(0.92); }
+    .color-btn:hover        { outline-color: color-mix(in srgb, var(--lw-primary) 45%, transparent); }
+    .color-btn.selected     { outline-color: var(--lw-primary-container); transform: scale(1.04); }
+    .color-btn:active       { transform: scale(0.92); }
 
     .color-btn--taken {
       opacity: 0.28;
@@ -364,10 +408,8 @@
       border-radius: 50%;
       background: repeating-linear-gradient(
         -45deg,
-        rgba(0,0,0,0.55) 0px,
-        rgba(0,0,0,0.55) 2px,
-        transparent 2px,
-        transparent 6px
+        rgba(0,0,0,0.55) 0px, rgba(0,0,0,0.55) 2px,
+        transparent 2px, transparent 6px
       );
     }
 
@@ -378,27 +420,24 @@
       width: 100%;
       position: relative;
       overflow: hidden;
-      padding: 0.85rem 1rem;
-      border-radius: 0.85rem;
+      padding: 0.9rem 1rem;
+      border-radius: 0.9rem;
       border: none;
       cursor: pointer;
       font-family: 'Plus Jakarta Sans', sans-serif;
       font-weight: 900;
-      font-size: clamp(1.2rem, 4vw, 1.45rem);
+      font-size: clamp(1.15rem, 2vw, 1.4rem);
       line-height: 1;
       letter-spacing: 0.02em;
       color: var(--lw-on-primary);
       background: linear-gradient(135deg, var(--lw-primary), var(--lw-primary-container));
-      box-shadow: 0 20px 40px rgba(75, 142, 255, 0.4);
+      box-shadow: 0 20px 48px rgba(75, 142, 255, 0.42);
       transition: transform 0.15s ease;
       appearance: none;
       -webkit-appearance: none;
     }
 
-    #play-btn::-moz-focus-inner {
-      border: 0;
-      padding: 0;
-    }
+    #play-btn::-moz-focus-inner { border: 0; padding: 0; }
 
     #play-btn::before {
       content: '';
@@ -410,17 +449,9 @@
       pointer-events: none;
     }
 
-    #play-btn:hover:not(:disabled) {
-      transform: scale(1.02);
-    }
-
-    #play-btn:hover:not(:disabled)::before {
-      opacity: 1;
-    }
-
-    #play-btn:active:not(:disabled) {
-      transform: scale(0.97);
-    }
+    #play-btn:hover:not(:disabled)         { transform: scale(1.02); }
+    #play-btn:hover:not(:disabled)::before { opacity: 1; }
+    #play-btn:active:not(:disabled)        { transform: scale(0.97); }
 
     #play-btn:disabled {
       opacity: 0.45;
@@ -432,15 +463,15 @@
     .lw-online-pill {
       display: inline-flex;
       align-items: center;
-      gap: 0.65rem;
+      gap: 0.6rem;
       align-self: center;
-      padding: 0.4rem 1.25rem;
+      padding: 0.38rem 1.2rem;
       border-radius: 9999px;
       background: color-mix(in srgb, var(--lw-surface-container-highest) 50%, transparent);
       border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 10%, transparent);
       font-family: 'Be Vietnam Pro', sans-serif;
       font-weight: 700;
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       text-transform: uppercase;
       letter-spacing: 0.04em;
       color: var(--lw-secondary-fixed-dim);
@@ -466,17 +497,13 @@
 
     .lw-ping-dot {
       position: relative;
-      width: 12px;
-      height: 12px;
+      width: 12px; height: 12px;
       border-radius: 50%;
       background: var(--lw-secondary-fixed-dim);
     }
 
     @keyframes lw-ping {
-      75%, 100% {
-        transform: scale(2.2);
-        opacity: 0;
-      }
+      75%, 100% { transform: scale(2.2); opacity: 0; }
     }
 
     #lobby-msg {
@@ -486,224 +513,44 @@
       text-align: center;
     }
 
-    .lw-how-to-play {
-      background: color-mix(in srgb, var(--lw-surface-container-highest) 55%, transparent);
-      border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 20%, transparent);
-      border-radius: 0.65rem;
-      padding: 0.55rem 0.75rem;
-      text-align: left;
-      font-size: 0.72rem;
-      color: var(--lw-on-surface-variant);
-      line-height: 1.42;
-    }
-
-    .lw-how-to-play strong {
-      font-family: 'Plus Jakarta Sans', sans-serif;
-      font-size: 0.62rem;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: var(--lw-primary);
-      display: block;
-      margin-bottom: 0.3rem;
-    }
-
-    .lw-how-columns {
-      display: grid;
-      grid-template-columns: minmax(10.5rem, 1fr) minmax(0, 1.35fr);
-      gap: 0.55rem 0.85rem;
-      align-items: start;
-    }
-
-    @media (max-width: 560px) {
-      .lw-how-columns {
+    /* ── Finestre strette (< 900px larghezza) ── */
+    @media (max-width: 900px) {
+      .lw-lobby-content {
         grid-template-columns: 1fr;
+        max-width: 420px;
+        gap: 1rem;
+        padding: 1.5rem;
+        overflow-y: auto;
+        align-items: start;
       }
-    }
-
-    .lw-controls-grid {
-      display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 0.08rem 0.55rem;
-      margin-bottom: 0;
-    }
-
-    .lw-how-tips {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 0.28rem;
-    }
-
-    .lw-how-tips li {
-      display: grid;
-      grid-template-columns: 1.15rem 1fr;
-      gap: 0.2rem 0.45rem;
-      align-items: start;
-    }
-
-    .lw-how-tip-icon {
-      font-size: 0.88rem;
-      line-height: 1.35;
-      text-align: center;
-      filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
-    }
-
-    .lw-how-tip-text {
-      font-size: inherit;
-      line-height: 1.38;
-      color: inherit;
-    }
-
-    .lw-how-tip-text strong {
-      font-family: 'Plus Jakarta Sans', sans-serif;
-      font-weight: 700;
-      font-size: 0.65rem;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: var(--lw-on-surface);
-      display: block;
-      margin-bottom: 0.06rem;
-    }
-
-    .lw-key {
-      font-family: 'Plus Jakarta Sans', sans-serif;
-      font-size: 0.65rem;
-      font-weight: 700;
-      background: color-mix(in srgb, var(--lw-surface-container-highest) 90%, var(--lw-primary));
-      border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 40%, transparent);
-      border-radius: 0.3rem;
-      padding: 0.05rem 0.4rem;
-      color: var(--lw-on-surface);
-      white-space: nowrap;
-      justify-self: start;
-    }
-
-    .lw-credits {
-      font-size: 0.62rem;
-      color: color-mix(in srgb, var(--lw-on-surface-variant) 55%, transparent);
-      text-align: center;
-      letter-spacing: 0.01em;
-      line-height: 1.25;
-    }
-
-    /* Lobby: schermate basse (niente scroll, solo compattazione) */
-    @media (max-height: 760px) {
-      .lw-lobby-header {
-        padding: 0.55rem 1rem 0.45rem;
+      .lw-lobby-left {
+        padding: 0;
+        gap: 1rem;
+        overflow: visible;
+        max-height: none;
       }
-
-      #lobby-box {
-        padding: 0.85rem 1.15rem 0.75rem;
-        gap: 0.6rem;
-        border-radius: 0.75rem;
-      }
-
-      #lobby-box .lw-hero-logo {
-        width: min(11rem, 52vw);
-        max-height: 13vh;
-      }
-
-      #lobby-box .lw-hero-title {
-        font-size: clamp(1.55rem, 5vw, 2.35rem);
-        padding-top: 0.1rem;
-      }
-
-      #lobby-box .lw-hero-sub {
-        margin-top: 0.1rem;
-        font-size: clamp(0.65rem, 1.5vw, 0.82rem);
-      }
-
-      #lobby-box .lw-fields {
-        gap: 0.5rem;
-      }
-
-      .lw-label {
-        margin-bottom: 0.25rem;
-      }
-
-      #lobby-box input[type="text"] {
-        padding: 0.55rem 2.5rem 0.55rem 0.95rem;
-        font-size: 0.88rem;
-      }
-
-      .color-btn {
-        width: 2.15rem;
-        height: 2.15rem;
-      }
-
-      #color-options,
-      #model-options {
-        gap: 0.45rem;
-      }
-
-      .model-btn {
-        padding: 0.4rem 0.75rem;
-        font-size: 0.78rem;
-      }
-
       .lw-how-to-play {
-        display: none;
+        flex: none;
+        overflow-y: visible;
       }
-
-      .lw-how-tips {
-        gap: 0.18rem;
-      }
-
-      .lw-how-tip-text {
-        line-height: 1.32;
-      }
-
-      #play-btn {
-        padding: 0.65rem 0.85rem;
-      }
-
-      .lw-online-pill {
-        padding: 0.28rem 0.9rem;
-        font-size: 0.72rem;
-      }
-
-      .lw-credits {
-        font-size: 0.55rem;
-      }
+      .lw-hero-logo  { width: clamp(90px, 18vw, 130px); }
+      #lobby-box { padding: 1.5rem 1.6rem; gap: 0.85rem; align-self: auto; }
     }
 
-    @media (max-height: 640px) {
-      .lw-lobby-main {
-        padding: 0.2rem 0.75rem 0.45rem;
-      }
+    /* ── Finestre basse (< 720px altezza) ── */
+    @media (max-height: 720px) {
+      .lw-lobby-content { padding: 1rem 3rem; gap: 2rem; }
+      .lw-hero-logo { width: clamp(80px, 9vw, 130px); }
+      .lw-lobby-left { gap: 1rem; padding: 0.75rem 0; }
+      #lobby-box { padding: 1.25rem 1.5rem; gap: 0.7rem; }
+      .lw-how-to-play { font-size: 0.67rem; padding: 0.75rem 0.9rem; }
+      .lw-how-tips { gap: 0.25rem; }
+      #play-btn { padding: 0.7rem 1rem; }
+    }
 
-      .lw-lobby-header {
-        padding: 0.4rem 0.85rem 0.25rem;
-      }
-
-      .lw-brand-logo {
-        width: 2.2rem;
-      }
-
-      #lobby-box {
-        padding: 0.65rem 0.9rem 0.55rem;
-        gap: 0.5rem;
-      }
-
-      #lobby-box .lw-hero-logo {
-        width: min(13rem, 58vw);
-        max-height: 15vh;
-      }
-
-      #lobby-box .lw-hero-sub {
-        margin-top: 0.1rem;
-      }
-
-      .lw-how-to-play {
-        display: none;
-      }
-
-      .lw-how-tip-icon {
-        font-size: 0.75rem;
-      }
+    @media (max-height: 560px) {
+      .lw-how-to-play { display: none; }
+      .lw-lobby-left { justify-content: center; padding: 0.5rem 0; }
     }
 
     /* ── HUD ───────────────────────────────────────── */
@@ -1158,6 +1005,7 @@
 <body>
   <!-- Lobby -->
   <div id="lobby">
+    <!-- Sfondo decorativo -->
     <div class="lw-lobby-bg" aria-hidden="true">
       <div class="lw-lobby-bg-gradient"></div>
       <div class="lw-lobby-orb lw-lobby-orb--1 lw-cloud-blur"></div>
@@ -1168,17 +1016,65 @@
       <div class="lw-lobby-star lw-lobby-star--4"></div>
     </div>
 
-    <header class="lw-lobby-header">
-      <img class="lw-brand-logo" src="/littlewar-logo.png" alt="LittleWar" draggable="false" />
-    </header>
+    <!-- Layout a due colonne -->
+    <div class="lw-lobby-content">
 
-    <div class="lw-lobby-main">
-      <div id="lobby-box">
-        <div>
+      <!-- SINISTRA: brand + come si gioca -->
+      <div class="lw-lobby-left">
+        <div class="lw-brand-area">
           <img class="lw-hero-logo" src="/littlewar-logo.png" alt="LittleWar" draggable="false" />
           <p class="lw-hero-sub">Sali a bordo e Conquista la Spagna</p>
         </div>
 
+        <div class="lw-how-to-play">
+          <strong>Come si gioca</strong>
+          <div class="lw-how-columns">
+            <div class="lw-controls-grid" aria-label="Tasti e controlli">
+              <span class="lw-key">W A S D</span><span>muovi l’aereo</span>
+              <span class="lw-key">Spazio</span><span>boost</span>
+              <span class="lw-key">Click ⬅</span><span>spara</span>
+              <span class="lw-key">Click ➡</span><span>sgancia bomba</span>
+              <span class="lw-key">T</span><span>chat (Invio invia, Esc chiude)</span>
+              <span class="lw-key">L / P</span><span>messaggi rapidi</span>
+            </div>
+            <ul class="lw-how-tips" aria-label="Obiettivi e meccaniche">
+              <li>
+                <span class="lw-how-tip-icon" aria-hidden="true">🔫</span>
+                <span class="lw-how-tip-text">
+                  <strong>Combattimento aereo</strong>
+                  Abbatti gli avversari col click sinistro. Arma più potente = più proiettili, ma voli più lento.
+                </span>
+              </li>
+              <li>
+                <span class="lw-how-tip-icon" aria-hidden="true">💣</span>
+                <span class="lw-how-tip-text">
+                  <strong>Bombardamento</strong>
+                  Click destro sul bersaglio 🎯 per fare punti. Colpisci le basi nemiche per distruggerle.
+                </span>
+              </li>
+              <li>
+                <span class="lw-how-tip-icon" aria-hidden="true">🏠</span>
+                <span class="lw-how-tip-text">
+                  <strong>Conquista le basi</strong>
+                  Stai sopra un edificio neutro da solo per catturarlo: diventa una torretta alleata.
+                </span>
+              </li>
+              <li>
+                <span class="lw-how-tip-icon" aria-hidden="true">✨</span>
+                <span class="lw-how-tip-text">
+                  <strong>Powerup</strong>
+                  Raccogli scudo o arma più potente. Senza scudo, un solo proiettile ti elimina.
+                </span>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="lw-credits">Con la partecipazione allo sviluppo di Santo, Cybermerlo e Peku</div>
+      </div>
+
+      <!-- DESTRA: form di gioco -->
+      <div id="lobby-box">
         <div class="lw-fields">
           <div>
             <label class="lw-label" for="nickname">Nickname</label>
@@ -1199,60 +1095,16 @@
           </div>
         </div>
 
-        <div class="lw-how-to-play">
-          <strong>Come si gioca</strong>
-          <div class="lw-how-columns">
-            <div class="lw-controls-grid" aria-label="Tasti e controlli">
-              <span class="lw-key">W A S D</span><span>muovi l'aereo</span>
-              <span class="lw-key">Spazio</span><span>boost</span>
-              <span class="lw-key">Click ⬅</span><span>spara</span>
-              <span class="lw-key">Click ➡</span><span>sgancia bomba</span>
-              <span class="lw-key">T</span><span>apre la chat (Invio invia, Esc chiude)</span>
-              <span class="lw-key">L</span><span>messaggio rapido di esultazione</span>
-              <span class="lw-key">P</span><span>messaggio rapido di rammarico</span>
-            </div>
-            <ul class="lw-how-tips" aria-label="Obiettivi e meccaniche">
-              <li>
-                <span class="lw-how-tip-icon" aria-hidden="true">🔫</span>
-                <span class="lw-how-tip-text">
-                  <strong>Combattimento aereo</strong>
-                  Abbatti gli avversari col click sinistro. Più alto è il livello arma, più proiettili spari per raffica — ma voli più lento.
-                </span>
-              </li>
-              <li>
-                <span class="lw-how-tip-icon" aria-hidden="true">💣</span>
-                <span class="lw-how-tip-text">
-                  <strong>Bombardamento</strong>
-                  Click destro: colpisci l’obiettivo a terra 🎯 per fare punti e far comparire un nuovo bersaglio. Centra anche le basi nemiche per distruggerle e far smettere le loro torrette.
-                </span>
-              </li>
-              <li>
-                <span class="lw-how-tip-icon" aria-hidden="true">🏠</span>
-                <span class="lw-how-tip-text">
-                  <strong>Conquista le basi</strong>
-                  Stai sopra un edificio neutro <em>da solo</em> fino a completare la barra: diventa una torretta alleata che spara ai nemici.
-                </span>
-              </li>
-              <li>
-                <span class="lw-how-tip-icon" aria-hidden="true">✨</span>
-                <span class="lw-how-tip-text">
-                  <strong>Powerup</strong>
-                  Raccogli i bonus in volo: scudo (assorbe un colpo) o arma più potente. Senza scudo, un solo proiettile ti elimina.
-                </span>
-              </li>
-            </ul>
-          </div>
-        </div>
-
         <button type="button" id="play-btn">GIOCA</button>
 
         <div class="lw-online-pill">
           <span class="lw-ping-wrap" aria-hidden="true"><span class="lw-ping-dot"></span></span>
           <span id="online-count">Online: …</span>
         </div>
+
         <div id="lobby-msg"></div>
-        <div class="lw-credits">Con la partecipazione allo sviluppo di Santo, Cybermerlo e Peku</div>
       </div>
+
     </div>
   </div>
 

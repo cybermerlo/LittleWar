@@ -155,6 +155,7 @@ const SHOOT_COOLDOWN = 200; // ms
 // Bomb cooldown
 let lastBombTime = 0;
 const BOMB_COOLDOWN = 1500; // ms
+const SPIN_TURN_BOOST_MULT = 1.35;
 
 // Boost locale
 let boostEnergy = BOOST_MAX;
@@ -194,9 +195,13 @@ const net = new NetworkManager({
     lobby.setOnlineCount(online, MAX_PLAYERS);
   },
 
-  onColorTaken({ takenColors }) {
+  onColorTaken({ takenColors, invalidColor }) {
     lobby.setTakenColors(takenColors);
-    lobby.setMessage('Quel colore è già in uso! Scegline un altro.');
+    lobby.setMessage(
+      invalidColor
+        ? 'Scegli uno dei colori della lista.'
+        : 'Quel colore è già in uso! Scegline un altro.',
+    );
   },
 
   onJoined({ playerId, players, powerups, target, buildings }) {
@@ -477,6 +482,7 @@ function animate() {
   const now = performance.now();
 
   sky.update(delta);
+  const nightFactor = typeof sky.getNightFactor === 'function' ? sky.getNightFactor() : 0;
 
   if (inGame && isAlive && localState) {
     ensureLocalAirplane(localState.color ?? '#ff4444', localState.model ?? 'airplane');
@@ -495,10 +501,21 @@ function animate() {
     const speedMult = boostActive ? BOOST_SPEED_MULT : 1;
     const speed = baseSpeed * speedMult;
 
+    if (input.consumeLeftDoubleTap()) localAirplane.triggerSpin(-1);
+    if (input.consumeRightDoubleTap()) localAirplane.triggerSpin(1);
+
     // Input → aggiorna heading e posizione (tutto * delta)
     const turnSpeed = 1.8; // rad/s
-    if (input.isLeft())  heading -= turnSpeed * delta;
-    if (input.isRight()) heading += turnSpeed * delta;
+    const turnInput = (input.isRight() ? 1 : 0) - (input.isLeft() ? 1 : 0);
+    let turnDelta = turnInput * turnSpeed * delta;
+    if (
+      turnInput !== 0 &&
+      localAirplane.isSpinning() &&
+      Math.sign(turnInput) === localAirplane.getSpinDirection()
+    ) {
+      turnDelta *= SPIN_TURN_BOOST_MULT;
+    }
+    heading += turnDelta;
 
     // Movimento in avanti sempre attivo
     const movingForward = input.isForward();
@@ -513,6 +530,7 @@ function animate() {
     phi   = moved.phi;
     heading = moved.heading;
 
+    localAirplane.setNightFactor(nightFactor);
     localAirplane.update(
       theta,
       phi,
@@ -522,7 +540,7 @@ function animate() {
       delta,
       boostActive ? (boostEnergy / BOOST_MAX) : 0,
     );
-    camCtrl.update(localAirplane.mesh, localAirplane.sphereQuaternion);
+    camCtrl.update(localAirplane.mesh, localAirplane.sphereQuaternion, localAirplane.flightQuaternion);
 
     // Invia input al server (throttled)
     if (now - lastInputSend >= CLIENT_INPUT_SEND_MS) {
@@ -570,6 +588,7 @@ function animate() {
       if (!plane) continue;
       if (p.alive) {
         plane.mesh.visible = true;
+        plane.setNightFactor(nightFactor);
         plane.tickRemote(delta);
       } else {
         plane.mesh.visible = false;
