@@ -15,12 +15,36 @@ const sounds = {
   chatPop:   trySound({ src: ['/sounds/chat-pop.mp3'], volume: 0.5 }),
 };
 
-/** Musica loop — volume più basso dei SFX */
-const music = trySound({
-  src: ['/music/piccolo-pianeta-blu.mp3'],
-  loop: true,
-  volume: 0.22,
-});
+/** Playlist musica: prima traccia casuale all’avvio, poi in ordine e di nuovo dal primo */
+const MUSIC_PATHS = [
+  '/music/piccolo-pianeta-blu.mp3',
+  '/music/whatsapp-2026-04-16.mp3',
+];
+const MUSIC_VOLUME = 0.22;
+
+const _musicHowls = MUSIC_PATHS.map((src) =>
+  trySound({ src: [src], loop: false, volume: MUSIC_VOLUME }),
+);
+
+let _musicPlaylistActive = false;
+
+for (let i = 0; i < _musicHowls.length; i++) {
+  const h = _musicHowls[i];
+  if (!h) continue;
+  const idx = i;
+  h.on('end', () => {
+    if (!_musicPlaylistActive) return;
+    let j = (idx + 1) % _musicHowls.length;
+    for (let k = 0; k < _musicHowls.length; k++) {
+      const next = _musicHowls[j];
+      if (next) {
+        next.play();
+        return;
+      }
+      j = (j + 1) % _musicHowls.length;
+    }
+  });
+}
 
 // ── Motore ────────────────────────────────────────────────────────────────────
 // Volume target e corrente per il motore locale
@@ -57,12 +81,20 @@ export const AudioManager = {
 
   /** Avvia in un handler da click utente (autoplay browser) */
   startMusic() {
-    if (!music || music.playing()) return;
-    music.play();
+    const anyPlaying = _musicHowls.some((h) => h?.playing());
+    if (anyPlaying) return;
+    const validIdx = _musicHowls.map((h, i) => (h ? i : -1)).filter((i) => i >= 0);
+    if (validIdx.length === 0) return;
+    const startAt = validIdx[Math.floor(Math.random() * validIdx.length)];
+    const first = _musicHowls[startAt];
+    if (!first) return;
+    _musicPlaylistActive = true;
+    first.play();
   },
 
   stopMusic() {
-    music?.stop();
+    _musicPlaylistActive = false;
+    for (const h of _musicHowls) h?.stop();
   },
 
   // ── Motore ────────────────────────────────────────────────────────────────
