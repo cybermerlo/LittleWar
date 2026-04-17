@@ -99,6 +99,19 @@ const input    = new InputManager();
 const mobile   = isTouchDevice() ? new MobileControls(input) : null;
 if (mobile) document.body.classList.add('is-mobile');
 
+// iOS non supporta requestFullscreen — mostra il banner "Aggiungi a schermata Home" se non già standalone
+const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
+if (_isIOS && !window.navigator.standalone) {
+  const tip = document.getElementById('ios-home-tip');
+  if (tip) {
+    tip.style.display = 'flex';
+    document.getElementById('ios-home-tip-close')?.addEventListener('click', () => {
+      tip.style.display = 'none';
+    });
+  }
+}
+
 // Bottone "sterza inclinando": richiede permesso giroscopio (iOS) e calibra.
 const tiltBtn = document.getElementById('tilt-toggle');
 const tiltLabel = document.getElementById('tilt-toggle-label');
@@ -192,9 +205,11 @@ let boostEnergy = BOOST_MAX;
 // ── Lobby + Network ───────────────────────────────────────────────────────────
 
 const lobby = new LobbyScreen((nickname, color, model) => {
-  const el = document.documentElement;
-  if (el.requestFullscreen) el.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
-  else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  if (!_isIOS) {
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  }
   AudioManager.startMusic();
   AudioManager.startEngine();
   net.join(nickname, color, model);
@@ -578,7 +593,10 @@ function animate() {
     // Aggiorna volume motore
     AudioManager.updateEngine(movingForward, boostActive, delta);
     if (boostActive) { AudioManager.startBoost(); } else { AudioManager.stopBoost(); }
-    const accel = movingForward ? FORWARD_ACCEL : movingBackward ? BACKWARD_ACCEL : 1;
+    // Su mobile l'asse Y del joystick (0..1) interpola tra FORWARD_ACCEL e BACKWARD_ACCEL
+    const brakeT = input.touch.speedAxis; // 0 = nessun freno, 1 = freno massimo
+    const forwardAccel = FORWARD_ACCEL - (FORWARD_ACCEL - BACKWARD_ACCEL) * brakeT;
+    const accel = movingForward ? forwardAccel : movingBackward ? BACKWARD_ACCEL : 1;
     const moved = moveOnSphere(theta, phi, heading, speed * accel * delta);
     theta = moved.theta;
     phi   = moved.phi;

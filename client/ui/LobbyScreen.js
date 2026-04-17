@@ -1,5 +1,7 @@
 import { PLAYER_COLORS } from '../../shared/constants.js';
 
+const LAST_NICKNAME_KEY = 'littlewar_last_nickname';
+
 const MODELS = [
   { id: 'spitfire', label: 'Spitfire' },
 ];
@@ -19,6 +21,8 @@ export class LobbyScreen {
     this._colorEl   = document.getElementById('color-options');
     this._modelEl   = document.getElementById('model-options');
 
+    this._restoreLastNickname();
+
     this._buildColorPicker();
     this._buildModelPicker();
     this._playBtn.addEventListener('click', () => this._handlePlay());
@@ -30,6 +34,26 @@ export class LobbyScreen {
     });
 
     this._updatePlayState();
+  }
+
+  _restoreLastNickname() {
+    try {
+      const raw = localStorage.getItem(LAST_NICKNAME_KEY);
+      if (raw == null || !this._nicknameEl) return;
+      const trimmed = String(raw).trim().slice(0, 16);
+      if (!trimmed) return;
+      this._nicknameEl.value = trimmed;
+    } catch {
+      /* localStorage non disponibile (privacy mode, ecc.) */
+    }
+  }
+
+  _persistNickname(nickname) {
+    try {
+      localStorage.setItem(LAST_NICKNAME_KEY, nickname);
+    } catch {
+      /* ignorato */
+    }
   }
 
   _getNicknameTrimmed() {
@@ -121,6 +145,7 @@ export class LobbyScreen {
       this._nicknameEl?.focus();
       return;
     }
+    this._persistNickname(nickname);
     this.onPlay(nickname, this.selectedColor, this.selectedModel);
   }
 

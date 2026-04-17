@@ -11,6 +11,7 @@ export class InputManager {
     // Touch state (controllato da MobileControls)
     this.touch = {
       turnAxis: 0,       // -1..1 dal joystick virtuale
+      speedAxis: 0,      // 0..1; >0 = joystick tirato giù = freno
       forward: false,
       backward: false,
       boost: false,
@@ -128,6 +129,9 @@ export class InputManager {
   // ─── API touch (usate da MobileControls) ─────────────────────────────────
   setTouchTurnAxis(v) {
     this.touch.turnAxis = Math.max(-1, Math.min(1, v));
+  }
+  setTouchSpeedAxis(v) {
+    this.touch.speedAxis = Math.max(0, Math.min(1, v));
   }
   setTouchForward(v)  { this.touch.forward  = !!v; }
   setTouchBackward(v) { this.touch.backward = !!v; }

@@ -24,6 +24,14 @@ export class MobileControls {
 
     this._gyroToggled = false;
 
+    // Previene pinch-to-zoom iOS quando si usano più dita contemporaneamente.
+    // gesturestart/gesturechange sono eventi webkit-only per pinch/rotate.
+    document.addEventListener('gesturestart',  e => e.preventDefault(), { passive: false });
+    document.addEventListener('gesturechange', e => e.preventDefault(), { passive: false });
+    document.addEventListener('touchmove', e => {
+      if (e.touches.length > 1) e.preventDefault();
+    }, { passive: false });
+
     this._bindJoystick();
     this._bindHoldButton(this._btnBoost, (held) => this.input.setTouchBoost(held));
     this._bindTapButton(this._btnShoot, () => this.input.triggerTouchShoot());
@@ -68,6 +76,7 @@ export class MobileControls {
       j.pointerId = null;
       j.thumb.style.transform = 'translate(-50%, -50%)';
       this.input.setTouchTurnAxis(0);
+      this.input.setTouchSpeedAxis(0);
       try { j.base.releasePointerCapture(e.pointerId); } catch (_) {}
       e.preventDefault();
     };
@@ -89,12 +98,18 @@ export class MobileControls {
     const ax = len > 0 ? (dx / len) * clamped : 0;
     const ay = len > 0 ? (dy / len) * clamped : 0;
     j.thumb.style.transform = `translate(calc(-50% + ${ax}px), calc(-50% + ${ay}px))`;
-    // Solo asse X per la sterzata (dead-zone centrale incluso nel rapporto)
-    const axis = Math.max(-1, Math.min(1, ax / max));
     const DEAD = 0.12;
+
+    // Asse X → sterzata
+    const axis = Math.max(-1, Math.min(1, ax / max));
     const out = Math.abs(axis) < DEAD ? 0
       : Math.sign(axis) * ((Math.abs(axis) - DEAD) / (1 - DEAD));
     this.input.setTouchTurnAxis(out);
+
+    // Asse Y → freno (solo verso il basso, ay positivo = dito sotto il centro)
+    const axisY = Math.max(-1, Math.min(1, ay / max));
+    const outY = axisY < DEAD ? 0 : (axisY - DEAD) / (1 - DEAD);
+    this.input.setTouchSpeedAxis(outY);
   }
 
   _bindHoldButton(el, setter) {

@@ -242,7 +242,7 @@ export class BuildingEntity {
     this.ringMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
-      opacity: 0.15,
+      opacity: 0.30,
       side: THREE.DoubleSide,
     });
     const ring = new THREE.Mesh(ringGeo, this.ringMat);
@@ -347,10 +347,10 @@ export class BuildingEntity {
     // Colore cerchio (mostra il proprietario)
     if (isConquered && state.ownerColor) {
       this.ringMat.color.set(state.ownerColor);
-      this.ringMat.opacity = 0.25;
+      this.ringMat.opacity = 0.50;
     } else {
       this.ringMat.color.set(0xffffff);
-      this.ringMat.opacity = 0.15;
+      this.ringMat.opacity = 0.30;
     }
 
     // Tint del modello conquistato + colore beacon
