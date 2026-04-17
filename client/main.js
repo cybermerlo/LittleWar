@@ -13,6 +13,7 @@ import { PowerUpEntity } from './entities/PowerUp.js';
 import { TargetEntity } from './entities/Target.js';
 import { BuildingEntity, spawnTurretDestruction } from './entities/Building.js';
 import { InputManager } from './systems/InputManager.js';
+import { MobileControls, isTouchDevice } from './systems/MobileControls.js';
 import { CameraController } from './systems/CameraController.js';
 import { NetworkManager } from './systems/NetworkManager.js';
 import { HUD } from './systems/HUD.js';
@@ -95,6 +96,32 @@ Promise.all([loadTreeTemplates(), loadBuildingTemplates(), loadHospitalTemplates
 // ── Stato gioco ───────────────────────────────────────────────────────────────
 
 const input    = new InputManager();
+const mobile   = isTouchDevice() ? new MobileControls(input) : null;
+if (mobile) document.body.classList.add('is-mobile');
+
+// Bottone "sterza inclinando": richiede permesso giroscopio (iOS) e calibra.
+const tiltBtn = document.getElementById('tilt-toggle');
+const tiltLabel = document.getElementById('tilt-toggle-label');
+if (tiltBtn && mobile) {
+  tiltBtn.addEventListener('click', async () => {
+    if (input.gyro.enabled) {
+      input.disableGyro();
+      tiltBtn.classList.remove('selected');
+      tiltBtn.setAttribute('aria-pressed', 'false');
+      if (tiltLabel) tiltLabel.textContent = 'Sterza inclinando il telefono';
+      return;
+    }
+    const ok = await input.enableGyro();
+    if (ok) {
+      input.calibrateGyro();
+      tiltBtn.classList.add('selected');
+      tiltBtn.setAttribute('aria-pressed', 'true');
+      if (tiltLabel) tiltLabel.textContent = 'Inclinazione attiva — tocca per disattivare';
+    } else {
+      if (tiltLabel) tiltLabel.textContent = 'Sensori non disponibili';
+    }
+  });
+}
 const camCtrl  = new CameraController(camera);
 const hud      = new HUD();
 const death    = new DeathScreen();
@@ -184,7 +211,9 @@ const net = new NetworkManager({
     lobby.setMessage('Disconnesso. Ricarica la pagina.');
     inGame = false;
     hud.hide();
+    mobile?.hide();
     chat.disable();
+    document.body.classList.remove('in-game');
   },
 
   onServerFull() {
@@ -255,8 +284,12 @@ const net = new NetworkManager({
     allPlayerStates = players;
     lobby.hide();
     hud.show();
+    mobile?.show();
     chat.enable();
     inGame = true;
+    document.body.classList.add('in-game');
+    // Calibra giroscopio all'ingresso in gioco se attivo.
+    if (input.gyro.enabled) input.calibrateGyro();
   },
 
   onPlayerJoined(info) {
@@ -523,7 +556,7 @@ function animate() {
 
     // Input → aggiorna heading e posizione (tutto * delta)
     const turnSpeed = 1.8; // rad/s
-    const turnInput = (input.isRight() ? 1 : 0) - (input.isLeft() ? 1 : 0);
+    const turnInput = input.getTurnAxis();
     let turnDelta = turnInput * turnSpeed * delta;
     if (
       turnInput !== 0 &&
