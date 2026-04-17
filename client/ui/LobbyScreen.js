@@ -9,6 +9,7 @@ export class LobbyScreen {
     this.onPlay = onPlay;
     this.selectedColor = PLAYER_COLORS[0];
     this.selectedModel = MODELS[0].id;
+    this._isFull = false;
 
     this._lobbyEl   = document.getElementById('lobby');
     this._nicknameEl = document.getElementById('nickname');
@@ -21,6 +22,32 @@ export class LobbyScreen {
     this._buildColorPicker();
     this._buildModelPicker();
     this._playBtn.addEventListener('click', () => this._handlePlay());
+    this._nicknameEl.addEventListener('input', () => this._updatePlayState());
+    this._nicknameEl.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      this._handlePlay();
+    });
+
+    this._updatePlayState();
+  }
+
+  _getNicknameTrimmed() {
+    return (this._nicknameEl?.value ?? '').trim();
+  }
+
+  _updatePlayState() {
+    const nickname = this._getNicknameTrimmed();
+    const valid = nickname.length > 0;
+    this._playBtn.disabled = this._isFull || !valid;
+    if (this._isFull) return;
+    if (!valid) {
+      this._msgEl.textContent = 'Inserisci un nickname per giocare.';
+      return;
+    }
+    if (this._msgEl.textContent === 'Inserisci un nickname per giocare.') {
+      this._msgEl.textContent = '';
+    }
   }
 
   _buildColorPicker() {
@@ -88,7 +115,12 @@ export class LobbyScreen {
   }
 
   _handlePlay() {
-    const nickname = this._nicknameEl.value.trim() || 'Pilota';
+    const nickname = this._getNicknameTrimmed();
+    if (!nickname) {
+      this._updatePlayState();
+      this._nicknameEl?.focus();
+      return;
+    }
     this.onPlay(nickname, this.selectedColor, this.selectedModel);
   }
 
@@ -97,8 +129,9 @@ export class LobbyScreen {
   }
 
   setFull(isFull) {
-    this._playBtn.disabled = isFull;
-    this._msgEl.textContent = isFull ? 'Server pieno, riprova tra poco.' : '';
+    this._isFull = !!isFull;
+    this._msgEl.textContent = this._isFull ? 'Server pieno, riprova tra poco.' : '';
+    this._updatePlayState();
   }
 
   setMessage(msg) {
