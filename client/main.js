@@ -559,7 +559,7 @@ function animate() {
     if (input.consumeRightDoubleTap()) localAirplane.triggerSpin(1);
 
     // Input → aggiorna heading e posizione (tutto * delta)
-    const turnSpeed = mobile ? 3.0 : 1.8; // rad/s — più alto su mobile per virate strette
+    const turnSpeed = mobile ? 5.0 : 1.8; // rad/s — più alto su mobile per virate strette
     const turnInput = input.getTurnAxis();
     let turnDelta = turnInput * turnSpeed * delta;
     if (
