@@ -244,12 +244,17 @@ function buildAirplaneMesh(color, modelName) {
   return group;
 }
 
-function createBoostParticleSystem() {
+function createBoostParticleSystem(playerColor = '#ff4444') {
   const geometry = new THREE.BufferGeometry();
   const positions = new Float32Array(BOOST_PARTICLE_COUNT * 3);
   const life = new Float32Array(BOOST_PARTICLE_COUNT);
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute('aLife', new THREE.BufferAttribute(life, 1));
+
+  const c = new THREE.Color(playerColor);
+  if (!Number.isFinite(c.r + c.g + c.b)) c.set('#888888');
+  const playerTint = c.clone();
+  playerTint.lerp(new THREE.Color(0xffffff), 0.08);
 
   const material = new THREE.ShaderMaterial({
     transparent: true,
@@ -257,6 +262,7 @@ function createBoostParticleSystem() {
     blending: THREE.AdditiveBlending,
     uniforms: {
       uColor: { value: new THREE.Color(0xffa31a) },
+      uPlayerTint: { value: playerTint },
     },
     vertexShader: `
       attribute float aLife;
@@ -274,6 +280,7 @@ function createBoostParticleSystem() {
     fragmentShader: `
       varying float vLife;
       uniform vec3 uColor;
+      uniform vec3 uPlayerTint;
       void main() {
         vec2 p = gl_PointCoord - vec2(0.5);
         float d = length(p);
@@ -281,7 +288,14 @@ function createBoostParticleSystem() {
         float glow = smoothstep(0.72, 0.12, d);
         float alpha = (core * 0.72 + glow * 0.22) * vLife;
         if (alpha < 0.01) discard;
-        gl_FragColor = vec4(uColor, alpha);
+        // Centro: bianco caldo; verso il bordo della sprite + in coda alla vita: colore giocatore ben visibile.
+        float edge = smoothstep(0.1, 0.46, d);
+        float tailPlayer = pow(1.0 - clamp(vLife, 0.0, 1.0), 0.75);
+        float playerW = clamp(0.6 + 0.38 * edge + 0.3 * tailPlayer, 0.0, 1.0);
+        vec3 innerHot = vec3(1.0, 0.94, 0.78);
+        vec3 outerTone = mix(uColor, uPlayerTint, 0.9);
+        vec3 rgb = mix(innerHot, outerTone, playerW);
+        gl_FragColor = vec4(rgb, alpha);
       }
     `,
   });
@@ -353,7 +367,7 @@ export class Airplane {
     this._boostVel = null;
     this._boostSpawnAcc = 0;
     this._boostHead = 0;
-    const ps = createBoostParticleSystem();
+    const ps = createBoostParticleSystem(color);
     this._boostPoints = ps.points;
     this._boostGeometry = ps.geometry;
     this._boostMaterial = ps.material;

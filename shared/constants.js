@@ -4,16 +4,16 @@ export const MAX_PLAYERS = 10;
 
 /** Colori selezionabili in lobby (uno per slot giocatore; stessa cardinalità di MAX_PLAYERS). */
 export const PLAYER_COLORS = [
-  '#d32f2f', // rosso
-  '#1565c0', // blu
-  '#2e7d32', // verde
-  '#fdd835', // giallo
-  '#6a1b9a', // viola
-  '#00bcd4', // ciano
-  '#c2185c', // magenta / rosa acceso
-  '#827717', // oliva
-  '#5d4037', // marrone
-  '#c6ff00', // lime / chartreuse (tinta lontana da rosso, blu e verde bosco)
+  '#ff0000', // rosso
+  '#0000ff', // blu
+  '#ffff00', // giallo
+  '#008000', // verde
+  '#ffa500', // arancione
+  '#800080', // viola
+  '#ffc0cb', // rosa
+  '#8b4513', // marrone
+  '#ffffff', // bianco
+  '#000000', // nero
 ];
 export const TICK_RATE = 40;          // Hz server broadcast / simulazione
 export const TICK_INTERVAL = 1000 / TICK_RATE;
@@ -42,8 +42,8 @@ export const BANK_MAX_DH_FRAME = 0.14;   // limite |Δheading| per frame (evita 
 // Telecamera: quanto il rollio dell'aereo influenza l'orientamento della camera (0 = nessuno, 1 = come l'aereo)
 export const CAMERA_BANK_FOLLOW = 0.55;
 
-// Armi
-export const MAX_WEAPON_LEVEL = 4;
+// Armi — tab fino a Lv.4; oltre si extrapola in getWeaponFireConfig
+export const MAX_WEAPON_LEVEL = 24;
 export const WEAPON_CONFIGS = [
   { bullets: 1, spread: 0,    speedMult: 1.00 },
   { bullets: 2, spread: 0.09, speedMult: 0.90 },
@@ -51,6 +51,29 @@ export const WEAPON_CONFIGS = [
   { bullets: 5, spread: 0.26, speedMult: 0.65 },
   { bullets: 7, spread: 0.44, speedMult: 0.50 },
 ];
+
+/**
+ * Pattern di fuoco per qualsiasi livello arma (server sparo + HUD).
+ * Per livelli oltre WEAPON_CONFIGS continua a crescere colpi/spread come da ultimo gradino.
+ */
+export function getWeaponFireConfig(level) {
+  const wl = Math.max(0, Math.floor(Number(level) || 0));
+  if (wl < WEAPON_CONFIGS.length) return WEAPON_CONFIGS[wl];
+  const last = WEAPON_CONFIGS[WEAPON_CONFIGS.length - 1];
+  const over = wl - (WEAPON_CONFIGS.length - 1);
+  return {
+    bullets: last.bullets + over * 2,
+    spread: Math.min(0.82, last.spread + over * 0.055),
+    speedMult: Math.max(0.12, last.speedMult - over * 0.06),
+  };
+}
+
+/** % velocità di crociera rispetto al livello 0 — stessa formula di client/main.js e server Game.tick */
+export function getWeaponMoveSpeedPercent(level) {
+  const wl = Math.max(0, Math.floor(Number(level) || 0));
+  const spd = Math.max(MIN_SPEED, BASE_SPEED - wl * SPEED_REDUCTION_PER_LEVEL);
+  return Math.round((spd / BASE_SPEED) * 100);
+}
 
 // Proiettili (radianti al SECONDO)
 export const BULLET_SPEED = 0.95;

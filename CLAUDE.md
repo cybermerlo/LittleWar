@@ -2,6 +2,7 @@
 
 A multiplayer 3D browser game built with Three.js. Players fly around a small planet Earth, chasing and shooting each other.
 
+
 ## Project Vision
 
 - Small, cute low-poly planet Earth as the game world, orbitabile in poco tempo
@@ -31,6 +32,7 @@ A multiplayer 3D browser game built with Three.js. Players fly around a small pl
 ## Deployment
 
 Railway is configured to watch the GitHub repository and auto-deploy on push. The server must listen on the port provided by `process.env.PORT`.
+- Nota: Per lanciare test: npm run dev
 
 ## Three.js Skills
 
@@ -98,8 +100,10 @@ In sviluppo aprire **due terminali**: uno per `npm start` (server), uno per `npm
 - `server/Game.js`: `tryCollectPowerup()` — se il powerup esiste ancora, lo raccoglie (no check di distanza: inutile con polling lag, gioco casual con amici).
 - Server-side collection esistente rimane come backup per chi usa WebSocket.
 
-**Bug persistente → patch 2026-04-16 (retry idempotente):** Il `Set` "una sola volta per ID" era il failure mode residuo. Se la singola richiesta `try-collect` veniva persa (packet drop con polling, disconnect transiente di Socket.IO) o rifiutata temporaneamente (`!player.alive` sul server per pochi ms mentre il client locale era ancora vivo), il client non riprovava mai più: il powerup rimaneva visibile senza suono né effetto finché non scadeva (30s) o non lo prendeva un altro.
-- Fix: sostituito `triedPowerups Set` con `powerupLastTryAt Map` (id → timestamp). Finché il local è in range e il powerup è ancora nella `powerupPositions` Map, il client reinvia `try-collect` ogni `TRY_COLLECT_RETRY_MS = 300ms` (max ~3 retry/s). Il server è già idempotente (`if (!pu) return`) quindi i retry sono innocui. La pulizia della Map avviene in `onJoined`, `onPowerupCollected` e nel loop di dismissione del `game-state` (powerup non più presente → smette di riprovare).
-- Questo copre: packet loss/polling, disconnect transienti, race "morto-per-un-istante", race tra più giocatori (quando arriva `powerup-collected` di un altro, la Map viene pulita e i retry cessano).
+**Tentativo 2026-04-16 (retry idempotente, NON HA FUNZIONATO):** Sostituito `triedPowerups Set` con `powerupLastTryAt Map`, retry ogni 300ms finché in range. Il bug è continuato a presentarsi anche **in locale** (escludendo packet loss/polling) e in particolare con due powerup sovrapposti uno solo veniva raccolto. Quindi il problema non era network né "una sola richiesta" — era altro, presumibilmente race server-side.
 
-**Se il problema persiste:** logga gli eventi `try-collect` e `powerup-collected` lato server per verificare che i retry arrivino davvero; se ancora no, valutare: (a) aumentare la polling frequency di socket.io, oppure (b) optimistic local collection + riconciliazione lato client.
+**Tentativo 2026-04-16 v2 (client autoritativo + feedback ottimistico):** Riprogettato il flusso di raccolta:
+- **Server**: rimosse `_checkPowerupCollection` e `_checkPowerupCollectionAlongPath`. Erano due strade indipendenti che usavano posizione **predetta dal server** (divergente dalla realtà del client) per raccogliere i powerup. Generavano race con `try-collect`: a volte il check su posizione predetta cancellava un powerup mentre il client stava ancora avvicinandosi alla posizione vera → l'evento `powerup-collected` arrivava al client senza che lui avesse percepito la collisione, e i powerup vicini sovrapposti potevano essere "rubati" male. Rimanga unicamente `tryCollectPowerup` (idempotente). Aggiunto warning console se `try-collect` viene rifiutato per player non vivo.
+- **Client**: aggiunto **feedback ottimistico immediato**. Appena il client locale rileva collisione con un powerup, nasconde subito l'entità dalla scena e suona l'effetto. Poi invia `try-collect` con retry ogni `POWERUP_RETRY_MS = 200ms` per max `POWERUP_RETRY_MAX_MS = 5000ms`. L'effetto di gameplay (weaponLevel/hasShield) resta autoritativo dal server via `game-state`. Se per caso il server non confermasse, il prossimo `game-state` ri-aggiunge automaticamente l'entità (rollback visivo), ma il giocatore ha sempre feedback immediato. Il client è ora unica fonte di verità per il rilevamento collisione (l'unico che conosce posizione esatta in real time).
+
+**Se il problema persiste:** controllare i log server per `[powerup] try-collect rifiutato`. Se compare frequentemente con "non vivo", c'è un mismatch dello stato `alive` tra client e server. Se non compare mai e i powerup non si applicano lato gameplay, il problema è in `collectPowerup` (es. branch ramificato che non incrementa). Se la sparizione visiva ottimistica funziona ma l'upgrade non arriva, attivare un log temporaneo in `collectPowerup` con player/weaponLevel risultante.

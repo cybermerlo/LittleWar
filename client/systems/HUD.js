@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 import { sphericalToCartesian } from '../utils/SphereUtils.js';
-import { WEAPON_CONFIGS, FLY_ALTITUDE } from '../../shared/constants.js';
+import { getWeaponFireConfig, getWeaponMoveSpeedPercent, FLY_ALTITUDE } from '../../shared/constants.js';
 
 export class HUD {
   constructor() {
     this.el = {
       hud:         document.getElementById('hud'),
       kills:       document.getElementById('hud-kills'),
-      bombs:       document.getElementById('hud-bombs'),
+      turrets:     document.getElementById('hud-turrets'),
       weapon:      document.getElementById('hud-weapon'),
       speed:       document.getElementById('hud-speed'),
       boost:       document.getElementById('hud-boost'),
@@ -64,7 +64,7 @@ export class HUD {
   showOwnTowerDestroyedNotice() {
     const el = this.el.towerToast;
     if (!el) return;
-    el.textContent = 'Hai distrutto la tua torretta — nessun punto';
+    el.textContent = 'Hai distrutto la tua torretta — Coglione!';
     el.classList.add('hud-toast--visible');
     if (this._towerToastTimer) clearTimeout(this._towerToastTimer);
     this._towerToastTimer = setTimeout(() => {
@@ -101,15 +101,17 @@ export class HUD {
     }, 3200);
   }
 
-  update(localPlayer, allPlayers, target, camera, boostRatio = 1, boostPressed = false) {
+  update(localPlayer, allPlayers, target, camera, boostRatio = 1, boostPressed = false, buildings = []) {
     if (!localPlayer) return;
 
-    const wl = localPlayer.weaponLevel;
-    const speedPct = Math.round(WEAPON_CONFIGS[wl].speedMult * 100);
+    const wl = Math.max(0, Math.floor(localPlayer.weaponLevel ?? 0));
+    const fire = getWeaponFireConfig(wl);
+    const speedPct = getWeaponMoveSpeedPercent(wl);
 
     this.el.kills.textContent  = `Kill: ${localPlayer.kills}`;
-    this.el.bombs.textContent  = `Bombe: ${localPlayer.bombPoints}`;
-    this.el.weapon.textContent = `Arma: Lv.${wl}`;
+    const turretCount = (buildings || []).filter((b) => b.ownerId === localPlayer.id).length;
+    if (this.el.turrets) this.el.turrets.textContent = `Torrette: ${turretCount}`;
+    this.el.weapon.textContent = `Arma: Lv.${wl} (${fire.bullets} colpi)`;
     this.el.speed.textContent  = `Velocità: ${speedPct}%`;
     const r = Math.max(0, Math.min(1, boostRatio));
     const boostPct = Math.round(r * 100);
