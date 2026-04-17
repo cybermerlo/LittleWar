@@ -543,8 +543,10 @@ function animate() {
 
     // Velocità in base al livello arma (radianti/secondo * delta)
     const wl = localState.weaponLevel ?? 0;
-    // Su mobile velocità ridotta: raggio_curva = v/turnSpeed → più stretto a parità di sterzata
-    const mobileSpeedMult = mobile ? 0.6 : 1.0;
+    const turnInput = input.getTurnAxis();
+    // Su mobile: in curva la velocità si riduce proporzionalmente al joystick,
+    // così il raggio di virata si stringe senza penalizzare il rettilineo.
+    const mobileSpeedMult = mobile ? (1.0 - 0.4 * Math.abs(turnInput)) : 1.0;
     const baseSpeed = Math.max(MIN_SPEED, BASE_SPEED - wl * SPEED_REDUCTION_PER_LEVEL) * mobileSpeedMult;
 
     const wantsBoost = input.isBoost();
@@ -562,7 +564,6 @@ function animate() {
 
     // Input → aggiorna heading e posizione (tutto * delta)
     const turnSpeed = 1.8; // rad/s
-    const turnInput = input.getTurnAxis();
     let turnDelta = turnInput * turnSpeed * delta;
     if (
       turnInput !== 0 &&
