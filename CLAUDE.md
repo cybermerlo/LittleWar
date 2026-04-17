@@ -78,6 +78,35 @@ In sviluppo aprire **due terminali**: uno per `npm start` (server), uno per `npm
 - Gli eventi `shoot` e `drop-bomb` **devono includere theta/phi/heading** dal client — la posizione predetta dal server diverge, specialmente quando si sta girando
 - Socket.IO client configurato con `transports: ['websocket', 'polling']` (WebSocket prioritario)
 
+## Mobile Support (2026-04-17)
+
+Il gioco è giocabile da browser mobile senza installazione.
+
+### Architettura controlli
+- `InputManager.getTurnAxis()` ritorna un valore analogico [-1, 1]: priorità tastiera → joystick touch → giroscopio.
+- `isLeft()` / `isRight()` restano booleani (threshold 0.15) per compatibilità con la logica esistente.
+- `MobileControls` (client/systems/MobileControls.js) gestisce joystick virtuale sinistro e bottoni FIRE/BOMB/BOOST/Centra. Su mobile il movimento in avanti è sempre attivo (nessun tasto W necessario).
+- Detect mobile: `isTouchDevice()` in MobileControls.js → aggiunge `body.is-mobile`.
+- Classe `body.in-game` aggiunta all'ingresso in partita, rimossa alla disconnessione.
+
+### Giroscopio
+- `DeviceOrientationEvent` — Android non richiede permessi; iOS 13+ richiede `DeviceOrientationEvent.requestPermission()` chiamato da un gesto utente.
+- Il bottone "Sterza inclinando il telefono" nella lobby gestisce il flow permesso e calibra.
+- Calibrazione: fissa il tilt corrente come zero (usare anche il bottone "Centra" in gioco).
+- Deadzone: 4°, range completo: 22° — tunable in `InputManager.gyro.sensitivity / deadzone`.
+- Orientazione schermo: usa `screen.orientation.angle` per remappare beta/gamma in base al landscape.
+- iOS Safari **non supporta la Fullscreen API** — su Android e desktop funziona.
+
+### Fullscreen
+- Chiamato nel click handler di GIOCA (richiede contesto gesto utente).
+- `exitFullscreen()` alla disconnessione dal server.
+- Prefix webkit per Safari desktop: `el.webkitRequestFullscreen()`.
+
+### CSS mobile
+- Prompt rotazione (`#rotate-prompt`) mostrato in portrait su `body.is-mobile.in-game` via media query.
+- HUD ridotto in landscape mobile: hud-players nascosto, hud-bottom e chat traslati a destra del joystick.
+- Safe area insets (`env(safe-area-inset-*)`) nei controlli touch per compatibilità notch/home bar.
+
 ## Development Notes
 
 - Keep the game lightweight — it runs in the browser for casual sessions with friends
