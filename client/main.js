@@ -543,7 +543,9 @@ function animate() {
 
     // Velocità in base al livello arma (radianti/secondo * delta)
     const wl = localState.weaponLevel ?? 0;
-    const baseSpeed = Math.max(MIN_SPEED, BASE_SPEED - wl * SPEED_REDUCTION_PER_LEVEL);
+    // Su mobile velocità ridotta: raggio_curva = v/turnSpeed → più stretto a parità di sterzata
+    const mobileSpeedMult = mobile ? 0.6 : 1.0;
+    const baseSpeed = Math.max(MIN_SPEED, BASE_SPEED - wl * SPEED_REDUCTION_PER_LEVEL) * mobileSpeedMult;
 
     const wantsBoost = input.isBoost();
     const boostActive = wantsBoost && boostEnergy > 0.01;
@@ -559,7 +561,7 @@ function animate() {
     if (input.consumeRightDoubleTap()) localAirplane.triggerSpin(1);
 
     // Input → aggiorna heading e posizione (tutto * delta)
-    const turnSpeed = mobile ? 5.0 : 1.8; // rad/s — più alto su mobile per virate strette
+    const turnSpeed = 1.8; // rad/s
     const turnInput = input.getTurnAxis();
     let turnDelta = turnInput * turnSpeed * delta;
     if (
