@@ -192,6 +192,9 @@ let boostEnergy = BOOST_MAX;
 // ── Lobby + Network ───────────────────────────────────────────────────────────
 
 const lobby = new LobbyScreen((nickname, color, model) => {
+  const el = document.documentElement;
+  if (el.requestFullscreen) el.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+  else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
   AudioManager.startMusic();
   AudioManager.startEngine();
   net.join(nickname, color, model);
@@ -207,6 +210,7 @@ const net = new NetworkManager({
   onDisconnect() {
     AudioManager.stopMusic();
     AudioManager.stopEngine();
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     lobby.show();
     lobby.setMessage('Disconnesso. Ricarica la pagina.');
     inGame = false;
