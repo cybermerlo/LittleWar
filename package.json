@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -k -n server,vite -c blue,green \"node --watch server/index.js\" \"vite\"",
+    "dev:client": "vite",
     "build": "vite build",
     "start": "node server/index.js"
   },
@@ -16,6 +17,7 @@
     "three": "^0.160.0"
   },
   "devDependencies": {
+    "concurrently": "^9.1.2",
     "vite": "^5.0.0"
   }
 }
