@@ -9,9 +9,19 @@ import {
   TURRET_BULLET_LIFETIME,
   TICK_INTERVAL,
 } from '../shared/constants.js';
+import { moveOnSphere } from '../shared/movement.js';
 import { Projectile } from './Projectile.js';
 
 const TICK_DT = TICK_INTERVAL / 1000;
+
+/**
+ * Offset angolare del punto di spawn del proiettile rispetto alla base della
+ * torretta, lungo la direzione di tiro. Estremità cannone in scene frame:
+ * (0.0479, 13.5079, 11.4608); pivot Turret_Pivot (0.185, 9.326, -0.218) → locale
+ * (-0.1371, 4.1819, 11.6788). Proiezione orizzontale √(x²+z²) ≈ 11.6779
+ * unità modello → × CESARE_SCALE (0.24) / FLY_ALTITUDE.
+ */
+const TURRET_MUZZLE_OFFSET = (11.6779 * 0.24) / FLY_ALTITUDE;
 
 let nextBuildingId = 1;
 
@@ -146,10 +156,15 @@ export class Building {
     const heading = this._headingTo(nearest.theta, nearest.phi);
     this.turretCooldown = TURRET_FIRE_RATE;
 
+    // Spawn offset: spostiamo il punto di spawn in avanti (lungo heading) di
+    // una distanza pari alla lunghezza visibile del cannone, così il proiettile
+    // appare dall'estremità del cannone invece che dal centro della torretta.
+    const spawn = moveOnSphere(this.theta, this.phi, heading, TURRET_MUZZLE_OFFSET);
+
     const proj = new Projectile(
       `turret-${this.id}`,  // ownerId speciale per le torrette
-      this.theta,
-      this.phi,
+      spawn.theta,
+      spawn.phi,
       heading,
       TURRET_BULLET_SPEED,
       TURRET_BULLET_LIFETIME,

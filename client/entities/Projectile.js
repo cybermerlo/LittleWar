@@ -18,8 +18,19 @@ const trailMat = new THREE.LineBasicMaterial({
 });
 
 export class ProjectileEntity {
-  constructor(scene, id, theta, phi) {
+  /**
+   * @param {THREE.Scene} scene
+   * @param {string} id
+   * @param {number} theta
+   * @param {number} phi
+   * @param {number} [altitude] - Raggio di rendering dal centro del pianeta.
+   *        Default: FLY_ALTITUDE + 0.1 (quota degli aerei). I proiettili delle
+   *        torrette passano la quota del tip del cannone per non apparire
+   *        "sopra" il cannone al momento dello spawn.
+   */
+  constructor(scene, id, theta, phi, altitude = FLY_ALTITUDE + 0.1) {
     this.id = id;
+    this._altitude = altitude;
     this.mesh = new THREE.Mesh(bulletGeo, bulletMat);
     this.mesh.scale.set(1, 1, 1.5);
     this.mesh.renderOrder = 3;
@@ -42,7 +53,7 @@ export class ProjectileEntity {
 
   update(theta, phi) {
     this.prevPosition.copy(this.currPosition);
-    const pos = sphericalToCartesian(theta, phi, FLY_ALTITUDE + 0.1);
+    const pos = sphericalToCartesian(theta, phi, this._altitude);
     this.currPosition.set(pos.x, pos.y, pos.z);
     if (!this.initialized) {
       this.prevPosition.copy(this.currPosition);

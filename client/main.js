@@ -134,6 +134,8 @@ const buildingEntities   = new Map(); // buildingId → BuildingEntity
 let   targetEntity       = null;
 let   currentTarget      = null;
 let   allPlayerStates    = [];
+/** Ultimo nightFactor campionato (aggiornato ogni frame): serve al beacon torrette in onGameState. */
+let   currentNightFactor = 0;
 
 // Powerup: posizioni note (da game-state) + timestamp ultimo try-collect per ID.
 // Non marchiamo più i powerup come "tentati una volta" — se la prima richiesta
@@ -325,7 +327,21 @@ const net = new NetworkManager({
     }
     state.projectiles.forEach(p => {
       if (!projectileEntities.has(p.id)) {
-        projectileEntities.set(p.id, new ProjectileEntity(scene, p.id, p.theta, p.phi));
+        // Se è un proiettile da torretta, lo renderizziamo alla quota del tip
+        // del cannone (~53.2 dal centro del pianeta) anziché FLY_ALTITUDE (56):
+        // altrimenti il proiettile appare 2-3 unità sopra la bocca del cannone.
+        // Il server continua a tracciare la collisione a FLY_ALTITUDE.
+        let altitude; // undefined → default del ProjectileEntity
+        if (typeof p.ownerId === 'string' && p.ownerId.startsWith('turret-')) {
+          const buildingId = p.ownerId.slice('turret-'.length);
+          const be = buildingEntities.get(buildingId);
+          if (be) {
+            const tip = be.getCannonTipWorld();
+            if (tip) altitude = tip.length();
+            be.spawnMuzzleFlash();
+          }
+        }
+        projectileEntities.set(p.id, new ProjectileEntity(scene, p.id, p.theta, p.phi, altitude));
       } else {
         projectileEntities.get(p.id).update(p.theta, p.phi);
       }
@@ -371,7 +387,7 @@ const net = new NetworkManager({
           const entity = new BuildingEntity(scene, b.id, b.theta, b.phi);
           buildingEntities.set(b.id, entity);
         }
-        buildingEntities.get(b.id).update(b, allPlayerStates, camera);
+        buildingEntities.get(b.id).update(b, allPlayerStates, camera, currentNightFactor);
       });
     }
   },
@@ -483,6 +499,7 @@ function animate() {
 
   sky.update(delta);
   const nightFactor = typeof sky.getNightFactor === 'function' ? sky.getNightFactor() : 0;
+  currentNightFactor = nightFactor;
 
   if (inGame && isAlive && localState) {
     ensureLocalAirplane(localState.color ?? '#ff4444', localState.model ?? 'airplane');
@@ -602,11 +619,12 @@ function animate() {
   // Anima target
   targetEntity?.tick();
 
-  // Aggiorna edifici (billboard barra progresso)
+  // Aggiorna edifici: billboard barra progresso + beacon notturno lampeggiante
   for (const be of buildingEntities.values()) {
     if (be.progressGroup.visible) {
       be.progressGroup.lookAt(camera.position);
     }
+    be.tick(delta, nightFactor);
   }
 
   // HUD
