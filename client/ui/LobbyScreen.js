@@ -26,7 +26,10 @@ export class LobbyScreen {
     this._buildColorPicker();
     this._buildModelPicker();
     this._playBtn.addEventListener('click', () => this._handlePlay());
-    this._nicknameEl.addEventListener('input', () => this._updatePlayState());
+    const onNicknameMaybeChanged = () => this._updatePlayState();
+    this._nicknameEl.addEventListener('input', onNicknameMaybeChanged);
+    this._nicknameEl.addEventListener('change', onNicknameMaybeChanged);
+    this._nicknameEl.addEventListener('focus', onNicknameMaybeChanged);
     this._nicknameEl.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
       e.preventDefault();
@@ -34,6 +37,12 @@ export class LobbyScreen {
     });
 
     this._updatePlayState();
+    // Autofill / browser che imposta il valore dopo il primo frame spesso non emettono `input`.
+    requestAnimationFrame(() => {
+      this._updatePlayState();
+      requestAnimationFrame(() => this._updatePlayState());
+    });
+    setTimeout(() => this._updatePlayState(), 300);
   }
 
   _restoreLastNickname() {
@@ -43,6 +52,7 @@ export class LobbyScreen {
       const trimmed = String(raw).trim().slice(0, 16);
       if (!trimmed) return;
       this._nicknameEl.value = trimmed;
+      this._updatePlayState();
     } catch {
       /* localStorage non disponibile (privacy mode, ecc.) */
     }
@@ -169,5 +179,6 @@ export class LobbyScreen {
 
   show() {
     this._lobbyEl.style.display = 'flex';
+    this._updatePlayState();
   }
 }
