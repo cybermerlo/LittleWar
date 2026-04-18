@@ -28,6 +28,7 @@ import {
   FORWARD_ACCEL, BACKWARD_ACCEL,
   WEAPON_CONFIGS, FLY_ALTITUDE, MAX_PLAYERS, CLIENT_INPUT_SEND_MS,
   POWERUP_COLLECT_RADIUS,
+  RESPAWN_INVINCIBILITY,
 } from '../shared/constants.js';
 
 /** Distanza 3D tra due punti sferici allo stesso raggio — stessa formula del server. */
@@ -523,6 +524,7 @@ const net = new NetworkManager({
     phi     = state.phi;
     heading = state.heading;
     boostEnergy = typeof state.boostEnergy === 'number' ? state.boostEnergy : BOOST_MAX;
+    _invincibleUntil = Date.now() + RESPAWN_INVINCIBILITY;
     death.hide();
   },
 
@@ -535,6 +537,7 @@ const net = new NetworkManager({
 // Creato quando riceviamo onJoined, ma ci serve il colore — lo creiamo dopo.
 // Usiamo un riferimento lazy.
 let localAirplane = null;
+let _invincibleUntil = 0;
 
 function ensureLocalAirplane(color, model) {
   if (!localAirplane) {
@@ -617,6 +620,13 @@ function animate() {
       delta,
       boostActive ? (boostEnergy / BOOST_MAX) : 0,
     );
+    // Blink durante invincibilità post-respawn (5 Hz, 100ms on/off)
+    if (Date.now() < _invincibleUntil) {
+      localAirplane.mesh.visible = Math.floor(Date.now() / 100) % 2 === 0;
+    } else {
+      localAirplane.mesh.visible = true;
+    }
+
     camCtrl.update(localAirplane.mesh, localAirplane.sphereQuaternion, localAirplane.flightQuaternion);
 
     // Invia input al server (throttled)

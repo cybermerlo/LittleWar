@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readdirSync, statSync } from 'fs';
+import { get as httpsGet } from 'https';
 import { Game } from './Game.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -31,6 +32,21 @@ app.get('/api/music-stations', (req, res) => {
   } catch {
     res.json([]);
   }
+});
+
+// Fetch ultimo bollettino GR1 dal feed RSS e ritorna { url, title }
+const GR1_FEED = 'https://giuliomagnifico.github.io/raiplay-feed/feed_gr1.xml';
+app.get('/api/gr1-latest', (req, res) => {
+  httpsGet(GR1_FEED, (feedRes) => {
+    let xml = '';
+    feedRes.on('data', (chunk) => { xml += chunk; });
+    feedRes.on('end', () => {
+      const enclosure = xml.match(/<enclosure[^>]+url="([^"]+)"/);
+      const title     = xml.match(/<item>[^]*?<title>([^<]+)<\/title>/);
+      if (!enclosure) return res.status(404).json({ error: 'nessun bollettino trovato' });
+      res.json({ url: enclosure[1], title: title?.[1] ?? 'GR1' });
+    });
+  }).on('error', () => res.status(502).json({ error: 'feed non raggiungibile' }));
 });
 
 // Serve il build di produzione

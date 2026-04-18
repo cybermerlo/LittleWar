@@ -17,30 +17,38 @@ const sounds = {
 };
 
 // ── Stazioni radio ─────────────────────────────────────────────────────────────
-// Le stazioni vengono caricate da /api/music-stations al primo avvio.
-// Basta aggiungere file nelle sottocartelle di public/music/ — nessuna modifica al codice.
+// Le stazioni da cartella vengono caricate da /api/music-stations al primo avvio.
+// "Giornale Radio" è una stazione speciale (type:'news') sempre iniettata in fondo.
 
 const MUSIC_VOLUME = 0.22;
 
-let _stations = [];          // [{ name, paths }]
+// Stazione speciale notizie — non ha paths, usa /api/gr1-latest
+const NEWS_STATION = { name: 'Giornale Radio', type: 'news' };
+
+let _stations = [];          // [{ name, type, paths? }]
 let _currentStationIdx = 0;
 let _musicHowls = [];
 let _musicPlaylistActive = false;
 let _initPromise = null;
+
+// Ritorna true se una stazione ha audio da riprodurre
+function _isPlayable(s) {
+  return s.type === 'news' || (s.paths?.length > 0);
+}
 
 async function _fetchStations() {
   try {
     const res = await fetch('/api/music-stations');
     if (!res.ok) throw new Error();
     const data = await res.json();
-    if (Array.isArray(data) && data.length > 0) return data;
+    if (Array.isArray(data)) return data;
   } catch { /* fallback vuoto */ }
   return [];
 }
 
 function _buildHowls(stationIdx) {
   const station = _stations[stationIdx];
-  if (!station) return [];
+  if (!station || station.type === 'news') return [];
   return station.paths.map((src) =>
     trySound({ src: [src], loop: false, volume: MUSIC_VOLUME }),
   );
@@ -65,6 +73,7 @@ function _wireChain(howls) {
 
 function _stopAllHowls() {
   for (const h of _musicHowls) h?.stop();
+  _musicHowls = [];
 }
 
 function _startStation(stationIdx, randomStart = false) {
@@ -80,6 +89,23 @@ function _startStation(stationIdx, randomStart = false) {
     : validIdx[0];
   _musicHowls[startAt]?.play();
   return true;
+}
+
+async function _playNewsStation() {
+  _stopAllHowls();
+  try {
+    const res = await fetch('/api/gr1-latest');
+    if (!res.ok) throw new Error('feed error');
+    const { url } = await res.json();
+    // html5:true evita problemi CORS con Web Audio API sullo stream RAI
+    const h = trySound({ src: [url], loop: false, volume: MUSIC_VOLUME, html5: true });
+    if (h) {
+      _musicHowls = [h];
+      h.play();
+    }
+  } catch {
+    console.warn('[AudioManager] Giornale Radio: bollettino non disponibile');
+  }
 }
 
 // ── Motore ────────────────────────────────────────────────────────────────────
@@ -117,21 +143,25 @@ export const AudioManager = {
   /** Carica le stazioni dal server. Va chiamato all'avvio, prima di startMusic(). */
   async init() {
     if (_initPromise) return _initPromise;
-    _initPromise = _fetchStations().then((stations) => {
-      _stations = stations;
-      // Default: "Radio Marilù", altrimenti prima stazione disponibile
-      const defaultIdx = stations.findIndex((s) => s.name === 'Radio Marilù');
-      _currentStationIdx = defaultIdx >= 0 ? defaultIdx : 0;
+    _initPromise = _fetchStations().then((folderStations) => {
+      // Radio Marilù sempre prima, poi le altre cartelle, poi Giornale Radio, poi Off (implicito)
+      const marilù = folderStations.find((s) => s.name === 'Radio Marilù');
+      const rest    = folderStations.filter((s) => s.name !== 'Radio Marilù');
+      _stations = [...(marilù ? [marilù] : []), ...rest, NEWS_STATION];
+      _currentStationIdx = 0;
     });
     return _initPromise;
   },
 
   /** Avvia in un handler da click utente (autoplay browser) */
   startMusic() {
-    if (_stations.length === 0 || _currentStationIdx === _stations.length) return;
+    const OFF = _stations.length;
+    if (_stations.length === 0 || _currentStationIdx === OFF) return;
     const anyPlaying = _musicHowls.some((h) => h?.playing());
     if (anyPlaying) return;
+    const station = _stations[_currentStationIdx];
     _musicPlaylistActive = true;
+    if (station?.type === 'news') { _playNewsStation(); return; }
     _startStation(_currentStationIdx, true);
   },
 
@@ -142,42 +172,43 @@ export const AudioManager = {
 
   /**
    * Passa alla stazione successiva (R).
-   * Ciclo: stazioni con tracce → ... → Off → prima stazione con tracce → ...
-   * Ritorna il nome della stazione attiva, o 'Off'.
+   * Ciclo: stazioni riproducibili (cartelle non vuote + Giornale Radio) → Off → ricomincia.
+   * Ritorna il nome della nuova stazione (o 'Off').
    */
   nextStation() {
     if (_stations.length === 0) return '';
     sounds.radioPing?.play();
 
-    // _currentStationIdx === _stations.length significa "Off"
     const OFF = _stations.length;
 
     if (_currentStationIdx === OFF) {
-      // Off → prima stazione non vuota
-      const first = _stations.findIndex((s) => s.paths.length > 0);
+      // Off → prima stazione riproducibile
+      const first = _stations.findIndex(_isPlayable);
       if (first < 0) return 'Off';
       _currentStationIdx = first;
-      _musicPlaylistActive = true;
-      _startStation(_currentStationIdx, true);
-      return _stations[_currentStationIdx].name;
+    } else {
+      // Cerca la prossima stazione riproducibile
+      let next = _currentStationIdx + 1;
+      while (next < OFF && !_isPlayable(_stations[next])) next++;
+
+      if (next === OFF) {
+        // Fine lista → Off
+        _currentStationIdx = OFF;
+        _musicPlaylistActive = false;
+        _stopAllHowls();
+        return 'Off';
+      }
+      _currentStationIdx = next;
     }
 
-    // Cerca la prossima stazione non vuota dopo quella corrente
-    let next = _currentStationIdx + 1;
-    while (next < OFF && _stations[next].paths.length === 0) next++;
-
-    if (next === OFF) {
-      // Ultima stazione → Off
-      _currentStationIdx = OFF;
-      _musicPlaylistActive = false;
-      _stopAllHowls();
-      return 'Off';
-    }
-
-    _currentStationIdx = next;
     _musicPlaylistActive = true;
-    _startStation(_currentStationIdx, true);
-    return _stations[_currentStationIdx].name;
+    const station = _stations[_currentStationIdx];
+    if (station.type === 'news') {
+      _playNewsStation();
+    } else {
+      _startStation(_currentStationIdx, true);
+    }
+    return station.name;
   },
 
   getStationName() {
