@@ -44,6 +44,8 @@ export const CAMERA_BANK_FOLLOW = 0.55;
 
 // Armi — tab fino a Lv.4; oltre si extrapola in getWeaponFireConfig
 export const MAX_WEAPON_LEVEL = 24;
+/** Barra HUD arma: piena a questo livello (e oltre). */
+export const WEAPON_HUD_BAR_FULL_LEVEL = 4;
 export const WEAPON_CONFIGS = [
   { bullets: 1, spread: 0,    speedMult: 1.00 },
   { bullets: 2, spread: 0.09, speedMult: 0.90 },

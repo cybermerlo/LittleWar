@@ -654,6 +654,60 @@
       filter: grayscale(0.35) brightness(0.85);
     }
 
+    /* Arma / velocità: stessa struttura del boost con barre a gradiente distinte */
+    .hud-stat-pill {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.32rem;
+      min-width: 5.5rem;
+      padding: 0.4rem 0.85rem 0.45rem;
+    }
+
+    .hud-stat-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      color: var(--lw-on-surface-variant);
+      line-height: 1.15;
+    }
+
+    .hud-stat-track {
+      height: 0.44rem;
+      border-radius: 9999px;
+      background: color-mix(in srgb, var(--lw-on-surface) 10%, transparent);
+      overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 14%, transparent);
+    }
+
+    .hud-stat-fill {
+      height: 100%;
+      width: 100%;
+      border-radius: inherit;
+      transform-origin: left center;
+      transform: scaleX(1);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+      transition: transform 0.2s ease-out;
+    }
+
+    .hud-stat-fill--weapon {
+      background: linear-gradient(
+        90deg,
+        #fb7185 0%,
+        #f97316 38%,
+        #fbbf24 100%
+      );
+    }
+
+    .hud-stat-fill--speed {
+      background: linear-gradient(
+        90deg,
+        #34d399 0%,
+        #2dd4bf 42%,
+        #38bdf8 100%
+      );
+    }
+
     #hud-bottom {
       position: absolute;
       bottom: 1rem;
@@ -877,6 +931,7 @@
     #chat-wrap {
       position: fixed;
       left: 1.25rem;
+      top: auto;
       bottom: 1.25rem;
       width: min(22rem, calc(100vw - 2.5rem));
       display: none;
@@ -1161,19 +1216,30 @@
       box-shadow: 0 8px 22px rgba(34, 211, 238, 0.45);
     }
 
-    .mc-btn--calibrate {
-      padding: 0.5rem 0.9rem;
-      font-size: 0.62rem;
+    .mc-btn--small {
+      width: 2.8rem;
+      height: 2.8rem;
+      border-radius: 50%;
+      font-size: 1rem;
+      padding: 0;
     }
 
-    #mc-top-controls {
-      position: absolute;
-      top: calc(0.8rem + env(safe-area-inset-top, 0px));
-      right: calc(0.8rem + env(safe-area-inset-right, 0px));
-      display: flex;
-      gap: 0.4rem;
-      pointer-events: none;
+    #mc-radio {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      appearance: none;
+      -webkit-appearance: none;
+      cursor: pointer;
+      pointer-events: auto;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      font-family: inherit;
+      line-height: 1;
+      transition: transform 0.08s ease, background 0.15s ease;
     }
+    #mc-radio:active { transform: scale(0.92); }
 
     /* Prompt di rotazione per portrait */
     #ios-home-tip {
@@ -1237,32 +1303,6 @@
       50%      { transform: rotate(0deg); }
     }
 
-    /* Bottone "Abilita inclinazione" nella lobby */
-    #tilt-toggle {
-      display: none;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      width: 100%;
-      padding: 0.65rem 1rem;
-      border-radius: 0.7rem;
-      border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 30%, transparent);
-      background: color-mix(in srgb, var(--lw-surface-container-highest) 80%, transparent);
-      color: var(--lw-on-surface);
-      font-family: 'Plus Jakarta Sans', sans-serif;
-      font-weight: 700;
-      font-size: 0.82rem;
-      cursor: pointer;
-      transition: border-color 0.2s ease, background 0.2s ease;
-    }
-
-    #tilt-toggle.selected {
-      border-color: var(--lw-primary-container);
-      background: color-mix(in srgb, var(--lw-primary-container) 22%, var(--lw-surface-container-highest));
-    }
-
-    body.is-mobile #tilt-toggle { display: flex; }
-
     /* Sulla lobby: su mobile mostra i controlli touch e nasconde la legenda tastiera. */
     .lw-controls-mobile { display: none; }
     body.is-mobile .lw-controls-kb     { display: none; }
@@ -1278,9 +1318,10 @@
       #hud-top   { top: 0.5rem; padding: 0 0.75rem; gap: 0.5rem; }
       #hud-bottom { bottom: 0.5rem; gap: 0.4rem; padding: 0 0.75rem; }
       .hud-pill  { font-size: 0.7rem; padding: 0.35rem 0.75rem; }
-      .hud-boost-pill { min-width: 5.5rem; }
+      .hud-boost-pill,
+      .hud-stat-pill { min-width: 5rem; padding: 0.32rem 0.7rem 0.38rem; }
       #hud-players { display: none; }
-      #chat-wrap { left: 0.75rem; bottom: 7.5rem; width: min(16rem, calc(100vw - 1.5rem)); }
+      #chat-wrap { left: 0.75rem; top: 3.5rem; bottom: auto; width: min(15rem, calc(100vw - 1.5rem)); }
     }
 
     @media (max-width: 900px) and (orientation: landscape) {
@@ -1291,7 +1332,7 @@
         justify-content: flex-start;
         padding-left: 11rem;
       }
-      #chat-wrap { bottom: 0.6rem; left: 11rem; width: min(14rem, calc(100vw - 22rem)); }
+      #chat-wrap { top: 3rem; bottom: auto; left: 0.75rem; width: min(14rem, calc(100vw - 2rem)); }
     }
   </style>
 </head>
@@ -1332,11 +1373,10 @@
             </div>
             <div class="lw-controls-grid lw-controls-mobile" aria-label="Controlli touch">
               <span class="lw-key">Joystick</span><span>sterza</span>
-              <span class="lw-key">Inclinazione</span><span>sterza (se abilitata)</span>
               <span class="lw-key">FIRE</span><span>spara</span>
               <span class="lw-key">💣</span><span>sgancia bomba</span>
               <span class="lw-key">⚡</span><span>boost</span>
-              <span class="lw-key">Centra</span><span>ricalibra l’inclinazione</span>
+              <span class="lw-key">🎵</span><span>cambia radio</span>
             </div>
             <ul class="lw-how-tips" aria-label="Obiettivi e meccaniche">
               <li>
@@ -1396,11 +1436,6 @@
           </div>
         </div>
 
-        <button type="button" id="tilt-toggle" aria-pressed="false">
-          <span class="material-symbols-outlined" aria-hidden="true">screen_rotation</span>
-          <span id="tilt-toggle-label">Sterza inclinando il telefono</span>
-        </button>
-
         <button type="button" id="play-btn">GIOCA</button>
 
         <div class="lw-online-pill">
@@ -1421,8 +1456,18 @@
       <div class="hud-pill" id="hud-turrets">Torrette: 0</div>
     </div>
     <div id="hud-bottom">
-      <div class="hud-pill" id="hud-weapon">Arma: Lv.0</div>
-      <div class="hud-pill" id="hud-speed">Velocità: 100%</div>
+      <div class="hud-pill hud-stat-pill" id="hud-weapon-wrap">
+        <span class="hud-stat-label" id="hud-weapon">🔫 Lv.0</span>
+        <div class="hud-stat-track">
+          <div class="hud-stat-fill hud-stat-fill--weapon" id="hud-weapon-fill"></div>
+        </div>
+      </div>
+      <div class="hud-pill hud-stat-pill" id="hud-speed-wrap">
+        <span class="hud-stat-label" id="hud-speed">🚀 100%</span>
+        <div class="hud-stat-track">
+          <div class="hud-stat-fill hud-stat-fill--speed" id="hud-speed-fill"></div>
+        </div>
+      </div>
       <div
         class="hud-pill hud-boost-pill"
         id="hud-boost"
@@ -1437,6 +1482,7 @@
           <div class="hud-boost-fill" id="hud-boost-fill"></div>
         </div>
       </div>
+      <button type="button" class="hud-pill" id="mc-radio" aria-label="Cambia radio">🎵</button>
     </div>
     <div id="hud-players">
       <h3>Giocatori</h3>
@@ -1456,12 +1502,6 @@
   <div id="mobile-controls" aria-hidden="true">
     <div id="mc-joystick">
       <div id="mc-joystick-thumb"></div>
-    </div>
-
-    <div id="mc-top-controls">
-      <button type="button" class="mc-btn mc-btn--calibrate" id="mc-calibrate" title="Ricalibra inclinazione">
-        Centra
-      </button>
     </div>
 
     <div class="mc-btns">

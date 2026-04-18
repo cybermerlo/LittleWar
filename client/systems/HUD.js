@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { sphericalToCartesian } from '../utils/SphereUtils.js';
-import { getWeaponFireConfig, getWeaponMoveSpeedPercent, FLY_ALTITUDE } from '../../shared/constants.js';
+import { getWeaponMoveSpeedPercent, WEAPON_HUD_BAR_FULL_LEVEL, FLY_ALTITUDE } from '../../shared/constants.js';
 
 export class HUD {
   constructor() {
@@ -10,6 +10,8 @@ export class HUD {
       turrets:     document.getElementById('hud-turrets'),
       weapon:      document.getElementById('hud-weapon'),
       speed:       document.getElementById('hud-speed'),
+      weaponFill:  document.getElementById('hud-weapon-fill'),
+      speedFill:   document.getElementById('hud-speed-fill'),
       boost:       document.getElementById('hud-boost'),
       boostFill:   document.getElementById('hud-boost-fill'),
       playerList:  document.getElementById('player-list'),
@@ -119,14 +121,18 @@ export class HUD {
     if (!localPlayer) return;
 
     const wl = Math.max(0, Math.floor(localPlayer.weaponLevel ?? 0));
-    const fire = getWeaponFireConfig(wl);
     const speedPct = getWeaponMoveSpeedPercent(wl);
 
-    this.el.kills.textContent  = `Kill: ${localPlayer.kills}`;
+    const isMobile = document.body.classList.contains('is-mobile');
+    this.el.kills.textContent  = isMobile ? `⚔️ ${localPlayer.kills}` : `Kill: ${localPlayer.kills}`;
     const turretCount = (buildings || []).filter((b) => b.ownerId === localPlayer.id).length;
-    if (this.el.turrets) this.el.turrets.textContent = `Torrette: ${turretCount}`;
-    this.el.weapon.textContent = `Arma: Lv.${wl} (${fire.bullets} colpi)`;
-    this.el.speed.textContent  = `Velocità: ${speedPct}%`;
+    if (this.el.turrets) this.el.turrets.textContent = isMobile ? `🏠 ${turretCount}` : `Torrette: ${turretCount}`;
+    this.el.weapon.textContent = `🔫 Lv.${wl}`;
+    if (this.el.speed) this.el.speed.textContent = `🚀 ${speedPct}%`;
+    const weaponBar = Math.max(0.1, Math.min(1, wl / WEAPON_HUD_BAR_FULL_LEVEL));
+    const speedBar = Math.max(0.06, Math.min(1, speedPct / 100));
+    if (this.el.weaponFill) this.el.weaponFill.style.transform = `scaleX(${weaponBar})`;
+    if (this.el.speedFill) this.el.speedFill.style.transform = `scaleX(${speedBar})`;
     const r = Math.max(0, Math.min(1, boostRatio));
     const boostPct = Math.round(r * 100);
     if (this.el.boostFill) {

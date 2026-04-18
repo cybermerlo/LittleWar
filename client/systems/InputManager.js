@@ -17,6 +17,7 @@ export class InputManager {
       boost: false,
       shoot: false,      // one-shot
       bomb: false,       // one-shot
+      radio: false,      // one-shot
       leftDoubleTap: false,
       rightDoubleTap: false,
     };
@@ -101,8 +102,9 @@ export class InputManager {
   }
 
   consumeRadio() {
-    if (this._radioPressed) {
+    if (this._radioPressed || this.touch.radio) {
       this._radioPressed = false;
+      this.touch.radio = false;
       return true;
     }
     return false;
@@ -147,6 +149,7 @@ export class InputManager {
   setTouchBoost(v)    { this.touch.boost    = !!v; }
   triggerTouchShoot() { this.touch.shoot = true; }
   triggerTouchBomb()  { this.touch.bomb  = true; }
+  triggerTouchRadio() { this.touch.radio = true; }
 
   // ─── API giroscopio ──────────────────────────────────────────────────────
   /**

@@ -164,6 +164,12 @@ export class ChatManager {
 
     entry.appendChild(nameSpan);
     entry.appendChild(textSpan);
+
+    const maxMessages = document.body.classList.contains('is-mobile') ? 3 : 6;
+    while (this._feed.children.length >= maxMessages) {
+      this._feed.removeChild(this._feed.firstChild);
+    }
+
     this._feed.appendChild(entry);
 
     // Fade-in

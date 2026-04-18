@@ -99,6 +99,10 @@ Promise.all([loadTreeTemplates(), loadBuildingTemplates(), loadHospitalTemplates
 AudioManager.init(); // carica stazioni in background
 
 const input    = new InputManager();
+document.getElementById('mc-radio')?.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  input.triggerTouchRadio();
+});
 const mobile   = isTouchDevice() ? new MobileControls(input) : null;
 if (mobile) document.body.classList.add('is-mobile');
 
@@ -115,29 +119,6 @@ if (_isIOS && !window.navigator.standalone) {
   }
 }
 
-// Bottone "sterza inclinando": richiede permesso giroscopio (iOS) e calibra.
-const tiltBtn = document.getElementById('tilt-toggle');
-const tiltLabel = document.getElementById('tilt-toggle-label');
-if (tiltBtn && mobile) {
-  tiltBtn.addEventListener('click', async () => {
-    if (input.gyro.enabled) {
-      input.disableGyro();
-      tiltBtn.classList.remove('selected');
-      tiltBtn.setAttribute('aria-pressed', 'false');
-      if (tiltLabel) tiltLabel.textContent = 'Sterza inclinando il telefono';
-      return;
-    }
-    const ok = await input.enableGyro();
-    if (ok) {
-      input.calibrateGyro();
-      tiltBtn.classList.add('selected');
-      tiltBtn.setAttribute('aria-pressed', 'true');
-      if (tiltLabel) tiltLabel.textContent = 'Inclinazione attiva — tocca per disattivare';
-    } else {
-      if (tiltLabel) tiltLabel.textContent = 'Sensori non disponibili';
-    }
-  });
-}
 const camCtrl  = new CameraController(camera);
 const hud      = new HUD();
 const death    = new DeathScreen();
@@ -321,8 +302,6 @@ const net = new NetworkManager({
     chat.enable();
     inGame = true;
     document.body.classList.add('in-game');
-    // Calibra giroscopio all'ingresso in gioco se attivo.
-    if (input.gyro.enabled) input.calibrateGyro();
   },
 
   onPlayerJoined(info) {

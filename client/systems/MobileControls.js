@@ -20,9 +20,6 @@ export class MobileControls {
     this._btnShoot = document.getElementById('mc-shoot');
     this._btnBomb  = document.getElementById('mc-bomb');
     this._btnBoost = document.getElementById('mc-boost');
-    this._btnCalibrate = document.getElementById('mc-calibrate');
-
-    this._gyroToggled = false;
 
     // Previene pinch-to-zoom iOS quando si usano più dita contemporaneamente.
     // gesturestart/gesturechange sono eventi webkit-only per pinch/rotate.
@@ -36,13 +33,6 @@ export class MobileControls {
     this._bindHoldButton(this._btnBoost, (held) => this.input.setTouchBoost(held));
     this._bindTapButton(this._btnShoot, () => this.input.triggerTouchShoot());
     this._bindTapButton(this._btnBomb,  () => this.input.triggerTouchBomb());
-    if (this._btnCalibrate) {
-      this._btnCalibrate.addEventListener('click', (e) => {
-        e.preventDefault();
-        this.input.calibrateGyro();
-        this._flash(this._btnCalibrate);
-      });
-    }
 
     // Su mobile teniamo sempre attivo il movimento in avanti (l'aereo non sta fermo)
     this.input.setTouchForward(true);
