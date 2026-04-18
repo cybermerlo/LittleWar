@@ -8,10 +8,10 @@ function trySound(config) {
 }
 
 const sounds = {
-  shoot:     trySound({ src: ['/sounds/shoot.wav'],     volume: 0.4 }),
-  explosion: trySound({ src: ['/sounds/explosion.wav'], volume: 0.6 }),
-  powerup:   trySound({ src: ['/sounds/powerup.wav'],   volume: 0.5 }),
-  bomb:      trySound({ src: ['/sounds/bomb.wav'],      volume: 0.7 }),
+  shoot:     trySound({ src: ['/sounds/shoot.mp3'],     volume: 0.4 }),
+  explosion: trySound({ src: ['/sounds/explosion.mp3'], volume: 0.6 }),
+  powerup:   trySound({ src: ['/sounds/powerup.mp3'],   volume: 0.5 }),
+  bomb:      trySound({ src: ['/sounds/bomb.mp3'],      volume: 0.7 }),
   chatPop:   trySound({ src: ['/sounds/chat-pop.mp3'], volume: 0.5 }),
   radioPing: trySound({ src: ['/sounds/radio-ping.mp3'], volume: 0.8 }),
 };
