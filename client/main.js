@@ -268,6 +268,19 @@ const net = new NetworkManager({
       boostEnergy = typeof localState.boostEnergy === 'number' ? localState.boostEnergy : BOOST_MAX;
     }
 
+    // Cleanup di entità eventualmente già create da game-state ricevuti prima
+    // di 'joined'. Il server broadcasta game-state a TUTTI i socket connessi,
+    // anche quelli ancora in lobby: al refresh il client crea entità via
+    // onGameState, poi onJoined le ricreerebbe lasciando le vecchie orfane
+    // nella scena (stelle freezate non raccoglibili).
+    for (const [, plane] of remoteAirplanes) plane.dispose(scene);
+    remoteAirplanes.clear();
+    remoteWasDead.clear();
+    for (const [, e] of powerupEntities) e.dispose(scene);
+    powerupEntities.clear();
+    powerupPositions.clear();
+    powerupLastTryAt.clear();
+
     // Crea aerei degli altri giocatori già presenti
     players.forEach(p => {
       if (p.id !== localPlayerId) {
@@ -278,8 +291,6 @@ const net = new NetworkManager({
     });
 
     // Powerup già presenti
-    powerupPositions.clear();
-    powerupLastTryAt.clear();
     powerups.forEach(pu => {
       const id = powerupKey(pu.id);
       const e = new PowerUpEntity(scene, id, pu.type, pu.theta, pu.phi);
