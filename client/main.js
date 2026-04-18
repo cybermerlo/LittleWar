@@ -95,6 +95,8 @@ Promise.all([loadTreeTemplates(), loadBuildingTemplates(), loadHospitalTemplates
 
 // ── Stato gioco ───────────────────────────────────────────────────────────────
 
+AudioManager.init(); // carica stazioni in background
+
 const input    = new InputManager();
 const mobile   = isTouchDevice() ? new MobileControls(input) : null;
 if (mobile) document.body.classList.add('is-mobile');
@@ -621,6 +623,12 @@ function animate() {
     if (now - lastInputSend >= CLIENT_INPUT_SEND_MS) {
       net.sendInput(theta, phi, heading, boostActive, movingForward, movingBackward);
       lastInputSend = now;
+    }
+
+    // Radio
+    if (input.consumeRadio()) {
+      const stationName = AudioManager.nextStation();
+      hud.showRadioToast(stationName);
     }
 
     // Sparo

@@ -47,6 +47,7 @@ export class InputManager {
   _onKeyDown(e) {
     if (e.code === 'Space') e.preventDefault();
     if (!e.repeat) {
+      if (e.code === 'KeyR') { this._radioPressed = true; }
       const now = performance.now();
       if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
         if (now - this._lastLeftTapAt <= 260) this.leftDoubleTap = true;
@@ -94,6 +95,14 @@ export class InputManager {
     if (this.mouseLeft || this.touch.shoot) {
       this.mouseLeft = false;
       this.touch.shoot = false;
+      return true;
+    }
+    return false;
+  }
+
+  consumeRadio() {
+    if (this._radioPressed) {
+      this._radioPressed = false;
       return true;
     }
     return false;

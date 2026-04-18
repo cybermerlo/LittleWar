@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { readdirSync, statSync } from 'fs';
 import { Game } from './Game.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -12,6 +13,24 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: '*' },
+});
+
+// Scansiona public/music/ e ritorna le stazioni con i loro file
+app.get('/api/music-stations', (req, res) => {
+  const musicDir = join(__dirname, '../public/music');
+  try {
+    const stations = readdirSync(musicDir)
+      .filter((name) => statSync(join(musicDir, name)).isDirectory())
+      .map((name) => {
+        const files = readdirSync(join(musicDir, name))
+          .filter((f) => /\.(mp3|ogg|wav)$/i.test(f))
+          .map((f) => `/music/${name}/${f}`);
+        return { name, paths: files };
+      });
+    res.json(stations);
+  } catch {
+    res.json([]);
+  }
 });
 
 // Serve il build di produzione

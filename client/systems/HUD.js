@@ -18,10 +18,12 @@ export class HUD {
       bombToast:   document.getElementById('hud-bomb-toast'),
       killToast:   document.getElementById('hud-kill-toast'),
       towerToast:  document.getElementById('hud-tower-toast'),
+      radioToast:  document.getElementById('hud-radio-toast'),
     };
     this._bombToastTimer  = null;
     this._killToastTimer  = null;
     this._towerToastTimer = null;
+    this._radioToastTimer = null;
     this._playerArrowMap = new Map();
     this._tmpRemote = new THREE.Vector3();
     this._tmpProj = new THREE.Vector3();
@@ -99,6 +101,18 @@ export class HUD {
       el.classList.remove('hud-toast--visible');
       this._bombToastTimer = null;
     }, 3200);
+  }
+
+  showRadioToast(stationName) {
+    const el = this.el.radioToast;
+    if (!el) return;
+    el.textContent = `📻 ${stationName}`;
+    el.classList.add('hud-toast--visible');
+    if (this._radioToastTimer) clearTimeout(this._radioToastTimer);
+    this._radioToastTimer = setTimeout(() => {
+      el.classList.remove('hud-toast--visible');
+      this._radioToastTimer = null;
+    }, 2500);
   }
 
   update(localPlayer, allPlayers, target, camera, boostRatio = 1, boostPressed = false, buildings = []) {
