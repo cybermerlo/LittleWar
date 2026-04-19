@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { surfaceAt, radiusAt, PLANET_RADIUS } from './planetHeight.js';
+import { surfaceAt, radiusAt, PLANET_RADIUS, heightAt01 } from './planetHeight.js';
 
 const TREE_MODEL_URLS = [
   '/models/tree-pine.glb',
+  '/models/alberello_lowpoly_rosso.glb',
+  '/models/Tree_LowPoly_Yellow.glb',
   '/models/tree-deciduous-a.glb',
   '/models/tree-deciduous-b.glb',
   '/models/tree-deciduous-c.glb',
@@ -24,10 +26,13 @@ const BUILDING_TEMPLATE_TARGET_SIZE = 3.2;
 const HOSPITAL_TEMPLATE_TARGET_SIZE = 4.0;
 
 /**
- * Micro-spostamento lungo la normale locale del piano d'appoggio (dopo il fit a 4 punti).
- * Positivo = verso l'esterno dal pianeta.
+ * Spostamento lungo la normale locale dopo l'appoggio sul terreno.
+ * Positivo = verso l'esterno dal pianeta (edifici: dopo il fit a 4 punti sugli angoli).
+ * Un valore per categoria così puoi correggere sink/float per modello.
  */
-const BUILDING_HEIGHT_OFFSET = 0.7;
+const TREE_GROUND_NORMAL_OFFSET = 0;
+const BUILDING_GROUND_NORMAL_OFFSET = 0.6;
+const HOSPITAL_GROUND_NORMAL_OFFSET = 0.2;
 
 const _treeLoader = new GLTFLoader();
 let _treeTemplatesPromise    = null;
@@ -43,6 +48,17 @@ const MAX_BUILDING_SLOPE = 0.28; // edifici: solo terreni quasi piatti
 // ── Anti-compenetrazione edifici (stima footprint su sfera) ───────────────────
 const BUILDING_CLEARANCE = 0.55;      // padding in unità mondo tra impronte
 const MAX_BUILDING_TRIES = 28;        // tentativi per trovare una posizione libera
+
+// ── Alberi: non si sovrappongono; padding piccolo + spawn vicini (foresta) ───
+const TREE_CLEARANCE = 0.14;
+/** Angolo massimo (rad) da un albero “genitore”; esponente < 1 favorisce vicinanza */
+const TREE_CLUSTER_ANGLE_MAX = 0.2;
+const TREE_ATTACH_PROB = 0.8;
+const MAX_TREE_FILL_ATTEMPTS = 5200;
+
+const _candDir = new THREE.Vector3();
+const _forestT = new THREE.Vector3();
+const _forestB = new THREE.Vector3();
 
 // Orienta un oggetto usando la normale analitica della superficie: "up" =
 // normale reale (non radiale), così l'albero segue l'inclinazione del pendio.
@@ -183,14 +199,41 @@ function estimateFootprintRadiusXZ(obj) {
   return Math.sqrt(hw * hw + hd * hd);
 }
 
+function spherePlacementPad(footprintRadius) {
+  return footprintRadius < 0.82 ? TREE_CLEARANCE : BUILDING_CLEARANCE;
+}
+
 function canPlaceOnSphere(dir, footprintRadius, placed, planetRadius) {
   const R = Math.max(planetRadius, 1e-6);
   for (const p of placed) {
     const sep = dir.angleTo(p.dir);
-    const minSepAngle = (footprintRadius + p.footprintRadius + BUILDING_CLEARANCE * 2) / R;
+    const minSepAngle = (
+      footprintRadius
+      + p.footprintRadius
+      + spherePlacementPad(footprintRadius)
+      + spherePlacementPad(p.footprintRadius)
+    ) / R;
     if (sep < minSepAngle) return false;
   }
   return true;
+}
+
+/** Direzione casuale in un cappello sferico attorno a parentDir (più probabile vicino al centro). */
+function sampleBiasedForestDirection(parentDir, maxAngleRad, out) {
+  out.copy(parentDir).normalize();
+  _refAxis.set(Math.abs(out.y) < 0.9 ? 0 : 1, Math.abs(out.y) < 0.9 ? 1 : 0, 0);
+  _forestT.crossVectors(out, _refAxis).normalize();
+  _forestB.crossVectors(out, _forestT).normalize();
+  const px = out.x, py = out.y, pz = out.z;
+  const theta = Math.pow(Math.random(), 1.55) * maxAngleRad;
+  const phi = Math.random() * Math.PI * 2;
+  const c = Math.cos(theta), s = Math.sin(theta), cp = Math.cos(phi), sp = Math.sin(phi);
+  out.set(
+    px * c + _forestT.x * s * cp + _forestB.x * s * sp,
+    py * c + _forestT.y * s * cp + _forestB.y * s * sp,
+    pz * c + _forestT.z * s * cp + _forestB.z * s * sp,
+  ).normalize();
+  return out;
 }
 
 /**
@@ -373,7 +416,12 @@ export function createTerrain(scene, heightData, posAttr, _planetMesh, treeTempl
   let hospitals = 0;
 
   const placedBuildings = [];
+  const placedTrees = [];
   const planetRadius = PLANET_RADIUS;
+
+  function treeAndBuildingObstacles() {
+    return placedTrees.length ? [...placedBuildings, ...placedTrees] : placedBuildings;
+  }
 
   function dirFromIndex(idx) {
     const x = posAttr.getX(idx), y = posAttr.getY(idx), z = posAttr.getZ(idx);
@@ -394,7 +442,7 @@ export function createTerrain(scene, heightData, posAttr, _planetMesh, treeTempl
       const dir = dirFromIndex(idx);
       surfaceAt(dir, scratchInfo);
       if (scratchInfo.slope > MAX_BUILDING_SLOPE) continue;
-      if (!canPlaceOnSphere(dir, footprint, placedBuildings, planetRadius)) continue;
+      if (!canPlaceOnSphere(dir, footprint, treeAndBuildingObstacles(), planetRadius)) continue;
 
       placeFn(obj, scratchInfo.point.clone());
       terrainGroup.add(obj);
@@ -413,9 +461,13 @@ export function createTerrain(scene, heightData, posAttr, _planetMesh, treeTempl
       surfaceAt(dir, scratchInfo);
       if (scratchInfo.slope <= MAX_TREE_SLOPE) {
         const tree = makeTree(treeTemplates);
-        orientOnSurface(tree, scratchInfo.point, scratchInfo.normal);
-        terrainGroup.add(tree);
-        trees++;
+        const fp = estimateFootprintRadiusXZ(tree);
+        if (canPlaceOnSphere(dir, fp, treeAndBuildingObstacles(), planetRadius)) {
+          orientOnSurface(tree, scratchInfo.point, scratchInfo.normal, TREE_GROUND_NORMAL_OFFSET);
+          terrainGroup.add(tree);
+          placedTrees.push({ dir: dir.clone(), footprintRadius: fp });
+          trees++;
+        }
       }
     } else if ((buildings < MAX_BUILDINGS || hospitals < MAX_HOSPITALS) && h > 0.04 && h < 0.20) {
       const canPlaceHospital = hospitals < MAX_HOSPITALS && buildings > 6;
@@ -424,7 +476,7 @@ export function createTerrain(scene, heightData, posAttr, _planetMesh, treeTempl
       if (wantsHospital) {
         const ok = tryPlaceBuildingLike(
           () => makeHospital(hospitalTemplates),
-          (obj, p) => placeBuildingBaseOnTerrain(obj, p, BUILDING_HEIGHT_OFFSET),
+          (obj, p) => placeBuildingBaseOnTerrain(obj, p, HOSPITAL_GROUND_NORMAL_OFFSET),
           0.04,
           0.20,
         );
@@ -432,7 +484,7 @@ export function createTerrain(scene, heightData, posAttr, _planetMesh, treeTempl
       } else if (buildings < MAX_BUILDINGS) {
         const ok = tryPlaceBuildingLike(
           () => makeBuilding(buildingTemplates),
-          (obj, p) => placeBuildingBaseOnTerrain(obj, p, BUILDING_HEIGHT_OFFSET),
+          (obj, p) => placeBuildingBaseOnTerrain(obj, p, BUILDING_GROUND_NORMAL_OFFSET),
           0.04,
           0.20,
         );
@@ -441,6 +493,34 @@ export function createTerrain(scene, heightData, posAttr, _planetMesh, treeTempl
     }
 
     if (trees >= MAX_TREES && buildings >= MAX_BUILDINGS && hospitals >= MAX_HOSPITALS) break;
+  }
+
+  // Raggiungi MAX_TREES con molti spawn “attaccati” ad alberi esistenti (macchie forestali).
+  let treeFillAttempts = 0;
+  while (trees < MAX_TREES && treeFillAttempts < MAX_TREE_FILL_ATTEMPTS) {
+    treeFillAttempts++;
+    let dir;
+    if (Math.random() < TREE_ATTACH_PROB && placedTrees.length > 0) {
+      const seed = placedTrees[Math.floor(Math.random() * placedTrees.length)].dir;
+      sampleBiasedForestDirection(seed, TREE_CLUSTER_ANGLE_MAX, _candDir);
+      dir = _candDir;
+    } else {
+      dir = dirFromIndex(indices[Math.floor(Math.random() * indices.length)]);
+    }
+
+    const h01 = heightAt01(dir.x, dir.y, dir.z);
+    if (h01 <= 0.08 || h01 >= 0.45) continue;
+    surfaceAt(dir, scratchInfo);
+    if (scratchInfo.slope > MAX_TREE_SLOPE) continue;
+
+    const tree = makeTree(treeTemplates);
+    const fp = estimateFootprintRadiusXZ(tree);
+    if (!canPlaceOnSphere(dir, fp, treeAndBuildingObstacles(), planetRadius)) continue;
+
+    orientOnSurface(tree, scratchInfo.point, scratchInfo.normal, TREE_GROUND_NORMAL_OFFSET);
+    terrainGroup.add(tree);
+    placedTrees.push({ dir: dir.clone(), footprintRadius: fp });
+    trees++;
   }
 
   scene.add(terrainGroup);
