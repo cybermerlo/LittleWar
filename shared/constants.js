@@ -96,7 +96,7 @@ export const BOMB_HIT_RADIUS = 3.0;  // distanza dall'obiettivo per contare il c
 // Powerup
 export const POWERUP_COLLECT_RADIUS = 4.0;
 export const POWERUP_LIFETIME = 30000;       // ms
-export const POWERUP_RANDOM_INTERVAL = 500; // ms tra spawn casuali
+export const POWERUP_RANDOM_INTERVAL = 11000; // ms tra spawn casuali
 export const POWERUP_DROP_CHANCE = 0.5;      // 50% alla morte
 
 // Respawn
