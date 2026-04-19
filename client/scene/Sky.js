@@ -23,18 +23,27 @@ const skyVertexShader = /* glsl */ `
 
 const skyFragmentShader = /* glsl */ `
   uniform vec3 topColor;    // bordi esterni schermo
+  uniform vec3 midColor;    // banda orizzonte (bassa quota)
   uniform vec3 bottomColor; // epicentro (dietro al pianeta)
   varying vec3 vWorldPosition;
 
   void main() {
     vec3 viewDir = normalize(vWorldPosition - cameraPosition);
-    vec3 centerDir = normalize(-cameraPosition); // direzione verso (0,0,0) dove c'è il pianeta
+    vec3 centerDir = normalize(-cameraPosition);
     float dotProduct = dot(viewDir, centerDir);
     float angle = acos(clamp(dotProduct, -1.0, 1.0));
-    // regola l'ampiezza del gradiente: valori più alti = transizione più larga e visibile
-    float mixFactor = clamp(angle / 1.8, 0.0, 1.0);
-    mixFactor = smoothstep(0.0, 1.0, mixFactor);
-    gl_FragColor = vec4(mix(bottomColor, topColor, mixFactor), 1.0);
+    float f = clamp(angle / 1.8, 0.0, 1.0);
+    f = smoothstep(0.0, 1.0, f);
+
+    // Tre bande: bottom → mid (orizzonte a ~55%) → top
+    vec3 col;
+    float mid = 0.55;
+    if (f < mid) {
+      col = mix(bottomColor, midColor, f / mid);
+    } else {
+      col = mix(midColor, topColor, (f - mid) / (1.0 - mid));
+    }
+    gl_FragColor = vec4(col, 1.0);
   }
 `;
 
@@ -150,18 +159,18 @@ const starsFragmentShader = /* glsl */ `
   }
 `;
 
-// top = bordi schermo, bottom = epicentro luminoso dietro al pianeta
+// top = bordi schermo, mid = orizzonte, bottom = epicentro luminoso dietro al pianeta
 const skyStates = [
-  // 1. Giorno Alieno (viola scuro ai bordi, ottanio neon al centro)
-  { top: new THREE.Color(0x2b0f4c), bottom: new THREE.Color(0x00f2fe), lightInt: 1.2, ambInt: 0.6, starOpacity: 0.2 },
-  // 2. Tramonto Synthwave (magenta ai bordi, arancio al centro)
-  { top: new THREE.Color(0xd500f9), bottom: new THREE.Color(0xff9100), lightInt: 1.0, ambInt: 0.5, starOpacity: 0.4 },
-  // 3. Crepuscolo Scarlatto (cremisi ai bordi, rosso al centro)
-  { top: new THREE.Color(0x5d001e), bottom: new THREE.Color(0xff1744), lightInt: 0.6, ambInt: 0.3, starOpacity: 0.8 },
-  // 4. Notte Abissale (blu cosmico ai bordi, smeraldo oscuro al centro)
-  { top: new THREE.Color(0x050514), bottom: new THREE.Color(0x00332a), lightInt: 0.1, ambInt: 0.2, starOpacity: 1.0 },
-  // 5. Alba Eterea (indaco ai bordi, menta tenue al centro)
-  { top: new THREE.Color(0x1a237e), bottom: new THREE.Color(0x64ffda), lightInt: 0.8, ambInt: 0.4, starOpacity: 0.5 },
+  // 1. Giorno Alieno (viola cosmico in alto → ciano elettrico mid → menta neon al centro)
+  { top: new THREE.Color(0x200050), mid: new THREE.Color(0x00bbff), bottom: new THREE.Color(0x00ffcc), lightInt: 1.2, ambInt: 0.6, starOpacity: 0.2 },
+  // 2. Tramonto Synthwave (cremisi scuro in alto → arancio fuoco orizzonte → oro al centro)
+  { top: new THREE.Color(0x6d0021), mid: new THREE.Color(0xff5500), bottom: new THREE.Color(0xffcc00), lightInt: 1.0, ambInt: 0.5, starOpacity: 0.4 },
+  // 3. Crepuscolo Scarlatto (nero bruciato in alto → rosso scarlatto mid → arancio brace al centro)
+  { top: new THREE.Color(0x0d0005), mid: new THREE.Color(0xaa1100), bottom: new THREE.Color(0xff4400), lightInt: 0.6, ambInt: 0.3, starOpacity: 0.8 },
+  // 4. Notte Abissale (blu cosm. → blu notte → smeraldo oscuro al centro)
+  { top: new THREE.Color(0x050514), mid: new THREE.Color(0x090920), bottom: new THREE.Color(0x00332a), lightInt: 0.1, ambInt: 0.2, starOpacity: 1.0 },
+  // 5. Alba Eterea (indaco → lavanda rosata orizzonte → menta tenue al centro)
+  { top: new THREE.Color(0x1a237e), mid: new THREE.Color(0xff8fa3), bottom: new THREE.Color(0x64ffda), lightInt: 0.8, ambInt: 0.4, starOpacity: 0.5 },
 ];
 
 /**
@@ -180,6 +189,7 @@ export function createSky(scene, lights) {
 
   const skyUniforms = {
     topColor:    { value: skyStates[0].top.clone() },
+    midColor:    { value: skyStates[0].mid.clone() },
     bottomColor: { value: skyStates[0].bottom.clone() },
   };
 
@@ -434,6 +444,7 @@ export function createSky(scene, lights) {
     const nxt = skyStates[next];
 
     skyUniforms.topColor.value.lerpColors(cur.top, nxt.top, t);
+    skyUniforms.midColor.value.lerpColors(cur.mid, nxt.mid, t);
     skyUniforms.bottomColor.value.lerpColors(cur.bottom, nxt.bottom, t);
 
     const sunInt = THREE.MathUtils.lerp(cur.lightInt, nxt.lightInt, t);

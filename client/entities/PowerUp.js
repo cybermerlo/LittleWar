@@ -6,21 +6,29 @@ import { FLY_ALTITUDE } from '../../shared/constants.js';
 const loader = new GLTFLoader();
 
 let multishotGltf = null;
+let shieldGltf = null;
 let speedGltf = null;
 
 const multishotPromise = loader.loadAsync('/models/Powerup_Multishot.glb').then(gltf => {
   multishotGltf = gltf;
+});
+const shieldPromise = loader.loadAsync('/models/Powerup_Shield.glb').then(gltf => {
+  shieldGltf = gltf;
 });
 const speedPromise = loader.loadAsync('/models/Powerup_Speed.glb').then(gltf => {
   speedGltf = gltf;
 });
 
 function powerupModelPromise(type) {
-  return type === 'extreme_boost' ? speedPromise : multishotPromise;
+  if (type === 'extreme_boost') return speedPromise;
+  if (type === 'shield') return shieldPromise;
+  return multishotPromise;
 }
 
 function powerupGltfForType(type) {
-  return type === 'extreme_boost' ? speedGltf : multishotGltf;
+  if (type === 'extreme_boost') return speedGltf;
+  if (type === 'shield') return shieldGltf;
+  return multishotGltf;
 }
 
 // Fallback geometrico (stessi colori di prima)
