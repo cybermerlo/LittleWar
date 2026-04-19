@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { surfaceAt, radiusAt, PLANET_RADIUS } from './planetHeight.js';
 
 const TREE_MODEL_URLS = [
   '/models/tree-pine.glb',
@@ -33,33 +34,32 @@ let _treeTemplatesPromise    = null;
 let _buildingTemplatesPromise = null;
 let _hospitalTemplatesPromise = null;
 
-const _raycaster = new THREE.Raycaster();
-const _rayOrigin = new THREE.Vector3();
-const _rayDir    = new THREE.Vector3();
 const _refAxis   = new THREE.Vector3();
 const _lc        = new THREE.Vector3();
-const RAY_START  = 85;
+const _surfInfo  = { point: new THREE.Vector3(), normal: new THREE.Vector3() };
+const MAX_TREE_SLOPE     = 0.55; // scarta direzioni troppo ripide per gli alberi
+const MAX_BUILDING_SLOPE = 0.28; // edifici: solo terreni quasi piatti
 
 // ── Anti-compenetrazione edifici (stima footprint su sfera) ───────────────────
 const BUILDING_CLEARANCE = 0.55;      // padding in unità mondo tra impronte
 const MAX_BUILDING_TRIES = 28;        // tentativi per trovare una posizione libera
 
-// Orienta un oggetto sulla sfera: "up" = verso l'esterno, "up world" = Y
-function orientOnSphere(obj, pos, radialOffset = 0) {
-  const up = pos.clone().normalize();
-  obj.position.copy(pos).addScaledVector(up, radialOffset);
-  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+// Orienta un oggetto usando la normale analitica della superficie: "up" =
+// normale reale (non radiale), così l'albero segue l'inclinazione del pendio.
+function orientOnSurface(obj, point, normal, radialOffset = 0) {
+  obj.position.copy(point).addScaledVector(normal, radialOffset);
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
   obj.quaternion.copy(q);
   obj.rotateOnAxis(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI * 2);
 }
 
-function raycastPlanetSurface(planetMesh, worldPointHint) {
-  const dir = worldPointHint.clone().normalize();
-  _rayOrigin.copy(dir).multiplyScalar(RAY_START);
-  _rayDir.copy(dir).negate();
-  _raycaster.set(_rayOrigin, _rayDir);
-  const hits = _raycaster.intersectObject(planetMesh, false);
-  return hits.length ? hits[0].point : null;
+// Punto sulla superficie analitica lungo una direzione (usato per gli angoli
+// della base degli edifici al posto del raycast sulla mesh a bassa risoluzione).
+const _sampleDir = new THREE.Vector3();
+function analyticSurfacePoint(dirHint, out) {
+  _sampleDir.copy(dirHint).normalize();
+  const r = radiusAt(_sampleDir.x, _sampleDir.y, _sampleDir.z);
+  return out.copy(_sampleDir).multiplyScalar(r);
 }
 
 /** Normale poligono (Newell), coerente con l'ordine dei vertici. */
@@ -80,18 +80,23 @@ function polygonNormalNewell(p0, p1, p2, p3) {
  * Appoggia la base (piano Y=0 in locale) su un piano definito da 4 colpi sul terreno
  * agli angoli dell'impronta in pianta. La rotazione allinea X/Z alla griglia locale.
  */
-function placeBuildingBaseOnTerrain(building, pos, planetMesh, radialOffset) {
+function placeBuildingBaseOnTerrain(building, pos, radialOffset) {
   building.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(building);
   const hw = (box.max.x - box.min.x) * 0.5;
   const hd = (box.max.z - box.min.z) * 0.5;
+
+  const up = pos.clone().normalize();
+  surfaceAt(up, _surfInfo);
+  const fallbackPoint = _surfInfo.point.clone();
+  const fallbackNormal = _surfInfo.normal.clone();
+
   if (hw < 1e-4 || hd < 1e-4) {
-    orientOnSphere(building, pos, radialOffset);
+    orientOnSurface(building, fallbackPoint, fallbackNormal, radialOffset);
     return;
   }
 
   const yaw = Math.random() * Math.PI * 2;
-  const up = pos.clone().normalize();
   _refAxis.set(Math.abs(up.y) < 0.9 ? 0 : 1, Math.abs(up.y) < 0.9 ? 1 : 0, 0);
   const t0 = new THREE.Vector3().crossVectors(up, _refAxis).normalize();
   const b0 = new THREE.Vector3().crossVectors(up, t0).normalize();
@@ -101,18 +106,14 @@ function placeBuildingBaseOnTerrain(building, pos, planetMesh, radialOffset) {
   const v = t0.clone().multiplyScalar(-sin).add(b0.clone().multiplyScalar(cos));
 
   const c0 = pos.clone().addScaledVector(u, -hw).addScaledVector(v, -hd);
-  const c1 = pos.clone().addScaledVector(u, hw).addScaledVector(v, -hd);
-  const c2 = pos.clone().addScaledVector(u, hw).addScaledVector(v, hd);
-  const c3 = pos.clone().addScaledVector(u, -hw).addScaledVector(v, hd);
+  const c1 = pos.clone().addScaledVector(u,  hw).addScaledVector(v, -hd);
+  const c2 = pos.clone().addScaledVector(u,  hw).addScaledVector(v,  hd);
+  const c3 = pos.clone().addScaledVector(u, -hw).addScaledVector(v,  hd);
 
-  const p0 = raycastPlanetSurface(planetMesh, c0);
-  const p1 = raycastPlanetSurface(planetMesh, c1);
-  const p2 = raycastPlanetSurface(planetMesh, c2);
-  const p3 = raycastPlanetSurface(planetMesh, c3);
-  if (!p0 || !p1 || !p2 || !p3) {
-    orientOnSphere(building, pos, radialOffset);
-    return;
-  }
+  const p0 = analyticSurfacePoint(c0, new THREE.Vector3());
+  const p1 = analyticSurfacePoint(c1, new THREE.Vector3());
+  const p2 = analyticSurfacePoint(c2, new THREE.Vector3());
+  const p3 = analyticSurfacePoint(c3, new THREE.Vector3());
 
   let n = polygonNormalNewell(p0, p1, p2, p3);
   if (n.dot(pos) < 0) n.negate();
@@ -120,7 +121,7 @@ function placeBuildingBaseOnTerrain(building, pos, planetMesh, radialOffset) {
   let xAxis = new THREE.Vector3().subVectors(p1, p0);
   xAxis.sub(n.clone().multiplyScalar(n.dot(xAxis)));
   if (xAxis.lengthSq() < 1e-10) {
-    orientOnSphere(building, pos, radialOffset);
+    orientOnSurface(building, fallbackPoint, fallbackNormal, radialOffset);
     return;
   }
   xAxis.normalize();
@@ -354,7 +355,7 @@ function makeHospital(hospitalTemplates) {
  * @param {THREE.Object3D[]} [buildingTemplates] - risultato di loadBuildingTemplates()
  * @param {THREE.Object3D[]} [hospitalTemplates] - risultato di loadHospitalTemplates()
  */
-export function createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates = [], buildingTemplates = [], hospitalTemplates = []) {
+export function createTerrain(scene, heightData, posAttr, _planetMesh, treeTemplates = [], buildingTemplates = [], hospitalTemplates = []) {
   const terrainGroup = new THREE.Group();
 
   const count = posAttr.count;
@@ -371,18 +372,15 @@ export function createTerrain(scene, heightData, posAttr, planetMesh, treeTempla
   const MAX_HOSPITALS = 12;
   let hospitals = 0;
 
-  // Per edifici/ospedali: registro delle "impronte" già piazzate, in angolo su sfera
   const placedBuildings = [];
-  const planetRadius = (() => {
-    // raggio stimato del pianeta: la maggior parte dei vertici ha lunghezza ~R
-    if (count <= 0) return 50;
-    const x0 = posAttr.getX(0), y0 = posAttr.getY(0), z0 = posAttr.getZ(0);
-    return Math.max(new THREE.Vector3(x0, y0, z0).length(), 1);
-  })();
+  const planetRadius = PLANET_RADIUS;
 
-  function getPosFromIndex(idx) {
-    return new THREE.Vector3(posAttr.getX(idx), posAttr.getY(idx), posAttr.getZ(idx));
+  function dirFromIndex(idx) {
+    const x = posAttr.getX(idx), y = posAttr.getY(idx), z = posAttr.getZ(idx);
+    return new THREE.Vector3(x, y, z).normalize();
   }
+
+  const scratchInfo = { point: new THREE.Vector3(), normal: new THREE.Vector3() };
 
   function tryPlaceBuildingLike(makeFn, placeFn, heightMin, heightMax) {
     const obj = makeFn();
@@ -393,13 +391,14 @@ export function createTerrain(scene, heightData, posAttr, planetMesh, treeTempla
       const h = heightData[idx];
       if (h <= heightMin || h >= heightMax) continue;
 
-      const pos = getPosFromIndex(idx);
-      const dir = pos.clone().normalize();
+      const dir = dirFromIndex(idx);
+      surfaceAt(dir, scratchInfo);
+      if (scratchInfo.slope > MAX_BUILDING_SLOPE) continue;
       if (!canPlaceOnSphere(dir, footprint, placedBuildings, planetRadius)) continue;
 
-      placeFn(obj, pos);
+      placeFn(obj, scratchInfo.point.clone());
       terrainGroup.add(obj);
-      placedBuildings.push({ dir, footprintRadius: footprint });
+      placedBuildings.push({ dir: dir.clone(), footprintRadius: footprint });
       return true;
     }
 
@@ -408,16 +407,16 @@ export function createTerrain(scene, heightData, posAttr, planetMesh, treeTempla
 
   for (const i of indices) {
     const h = heightData[i];
-    const x = posAttr.getX(i);
-    const y = posAttr.getY(i);
-    const z = posAttr.getZ(i);
-    const pos = new THREE.Vector3(x, y, z);
+    const dir = dirFromIndex(i);
 
     if (trees < MAX_TREES && h > 0.08 && h < 0.45) {
-      const tree = makeTree(treeTemplates);
-      orientOnSphere(tree, pos);
-      terrainGroup.add(tree);
-      trees++;
+      surfaceAt(dir, scratchInfo);
+      if (scratchInfo.slope <= MAX_TREE_SLOPE) {
+        const tree = makeTree(treeTemplates);
+        orientOnSurface(tree, scratchInfo.point, scratchInfo.normal);
+        terrainGroup.add(tree);
+        trees++;
+      }
     } else if ((buildings < MAX_BUILDINGS || hospitals < MAX_HOSPITALS) && h > 0.04 && h < 0.20) {
       const canPlaceHospital = hospitals < MAX_HOSPITALS && buildings > 6;
       const wantsHospital = canPlaceHospital && (Math.random() < 0.18) && (buildings < MAX_BUILDINGS);
@@ -425,7 +424,7 @@ export function createTerrain(scene, heightData, posAttr, planetMesh, treeTempla
       if (wantsHospital) {
         const ok = tryPlaceBuildingLike(
           () => makeHospital(hospitalTemplates),
-          (obj, p) => placeBuildingBaseOnTerrain(obj, p, planetMesh, BUILDING_HEIGHT_OFFSET),
+          (obj, p) => placeBuildingBaseOnTerrain(obj, p, BUILDING_HEIGHT_OFFSET),
           0.04,
           0.20,
         );
@@ -433,7 +432,7 @@ export function createTerrain(scene, heightData, posAttr, planetMesh, treeTempla
       } else if (buildings < MAX_BUILDINGS) {
         const ok = tryPlaceBuildingLike(
           () => makeBuilding(buildingTemplates),
-          (obj, p) => placeBuildingBaseOnTerrain(obj, p, planetMesh, BUILDING_HEIGHT_OFFSET),
+          (obj, p) => placeBuildingBaseOnTerrain(obj, p, BUILDING_HEIGHT_OFFSET),
           0.04,
           0.20,
         );

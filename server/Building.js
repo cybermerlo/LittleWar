@@ -230,13 +230,32 @@ export class Building {
   }
 }
 
-/** Genera N edifici in posizioni casuali ben distribuite sulla sfera */
+/** Distanza cartesiana tra due punti sulla sfera a raggio PLANET_RADIUS. */
+function buildingDist(t1, p1, t2, p2) {
+  const ax = PLANET_RADIUS * Math.sin(t1) * Math.cos(p1);
+  const ay = PLANET_RADIUS * Math.cos(t1);
+  const az = PLANET_RADIUS * Math.sin(t1) * Math.sin(p1);
+  const bx = PLANET_RADIUS * Math.sin(t2) * Math.cos(p2);
+  const by = PLANET_RADIUS * Math.cos(t2);
+  const bz = PLANET_RADIUS * Math.sin(t2) * Math.sin(p2);
+  return Math.sqrt((ax - bx) ** 2 + (ay - by) ** 2 + (az - bz) ** 2);
+}
+
+/** Genera N edifici garantendo che i cerchi di conquista non si intersechino. */
 export function generateBuildings(count) {
   const buildings = new Map();
+  const MIN_DIST = BUILDING_CONQUEST_RADIUS * 2; // cerchi tangenti = distanza minima
+  const placed = [];
+
   for (let i = 0; i < count; i++) {
-    // Distribuzione uniforme sulla sfera
-    const theta = Math.acos(2 * Math.random() - 1);
-    const phi = Math.random() * Math.PI * 2;
+    let theta, phi, attempts = 0;
+    do {
+      theta = Math.acos(2 * Math.random() - 1);
+      phi = Math.random() * Math.PI * 2;
+      attempts++;
+    } while (attempts < 500 && placed.some(p => buildingDist(theta, phi, p.theta, p.phi) < MIN_DIST));
+
+    placed.push({ theta, phi });
     const b = new Building(theta, phi);
     buildings.set(b.id, b);
   }

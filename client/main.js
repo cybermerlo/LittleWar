@@ -90,7 +90,7 @@ window.addEventListener('keydown', (e) => chat.handleKey(e));
 
 const lights = setupLighting(scene);
 const sky = createSky(scene, lights);
-const { mesh: planetMesh, heightData, posAttr } = createPlanet(scene);
+const { mesh: planetMesh, heightData, posAttr, update: updatePlanet } = createPlanet(scene);
 Promise.all([loadTreeTemplates(), loadBuildingTemplates(), loadHospitalTemplates()]).then(([treeTemplates, buildingTemplates, hospitalTemplates]) => {
   createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates, buildingTemplates, hospitalTemplates);
 });
@@ -564,6 +564,7 @@ function animate() {
   const now = performance.now();
 
   sky.update(delta);
+  updatePlanet(delta, camera.position);
   const nightFactor = typeof sky.getNightFactor === 'function' ? sky.getNightFactor() : 0;
   currentNightFactor = nightFactor;
 
