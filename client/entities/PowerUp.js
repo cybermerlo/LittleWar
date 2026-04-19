@@ -4,14 +4,26 @@ import { sphericalToCartesian } from '../utils/SphereUtils.js';
 import { FLY_ALTITUDE } from '../../shared/constants.js';
 
 const loader = new GLTFLoader();
-let starGltf = null;
 
-// Pre-carica il modello una sola volta
-const starPromise = loader.loadAsync('/models/Star.glb').then(gltf => {
-  starGltf = gltf;
+let multishotGltf = null;
+let speedGltf = null;
+
+const multishotPromise = loader.loadAsync('/models/Powerup_Multishot.glb').then(gltf => {
+  multishotGltf = gltf;
+});
+const speedPromise = loader.loadAsync('/models/Powerup_Speed.glb').then(gltf => {
+  speedGltf = gltf;
 });
 
-// Colori per tipo
+function powerupModelPromise(type) {
+  return type === 'extreme_boost' ? speedPromise : multishotPromise;
+}
+
+function powerupGltfForType(type) {
+  return type === 'extreme_boost' ? speedGltf : multishotGltf;
+}
+
+// Fallback geometrico (stessi colori di prima)
 const WEAPON_COLOR = new THREE.Color(0xffd700);
 const SHIELD_COLOR = new THREE.Color(0x44aaff);
 const EXTREME_BOOST_COLOR = new THREE.Color(0xff3300);
@@ -31,12 +43,12 @@ export class PowerUpEntity {
 
     this._updatePosition();
 
-    if (starGltf) {
+    const gltf = powerupGltfForType(type);
+    if (gltf) {
       this._attachModel();
     } else {
-      // Fallback geometrico finché il modello non è pronto
       this._addFallback();
-      starPromise.then(() => {
+      powerupModelPromise(type).then(() => {
         this._removeFallback();
         this._attachModel();
       });
@@ -61,19 +73,12 @@ export class PowerUpEntity {
   }
 
   _attachModel() {
-    this._model = starGltf.scene.clone(true);
-    this._model.scale.setScalar(0.55);
+    const gltf = powerupGltfForType(this.type);
+    if (!gltf || this._model) return;
 
-    const color = this.type === 'weapon' ? WEAPON_COLOR : this.type === 'extreme_boost' ? EXTREME_BOOST_COLOR : SHIELD_COLOR;
-    this._model.traverse(child => {
-      if (child.isMesh) {
-        child.material = child.material.clone();
-        child.material.color.set(color);
-        if (child.material.emissive) {
-          child.material.emissive.set(color).multiplyScalar(0.25);
-        }
-      }
-    });
+    this._model = gltf.scene.clone(true);
+    // Scala unica ragionevole per collectible in volo; modelli GLB hanno materiali originali.
+    this._model.scale.setScalar(this.type === 'extreme_boost' ? 0.5 : 0.55);
 
     this.root.add(this._model);
   }
