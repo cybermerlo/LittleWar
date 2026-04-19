@@ -1,4 +1,4 @@
-import { FLY_ALTITUDE, BOOST_MAX } from '../shared/constants.js';
+import { FLY_ALTITUDE, BOOST_MAX, EXTREME_BOOST_DURATION } from '../shared/constants.js';
 
 let nextId = 1;
 
@@ -29,6 +29,9 @@ export class Player {
     this.boostPressed = false;
     this.moveForward = false;
     this.moveBackward = false;
+    this.hasExtremeBoost = false;
+    this.extremeBoostActive = false;
+    this.extremeBoostTimer = 0;
 
     // Target bombardamento (assegnato dal server)
     this.targetId = null;
@@ -61,6 +64,8 @@ export class Player {
       // Ottimizzazione rete: boostEnergy serve ai remoti solo durante boost attivo.
       boosting,
       boostEnergy: boosting ? boostEnergy : undefined,
+      hasExtremeBoost: this.hasExtremeBoost,
+      extremeBoosting: this.extremeBoostActive,
     };
   }
 

@@ -26,6 +26,7 @@ import {
   BASE_SPEED, SPEED_REDUCTION_PER_LEVEL, MIN_SPEED,
   BOOST_MAX, BOOST_SPEED_MULT, BOOST_DRAIN_PER_SEC, BOOST_REGEN_PER_SEC,
   FORWARD_ACCEL, BACKWARD_ACCEL,
+  EXTREME_BOOST_MULT, EXTREME_BOOST_DURATION,
   WEAPON_CONFIGS, FLY_ALTITUDE, MAX_PLAYERS, CLIENT_INPUT_SEND_MS,
   POWERUP_COLLECT_RADIUS,
   RESPAWN_INVINCIBILITY,
@@ -102,6 +103,11 @@ const input    = new InputManager();
 document.getElementById('mc-radio')?.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   input.triggerTouchRadio();
+});
+
+document.getElementById('hud-back')?.addEventListener('click', () => {
+  if (!inGame) return;
+  net.disconnectVoluntary();
 });
 const mobile   = isTouchDevice() ? new MobileControls(input) : null;
 if (mobile) document.body.classList.add('is-mobile');
@@ -186,6 +192,10 @@ const SPIN_TURN_BOOST_MULT = 1.35;
 // Boost locale
 let boostEnergy = BOOST_MAX;
 
+// Extreme Boost locale (ottimistico — sincronizzato dal game-state)
+let localHasExtremeBoost = false;
+let extremeBoostTimer = 0; // secondi rimanenti; > 0 = attivo
+
 // ── Lobby + Network ───────────────────────────────────────────────────────────
 
 const lobby = new LobbyScreen((nickname, color, model) => {
@@ -206,12 +216,13 @@ const net = new NetworkManager({
     lobby.setOnlineCount(0, MAX_PLAYERS);
   },
 
-  onDisconnect() {
+  onDisconnect({ voluntary } = {}) {
     AudioManager.stopMusic();
     AudioManager.stopEngine();
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    death.hide();
     lobby.show();
-    lobby.setMessage('Disconnesso. Ricarica la pagina.');
+    lobby.setMessage(voluntary ? '' : 'Disconnesso. Ricarica la pagina.');
     inGame = false;
     hud.hide();
     mobile?.hide();
@@ -337,6 +348,11 @@ const net = new NetworkManager({
     state.players.forEach(p => {
       if (p.id === localPlayerId) {
         localState = p;
+        // Sincronizza stato extreme boost dal server (source of truth)
+        localHasExtremeBoost = !!p.hasExtremeBoost;
+        if (!p.extremeBoosting && extremeBoostTimer <= 0) {
+          // server conferma che non è attivo e il timer locale è già scaduto: nessun conflitto
+        }
         return;
       }
       if (!remoteAirplanes.has(p.id)) {
@@ -443,6 +459,8 @@ const net = new NetworkManager({
 
     if (victimId === localPlayerId) {
       isAlive = false;
+      // Ferma motore e boost: il game loop non li aggiorna più quando !isAlive
+      AudioManager.stopEngine();
       const killer = allPlayerStates.find(pl => pl.id === killerId);
       death.show(killer?.nickname ?? null, byTurret ?? false, () => {
         // Il respawn arriva dal server via onRespawned
@@ -516,6 +534,7 @@ const net = new NetworkManager({
     boostEnergy = typeof state.boostEnergy === 'number' ? state.boostEnergy : BOOST_MAX;
     _invincibleUntil = Date.now() + RESPAWN_INVINCIBILITY;
     death.hide();
+    AudioManager.startEngine();
   },
 
   onChatMessage(msg) {
@@ -559,14 +578,25 @@ function animate() {
     const mobileSpeedMult = mobile ? (1.0 - 0.4 * Math.abs(turnInput)) : 1.0;
     const baseSpeed = Math.max(MIN_SPEED, BASE_SPEED - wl * SPEED_REDUCTION_PER_LEVEL) * mobileSpeedMult;
 
-    const wantsBoost = input.isBoost();
+    // Extreme Boost: attivazione da doppio tap + countdown
+    if (localHasExtremeBoost && extremeBoostTimer <= 0 && input.consumeBoostDoubleTap()) {
+      net.sendActivateExtremeBoost();
+      localHasExtremeBoost = false;
+      extremeBoostTimer = EXTREME_BOOST_DURATION;
+    }
+    if (extremeBoostTimer > 0) {
+      extremeBoostTimer = Math.max(0, extremeBoostTimer - delta);
+    }
+    const extremeBoostActive = extremeBoostTimer > 0;
+
+    const wantsBoost = !extremeBoostActive && input.isBoost();
     const boostActive = wantsBoost && boostEnergy > 0.01;
     if (boostActive) {
       boostEnergy = Math.max(0, boostEnergy - BOOST_DRAIN_PER_SEC * delta);
-    } else {
+    } else if (!extremeBoostActive) {
       boostEnergy = Math.min(BOOST_MAX, boostEnergy + BOOST_REGEN_PER_SEC * delta);
     }
-    const speedMult = boostActive ? BOOST_SPEED_MULT : 1;
+    const speedMult = extremeBoostActive ? EXTREME_BOOST_MULT : (boostActive ? BOOST_SPEED_MULT : 1);
     const speed = baseSpeed * speedMult;
 
     if (input.consumeLeftDoubleTap()) localAirplane.triggerSpin(-1);
@@ -588,9 +618,10 @@ function animate() {
     const movingForward = input.isForward();
     const movingBackward = input.isBackward();
 
-    // Aggiorna volume motore
-    AudioManager.updateEngine(movingForward, boostActive, delta);
-    if (boostActive) { AudioManager.startBoost(); } else { AudioManager.stopBoost(); }
+    // Aggiorna volume motore (extreme boost trattato come boost pieno)
+    const anyBoostActive = boostActive || extremeBoostActive;
+    AudioManager.updateEngine(movingForward, anyBoostActive, delta);
+    if (anyBoostActive) { AudioManager.startBoost(); } else { AudioManager.stopBoost(); }
     // Su mobile l'asse Y del joystick (0..1) interpola tra FORWARD_ACCEL e BACKWARD_ACCEL
     const brakeT = input.touch.speedAxis; // 0 = nessun freno, 1 = freno massimo
     const forwardAccel = FORWARD_ACCEL - (FORWARD_ACCEL - BACKWARD_ACCEL) * brakeT;
@@ -608,7 +639,7 @@ function animate() {
       wl,
       localState.hasShield ?? false,
       delta,
-      boostActive ? (boostEnergy / BOOST_MAX) : 0,
+      extremeBoostActive ? 1.0 : (boostActive ? (boostEnergy / BOOST_MAX) : 0),
     );
     // Blink durante invincibilità post-respawn (5 Hz, 100ms on/off)
     if (Date.now() < _invincibleUntil) {
@@ -695,7 +726,13 @@ function animate() {
 
   // HUD
   if (inGame) {
-    hud.update(localState, allPlayerStates, currentTarget, camera, boostEnergy / BOOST_MAX, input.isBoost());
+    hud.update(
+      localState, allPlayerStates, currentTarget, camera,
+      boostEnergy / BOOST_MAX, input.isBoost(),
+      undefined, // buildings (già passato altrove)
+      localHasExtremeBoost,
+      extremeBoostTimer,
+    );
   }
 
   composer.render();

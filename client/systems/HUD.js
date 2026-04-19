@@ -17,10 +17,11 @@ export class HUD {
       playerList:  document.getElementById('player-list'),
       arrow:       document.getElementById('target-arrow'),
       playerArrows: document.getElementById('player-arrows'),
-      bombToast:   document.getElementById('hud-bomb-toast'),
-      killToast:   document.getElementById('hud-kill-toast'),
-      towerToast:  document.getElementById('hud-tower-toast'),
-      radioToast:  document.getElementById('hud-radio-toast'),
+      bombToast:    document.getElementById('hud-bomb-toast'),
+      killToast:    document.getElementById('hud-kill-toast'),
+      towerToast:   document.getElementById('hud-tower-toast'),
+      radioToast:   document.getElementById('hud-radio-toast'),
+      extremeBoost: document.getElementById('hud-extreme-boost'),
     };
     this._bombToastTimer  = null;
     this._killToastTimer  = null;
@@ -117,7 +118,7 @@ export class HUD {
     }, 2500);
   }
 
-  update(localPlayer, allPlayers, target, camera, boostRatio = 1, boostPressed = false, buildings = []) {
+  update(localPlayer, allPlayers, target, camera, boostRatio = 1, boostPressed = false, buildings = [], hasExtremeBoost = false, extremeBoostTimer = 0) {
     if (!localPlayer) return;
 
     const wl = Math.max(0, Math.floor(localPlayer.weaponLevel ?? 0));
@@ -143,6 +144,19 @@ export class HUD {
       boostPill.classList.toggle('hud-boost--active', boostPressed && r > 0.01);
       boostPill.classList.toggle('hud-boost--empty', r < 0.04);
       boostPill.setAttribute('aria-valuenow', String(boostPct));
+    }
+
+    // Extreme Boost indicator
+    const ebEl = this.el.extremeBoost;
+    if (ebEl) {
+      const ebActive = extremeBoostTimer > 0;
+      ebEl.style.display = (hasExtremeBoost || ebActive) ? '' : 'none';
+      ebEl.classList.toggle('hud-extreme--active', ebActive);
+      ebEl.classList.toggle('hud-extreme--ready', hasExtremeBoost && !ebActive);
+      const label = ebEl.querySelector('#hud-extreme-label');
+      if (label) {
+        label.textContent = ebActive ? `🔥 ${Math.ceil(extremeBoostTimer)}s` : '🔥 Boost+';
+      }
     }
 
     // Lista giocatori: ordine per punteggio totale (kill + bombe), decrescente

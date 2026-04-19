@@ -573,8 +573,49 @@
       right: 0;
       display: flex;
       justify-content: space-between;
+      align-items: center;
       padding: 0 1.25rem;
       gap: 0.75rem;
+    }
+
+    .hud-top-cluster {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+
+    .hud-back-btn {
+      flex-shrink: 0;
+      width: 1.85rem;
+      height: 1.85rem;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      appearance: none;
+      -webkit-appearance: none;
+      border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 18%, transparent);
+      border-radius: 9999px;
+      background: color-mix(in srgb, var(--lw-surface-container-low) 78%, transparent);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      color: var(--lw-on-surface);
+      font-size: 0.95rem;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+      pointer-events: auto;
+      touch-action: manipulation;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+      transition: transform 0.08s ease, background 0.15s ease;
+    }
+
+    .hud-back-btn:hover {
+      background: color-mix(in srgb, var(--lw-surface-container) 82%, transparent);
+    }
+
+    .hud-back-btn:active {
+      transform: scale(0.94);
     }
 
     .hud-pill {
@@ -652,6 +693,36 @@
     .hud-boost-pill.hud-boost--empty .hud-boost-fill {
       opacity: 0.4;
       filter: grayscale(0.35) brightness(0.85);
+    }
+
+    /* Extreme Boost pill */
+    .hud-extreme-pill {
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      padding: 0.4rem 0.85rem;
+      color: #ff7744;
+      border: 1px solid rgba(255, 100, 30, 0.35);
+      transition: color 0.2s, box-shadow 0.2s;
+      cursor: default;
+    }
+    .hud-extreme-pill.hud-extreme--ready {
+      animation: eb-pulse 1.4s ease-in-out infinite;
+    }
+    .hud-extreme-pill.hud-extreme--active {
+      color: #fff;
+      background: rgba(255, 80, 20, 0.25);
+      box-shadow: 0 0 14px rgba(255, 80, 20, 0.6);
+      animation: eb-shake 0.12s linear infinite;
+    }
+    @keyframes eb-pulse {
+      0%, 100% { box-shadow: 0 0 4px rgba(255, 100, 30, 0.3); }
+      50%       { box-shadow: 0 0 12px rgba(255, 100, 30, 0.75); }
+    }
+    @keyframes eb-shake {
+      0%, 100% { transform: translateX(0); }
+      25%      { transform: translateX(-1px); }
+      75%      { transform: translateX(1px); }
     }
 
     /* Arma / velocità: stessa struttura del boost con barre a gradiente distinte */
@@ -1318,6 +1389,7 @@
       #hud-top   { top: 0.5rem; padding: 0 0.75rem; gap: 0.5rem; }
       #hud-bottom { bottom: 0.5rem; gap: 0.4rem; padding: 0 0.75rem; }
       .hud-pill  { font-size: 0.7rem; padding: 0.35rem 0.75rem; }
+      .hud-back-btn { width: 1.65rem; height: 1.65rem; font-size: 0.85rem; }
       .hud-boost-pill,
       .hud-stat-pill { min-width: 5rem; padding: 0.32rem 0.7rem 0.38rem; }
       #hud-players { display: none; }
@@ -1452,7 +1524,10 @@
   <!-- HUD (visibile in gioco) -->
   <div id="hud">
     <div id="hud-top">
-      <div class="hud-pill" id="hud-kills">Kill: 0</div>
+      <div class="hud-top-cluster">
+        <button type="button" class="hud-back-btn" id="hud-back" aria-label="Torna al menu principale">←</button>
+        <div class="hud-pill" id="hud-kills">Kill: 0</div>
+      </div>
       <div class="hud-pill" id="hud-turrets">Torrette: 0</div>
     </div>
     <div id="hud-bottom">
@@ -1481,6 +1556,9 @@
         <div class="hud-boost-track">
           <div class="hud-boost-fill" id="hud-boost-fill"></div>
         </div>
+      </div>
+      <div class="hud-pill hud-extreme-pill" id="hud-extreme-boost" style="display:none" title="Doppio tap Spazio (o doppio tap boost su mobile) per attivare">
+        <span id="hud-extreme-label">🔥 Boost+</span>
       </div>
       <button type="button" class="hud-pill" id="mc-radio" aria-label="Cambia radio">🎵</button>
     </div>

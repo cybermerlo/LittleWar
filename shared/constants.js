@@ -33,6 +33,13 @@ export const BOOST_REGEN_PER_SEC = 11;
 export const FORWARD_ACCEL = 1.3;
 export const BACKWARD_ACCEL = 0.4;
 
+// Extreme Boost (powerup raro, via di fuga istantanea)
+export const EXTREME_BOOST_MULT = 3.8;
+export const EXTREME_BOOST_DURATION = 4; // secondi, incontrollabile
+
+// Collisioni tra aerei
+export const PLANE_COLLISION_RADIUS = 1.8; // distanza cartesiana (unità world)
+
 // Rollio in virata (banking) — radianti
 export const MAX_BANK_ANGLE = 0.38;      // ~22°
 export const BANK_GAIN = 0.34;           // quanto il roll risponde alla velocità di virata (rad / (rad/s))
@@ -89,7 +96,7 @@ export const BOMB_HIT_RADIUS = 3.0;  // distanza dall'obiettivo per contare il c
 // Powerup
 export const POWERUP_COLLECT_RADIUS = 4.0;
 export const POWERUP_LIFETIME = 30000;       // ms
-export const POWERUP_RANDOM_INTERVAL = 12000; // ms tra spawn casuali
+export const POWERUP_RANDOM_INTERVAL = 500; // ms tra spawn casuali
 export const POWERUP_DROP_CHANCE = 0.5;      // 50% alla morte
 
 // Respawn

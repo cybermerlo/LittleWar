@@ -5,8 +5,10 @@ export class InputManager {
     this.mouseRight = false;
     this.leftDoubleTap = false;
     this.rightDoubleTap = false;
+    this.boostDoubleTap = false;
     this._lastLeftTapAt = -Infinity;
     this._lastRightTapAt = -Infinity;
+    this._lastBoostTapAt = -Infinity;
 
     // Touch state (controllato da MobileControls)
     this.touch = {
@@ -20,6 +22,7 @@ export class InputManager {
       radio: false,      // one-shot
       leftDoubleTap: false,
       rightDoubleTap: false,
+      boostDoubleTap: false,
     };
 
     // Giroscopio
@@ -57,6 +60,10 @@ export class InputManager {
       if (e.code === 'KeyD' || e.code === 'ArrowRight') {
         if (now - this._lastRightTapAt <= 260) this.rightDoubleTap = true;
         this._lastRightTapAt = now;
+      }
+      if (e.code === 'Space') {
+        if (now - this._lastBoostTapAt <= 280) this.boostDoubleTap = true;
+        this._lastBoostTapAt = now;
       }
     }
     this.keys[e.code] = true;
@@ -137,6 +144,15 @@ export class InputManager {
     return false;
   }
 
+  consumeBoostDoubleTap() {
+    if (this.boostDoubleTap || this.touch.boostDoubleTap) {
+      this.boostDoubleTap = false;
+      this.touch.boostDoubleTap = false;
+      return true;
+    }
+    return false;
+  }
+
   // ─── API touch (usate da MobileControls) ─────────────────────────────────
   setTouchTurnAxis(v) {
     this.touch.turnAxis = Math.max(-1, Math.min(1, v));
@@ -147,6 +163,7 @@ export class InputManager {
   setTouchForward(v)  { this.touch.forward  = !!v; }
   setTouchBackward(v) { this.touch.backward = !!v; }
   setTouchBoost(v)    { this.touch.boost    = !!v; }
+  triggerTouchBoostDoubleTap() { this.touch.boostDoubleTap = true; }
   triggerTouchShoot() { this.touch.shoot = true; }
   triggerTouchBomb()  { this.touch.bomb  = true; }
   triggerTouchRadio() { this.touch.radio = true; }

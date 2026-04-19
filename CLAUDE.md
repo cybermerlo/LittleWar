@@ -1,3 +1,6 @@
+
+# NOTA PRELIMINARE: Ogni volta che fai una modifica strutturale al gioco modifica questo file.
+
 # LittleWar
 
 A multiplayer 3D browser game built with Three.js. Players fly around a small planet Earth, chasing and shooting each other.

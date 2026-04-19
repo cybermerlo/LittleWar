@@ -32,6 +32,9 @@ import {
   PLANET_RADIUS,
   FLY_ALTITUDE,
   BUILDING_COUNT,
+  EXTREME_BOOST_MULT,
+  EXTREME_BOOST_DURATION,
+  PLANE_COLLISION_RADIUS,
 } from '../shared/constants.js';
 
 const TICK_DT = TICK_INTERVAL / 1000; // secondi per tick
@@ -238,13 +241,21 @@ export class Game {
       if (!player.alive) continue;
       const wl = player.weaponLevel ?? 0;
       const baseSpeed = Math.max(MIN_SPEED, BASE_SPEED - wl * SPEED_REDUCTION_PER_LEVEL);
-      const canBoost = player.boostPressed && player.boostEnergy > 0;
+      // Extreme boost: countdown incontrollabile
+      if (player.extremeBoostActive) {
+        player.extremeBoostTimer -= TICK_DT;
+        if (player.extremeBoostTimer <= 0) {
+          player.extremeBoostActive = false;
+          player.extremeBoostTimer = 0;
+        }
+      }
+      const canBoost = !player.extremeBoostActive && player.boostPressed && player.boostEnergy > 0;
       if (canBoost) {
         player.boostEnergy = Math.max(0, player.boostEnergy - BOOST_DRAIN_PER_SEC * TICK_DT);
-      } else {
+      } else if (!player.extremeBoostActive) {
         player.boostEnergy = Math.min(BOOST_MAX, player.boostEnergy + BOOST_REGEN_PER_SEC * TICK_DT);
       }
-      const speedMult = canBoost ? BOOST_SPEED_MULT : 1;
+      const speedMult = player.extremeBoostActive ? EXTREME_BOOST_MULT : (canBoost ? BOOST_SPEED_MULT : 1);
       const accel = player.moveForward ? FORWARD_ACCEL : player.moveBackward ? BACKWARD_ACCEL : 1;
       const speed = baseSpeed * speedMult * accel;
       const moved = moveOnSphere(player.theta, player.phi, player.heading, speed * TICK_DT);
@@ -252,6 +263,9 @@ export class Game {
       player.phi = moved.phi;
       player.heading = moved.heading;
     }
+
+    // Collisioni tra aerei
+    this._checkPlaneCollisions();
 
     // Aggiorna proiettili + controlla collisioni
     for (const [id, proj] of this.projectiles) {
@@ -344,6 +358,9 @@ export class Game {
     victim.boostPressed = false;
     victim.moveForward = false;
     victim.moveBackward = false;
+    victim.hasExtremeBoost = false;
+    victim.extremeBoostActive = false;
+    victim.extremeBoostTimer = 0;
 
     const killer = this.getPlayerById(killerId);
     if (killer) killer.kills++;
@@ -391,6 +408,9 @@ export class Game {
     player.boostPressed = false;
     player.moveForward = false;
     player.moveBackward = false;
+    player.hasExtremeBoost = false;
+    player.extremeBoostActive = false;
+    player.extremeBoostTimer = 0;
     player.lastClientTheta = null;
     player.lastClientPhi = null;
 
@@ -535,6 +555,8 @@ export class Game {
       player.weaponLevel++;
     } else if (pu.type === 'shield') {
       player.hasShield = true;
+    } else if (pu.type === 'extreme_boost' && !player.hasExtremeBoost && !player.extremeBoostActive) {
+      player.hasExtremeBoost = true;
     }
 
     this.io.emit('powerup-collected', {
@@ -574,9 +596,87 @@ export class Game {
     });
   }
 
+  _checkPlaneCollisions() {
+    const alive = [...this.players.values()].filter(p => p.alive);
+    for (let i = 0; i < alive.length; i++) {
+      for (let j = i + 1; j < alive.length; j++) {
+        const a = alive[i];
+        const b = alive[j];
+        if (!a.alive || !b.alive) continue; // già uccisi in questa passata
+        const dist = this.distanceSphere(a.theta, a.phi, b.theta, b.phi, FLY_ALTITUDE);
+        if (dist < PLANE_COLLISION_RADIUS) this._killByCollision(a, b);
+      }
+    }
+  }
+
+  _killByCollision(a, b) {
+    const now = Date.now();
+    let anyDied = false;
+
+    for (const victim of [a, b]) {
+      if (!victim.alive) continue;
+      if (victim.respawnInvincibleUntil && now < victim.respawnInvincibleUntil) continue;
+      if (victim.shieldInvincible) continue;
+
+      if (victim.hasShield) {
+        victim.hasShield = false;
+        victim.shieldInvincible = true;
+        setTimeout(() => { victim.shieldInvincible = false; }, SHIELD_INVINCIBILITY);
+        this.io.emit('shield-broken', { playerId: victim.id });
+        continue;
+      }
+
+      victim.alive = false;
+      victim.respawnAt = now + RESPAWN_DELAY;
+      victim.respawnInvincibleUntil = 0;
+      victim.weaponLevel = 0;
+      victim.hasShield = false;
+      victim.boostPressed = false;
+      victim.moveForward = false;
+      victim.moveBackward = false;
+      victim.hasExtremeBoost = false;
+      victim.extremeBoostActive = false;
+      victim.extremeBoostTimer = 0;
+      anyDied = true;
+
+      this.io.emit('player-killed', {
+        killerId: null,
+        victimId: victim.id,
+        theta: victim.theta,
+        phi: victim.phi,
+        byCollision: true,
+      });
+
+      if (Math.random() < POWERUP_DROP_CHANCE) {
+        const pu = new PowerUp('weapon', victim.theta, victim.phi);
+        this.powerups.set(pu.id, pu);
+        this.io.emit('powerup-spawned', pu.toState());
+      }
+    }
+
+    if (anyDied) {
+      this.emitKillFeedMessage(`💥 ${a.nickname} e ${b.nickname} si sono scontrati!`, {
+        kind: 'collision',
+        players: [
+          { nickname: a.nickname, color: a.color },
+          { nickname: b.nickname, color: b.color },
+        ],
+      });
+    }
+  }
+
+  activateExtremeBoost(socketId) {
+    const player = this.players.get(socketId);
+    if (!player || !player.alive || !player.hasExtremeBoost || player.extremeBoostActive) return;
+    player.hasExtremeBoost = false;
+    player.extremeBoostActive = true;
+    player.extremeBoostTimer = EXTREME_BOOST_DURATION;
+  }
+
   spawnRandomPowerup() {
     if (this.players.size === 0) return;
-    const type = Math.random() < 0.7 ? 'weapon' : 'shield';
+    const r = Math.random();
+    const type = r < 0.56 ? 'weapon' : r < 0.80 ? 'shield' : 'extreme_boost';
     const pu = new PowerUp(type);
     this.powerups.set(pu.id, pu);
     this.io.emit('powerup-spawned', pu.toState());

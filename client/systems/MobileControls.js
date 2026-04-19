@@ -30,7 +30,7 @@ export class MobileControls {
     }, { passive: false });
 
     this._bindJoystick();
-    this._bindHoldButton(this._btnBoost, (held) => this.input.setTouchBoost(held));
+    this._bindBoostButton(this._btnBoost);
     this._bindTapButton(this._btnShoot, () => this.input.triggerTouchShoot());
     this._bindTapButton(this._btnBomb,  () => this.input.triggerTouchBomb());
 
@@ -100,6 +100,28 @@ export class MobileControls {
     const axisY = Math.max(-1, Math.min(1, ay / max));
     const outY = axisY < DEAD ? 0 : (axisY - DEAD) / (1 - DEAD);
     this.input.setTouchSpeedAxis(outY);
+  }
+
+  _bindBoostButton(el) {
+    if (!el) return;
+    let lastTapAt = -Infinity;
+    const on = (e) => {
+      const now = performance.now();
+      if (now - lastTapAt <= 280) this.input.triggerTouchBoostDoubleTap();
+      lastTapAt = now;
+      this.input.setTouchBoost(true);
+      el.classList.add('mc-btn--active');
+      e.preventDefault();
+    };
+    const off = (e) => {
+      this.input.setTouchBoost(false);
+      el.classList.remove('mc-btn--active');
+      e.preventDefault();
+    };
+    el.addEventListener('pointerdown',   on);
+    el.addEventListener('pointerup',     off);
+    el.addEventListener('pointercancel', off);
+    el.addEventListener('pointerleave',  off);
   }
 
   _bindHoldButton(el, setter) {

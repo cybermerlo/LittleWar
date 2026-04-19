@@ -14,6 +14,7 @@ const starPromise = loader.loadAsync('/models/Star.glb').then(gltf => {
 // Colori per tipo
 const WEAPON_COLOR = new THREE.Color(0xffd700);
 const SHIELD_COLOR = new THREE.Color(0x44aaff);
+const EXTREME_BOOST_COLOR = new THREE.Color(0xff3300);
 
 export class PowerUpEntity {
   constructor(scene, id, type, theta, phi) {
@@ -45,7 +46,7 @@ export class PowerUpEntity {
   _addFallback() {
     const geo = new THREE.BoxGeometry(0.7, 0.7, 0.7);
     const mat = new THREE.MeshLambertMaterial({
-      color: this.type === 'weapon' ? WEAPON_COLOR : SHIELD_COLOR,
+      color: this.type === 'weapon' ? WEAPON_COLOR : this.type === 'extreme_boost' ? EXTREME_BOOST_COLOR : SHIELD_COLOR,
       flatShading: true,
     });
     this._fallback = new THREE.Mesh(geo, mat);
@@ -63,7 +64,7 @@ export class PowerUpEntity {
     this._model = starGltf.scene.clone(true);
     this._model.scale.setScalar(0.55);
 
-    const color = this.type === 'weapon' ? WEAPON_COLOR : SHIELD_COLOR;
+    const color = this.type === 'weapon' ? WEAPON_COLOR : this.type === 'extreme_boost' ? EXTREME_BOOST_COLOR : SHIELD_COLOR;
     this._model.traverse(child => {
       if (child.isMesh) {
         child.material = child.material.clone();

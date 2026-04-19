@@ -87,6 +87,10 @@ io.on('connection', (socket) => {
     game.tryCollectPowerup(socket.id, powerupId);
   });
 
+  socket.on('activate-extreme-boost', () => {
+    game.activateExtremeBoost(socket.id);
+  });
+
   socket.on('disconnect', () => {
     console.log(`[-] Socket disconnesso: ${socket.id}`);
     game.removePlayer(socket.id);
