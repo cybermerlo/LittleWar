@@ -11,7 +11,7 @@ import { ProjectileEntity } from './entities/Projectile.js';
 import { BombEntity, spawnExplosion } from './entities/Bomb.js';
 import { PowerUpEntity } from './entities/PowerUp.js';
 import { TargetEntity } from './entities/Target.js';
-import { BuildingEntity, spawnTurretDestruction } from './entities/Building.js';
+import { BuildingEntity, spawnTurretDestruction, preloadTurretBuildingModels } from './entities/Building.js';
 import { InputManager } from './systems/InputManager.js';
 import { MobileControls, isTouchDevice } from './systems/MobileControls.js';
 import { CameraController } from './systems/CameraController.js';
@@ -90,8 +90,50 @@ window.addEventListener('keydown', (e) => chat.handleKey(e));
 
 const lights = setupLighting(scene);
 const sky = createSky(scene, lights);
-const { mesh: planetMesh, heightData, posAttr, update: updatePlanet } = createPlanet(scene);
-Promise.all([loadTreeTemplates(), loadBuildingTemplates(), loadHospitalTemplates()]).then(([treeTemplates, buildingTemplates, hospitalTemplates]) => {
+const { mesh: planetMesh, water: waterMesh, heightData, posAttr, update: updatePlanet } = createPlanet(scene);
+
+// ── DEBUG: rete di superficie locale (tasto G per toggle) ─────────────────────
+// Shader che scarta i segmenti oltre DBG_RADIUS unità dalla camera, con fade.
+// Così si vede solo la rete vicina senza il caos dell'intero pianeta.
+const DBG_RADIUS = 30;
+const _dbgMat = new THREE.ShaderMaterial({
+  uniforms: { uCam: { value: new THREE.Vector3() }, uR: { value: DBG_RADIUS } },
+  vertexShader: `
+    uniform vec3  uCam;
+    varying float vDist;
+    void main() {
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vDist = length(wp.xyz - uCam);
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }`,
+  fragmentShader: `
+    uniform float uR;
+    varying float vDist;
+    void main() {
+      if (vDist > uR) discard;
+      float fade = 1.0 - smoothstep(uR * 0.55, uR, vDist);
+      gl_FragColor = vec4(1.0, 0.1, 0.1, fade);
+    }`,
+  transparent: true,
+  depthWrite: false,
+  depthTest: false,
+});
+const _dbgPlanet = new THREE.LineSegments(new THREE.WireframeGeometry(planetMesh.geometry), _dbgMat);
+const _dbgWater  = new THREE.LineSegments(new THREE.WireframeGeometry(waterMesh.geometry),  _dbgMat);
+_dbgPlanet.renderOrder = _dbgWater.renderOrder = 999;
+let _dbgVisible = false;
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyG' && !e.repeat) {
+    _dbgVisible = !_dbgVisible;
+    _dbgVisible ? scene.add(_dbgPlanet, _dbgWater) : scene.remove(_dbgPlanet, _dbgWater);
+  }
+});
+Promise.all([
+  loadTreeTemplates(),
+  loadBuildingTemplates(),
+  loadHospitalTemplates(),
+  preloadTurretBuildingModels(),
+]).then(([treeTemplates, buildingTemplates, hospitalTemplates]) => {
   createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates, buildingTemplates, hospitalTemplates);
 });
 
@@ -565,6 +607,7 @@ function animate() {
 
   sky.update(delta);
   updatePlanet(delta, camera.position);
+  if (_dbgVisible) _dbgMat.uniforms.uCam.value.copy(camera.position);
   const nightFactor = typeof sky.getNightFactor === 'function' ? sky.getNightFactor() : 0;
   currentNightFactor = nightFactor;
 

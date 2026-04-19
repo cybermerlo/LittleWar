@@ -80,6 +80,15 @@ const _prePromise = _loader
   .then((gltf) => { _preGltf = gltf; })
   .catch((err) => { console.warn('[Building] fallito caricamento pre_torretta.glb', err); });
 
+/**
+ * Risolve quando i glTF delle torrette (neutra + conquistata) sono in memoria.
+ * Da includere nel preload iniziale insieme ad alberi/edifici così il parsing
+ * di rete/decodifica non avviene allo spawn in partita.
+ */
+export function preloadTurretBuildingModels() {
+  return Promise.all([_cesarePromise, _prePromise]);
+}
+
 // ── Utility ───────────────────────────────────────────────────────────────────
 
 /**
