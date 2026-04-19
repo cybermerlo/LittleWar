@@ -2,7 +2,6 @@ import {
   BULLET_SPEED,
   BULLET_LIFETIME,
   BULLET_HIT_RADIUS,
-  PLANET_RADIUS,
   FLY_ALTITUDE,
   TICK_INTERVAL,
 } from '../shared/constants.js';
@@ -11,49 +10,43 @@ const TICK_DT = TICK_INTERVAL / 1000; // secondi per tick
 
 let nextProjectileId = 1;
 
-// Muove un punto su una sfera di raggio r lungo la direzione tangenziale
-// dati theta/phi correnti, heading, e delta radianti
-function moveOnSphere(theta, phi, heading, delta) {
-  // Converti in cartesiane
-  const r = FLY_ALTITUDE;
-  const x = r * Math.sin(theta) * Math.cos(phi);
-  const y = r * Math.cos(theta);
-  const z = r * Math.sin(theta) * Math.sin(phi);
+function sphericalToUnit(theta, phi) {
+  const sinTheta = Math.sin(theta);
+  return {
+    x: sinTheta * Math.cos(phi),
+    y: Math.cos(theta),
+    z: sinTheta * Math.sin(phi),
+  };
+}
 
-  // Normale alla sfera nel punto
-  const nx = x / r, ny = y / r, nz = z / r;
+function cross(a, b) {
+  return {
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x,
+  };
+}
 
-  // Vettore "est" locale (tangente in direzione phi crescente)
-  const ex = -Math.sin(phi);
-  const ey = 0;
-  const ez = Math.cos(phi);
+function dot(a, b) {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
 
-  // Vettore "nord" locale = normale × est
-  const fx = ny * ez - nz * ey;
-  const fy = nz * ex - nx * ez;
-  const fz = nx * ey - ny * ex;
+function normalize(v) {
+  const len = Math.hypot(v.x, v.y, v.z);
+  if (len < 1e-9) return null;
+  return { x: v.x / len, y: v.y / len, z: v.z / len };
+}
 
-  // Direzione di movimento
-  const dx = Math.cos(heading) * fx + Math.sin(heading) * ex;
-  const dy = Math.cos(heading) * fy + Math.sin(heading) * ey;
-  const dz = Math.cos(heading) * fz + Math.sin(heading) * ez;
-
-  // Nuovo punto cartesiano
-  let nx2 = x + dx * delta * r;
-  let ny2 = y + dy * delta * r;
-  let nz2 = z + dz * delta * r;
-
-  // Riporta sul guscio sferico
-  const len = Math.sqrt(nx2 * nx2 + ny2 * ny2 + nz2 * nz2);
-  nx2 = nx2 / len * r;
-  ny2 = ny2 / len * r;
-  nz2 = nz2 / len * r;
-
-  // Riconverti in sferiche
-  const newTheta = Math.acos(Math.max(-1, Math.min(1, ny2 / r)));
-  const newPhi = Math.atan2(nz2, nx2);
-
-  return { theta: newTheta, phi: newPhi };
+function rotateAroundAxis(v, axis, angle) {
+  const cosA = Math.cos(angle);
+  const sinA = Math.sin(angle);
+  const kCrossV = cross(axis, v);
+  const kDotV = dot(axis, v);
+  return {
+    x: v.x * cosA + kCrossV.x * sinA + axis.x * kDotV * (1 - cosA),
+    y: v.y * cosA + kCrossV.y * sinA + axis.y * kDotV * (1 - cosA),
+    z: v.z * cosA + kCrossV.z * sinA + axis.z * kDotV * (1 - cosA),
+  };
 }
 
 export class Projectile {
@@ -66,12 +59,41 @@ export class Projectile {
     this.speed = speed;
     this.lifetime = lifetime;
     this.createdAt = Date.now();
+    this._unitPos = sphericalToUnit(theta, phi);
+    this._axis = this._buildTrajectoryAxis(theta, phi, heading);
+  }
+
+  _buildTrajectoryAxis(theta, phi, heading) {
+    const unitPos = this._unitPos;
+    const east = normalize({
+      x: -Math.sin(phi),
+      y: 0,
+      z: Math.cos(phi),
+    });
+    if (!east) return { x: 0, y: 1, z: 0 };
+
+    const north = normalize(cross(unitPos, east));
+    if (!north) return { x: 0, y: 1, z: 0 };
+
+    const tangent = normalize({
+      x: Math.cos(heading) * north.x + Math.sin(heading) * east.x,
+      y: Math.cos(heading) * north.y + Math.sin(heading) * east.y,
+      z: Math.cos(heading) * north.z + Math.sin(heading) * east.z,
+    });
+    if (!tangent) return { x: 0, y: 1, z: 0 };
+
+    const axis = normalize(cross(unitPos, tangent));
+    if (axis) return axis;
+    // Fallback numerico vicino a casi degeneri.
+    return { x: 0, y: 1, z: 0 };
   }
 
   update() {
-    const pos = moveOnSphere(this.theta, this.phi, this.heading, this.speed * TICK_DT);
-    this.theta = pos.theta;
-    this.phi = pos.phi;
+    const angularStep = this.speed * TICK_DT;
+    this._unitPos = normalize(rotateAroundAxis(this._unitPos, this._axis, angularStep)) ?? this._unitPos;
+
+    this.theta = Math.acos(Math.max(-1, Math.min(1, this._unitPos.y)));
+    this.phi = Math.atan2(this._unitPos.z, this._unitPos.x);
   }
 
   isExpired() {
