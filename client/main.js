@@ -392,9 +392,10 @@ const net = new NetworkManager({
         localState = p;
         // Sincronizza stato extreme boost dal server (source of truth)
         localHasExtremeBoost = !!p.hasExtremeBoost;
-        if (!p.extremeBoosting && extremeBoostTimer <= 0) {
-          // server conferma che non è attivo e il timer locale è già scaduto: nessun conflitto
-        }
+        // Se il server dice che il boost non è attivo, azzeriamo il timer locale
+        // immediatamente — evita che il client continui a usare la velocità boost
+        // dopo che il server l'ha già disattivata.
+        if (!p.extremeBoosting) extremeBoostTimer = 0;
         return;
       }
       if (!remoteAirplanes.has(p.id)) {

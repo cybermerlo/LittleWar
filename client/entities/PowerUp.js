@@ -3,6 +3,12 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { sphericalToCartesian } from '../utils/SphereUtils.js';
 import { FLY_ALTITUDE } from '../../shared/constants.js';
 
+// Module-level reusables — no per-frame allocation
+const _up       = new THREE.Vector3(0, 1, 0);
+const _pNormal  = new THREE.Vector3();
+const _spinAxis = new THREE.Vector3(0, 1, 0);
+const _spinQuat = new THREE.Quaternion();
+
 const loader = new GLTFLoader();
 
 let multishotGltf = null;
@@ -49,6 +55,8 @@ export class PowerUpEntity {
     this.root = new THREE.Object3D();
     scene.add(this.root);
 
+    /** Orientamento base (Y locale = normale al pianeta) — calcolato una volta sola in _updatePosition(). */
+    this._baseQuat = new THREE.Quaternion();
     this._updatePosition();
 
     const gltf = powerupGltfForType(type);
@@ -94,18 +102,16 @@ export class PowerUpEntity {
   _updatePosition() {
     const pos = sphericalToCartesian(this.theta, this.phi, FLY_ALTITUDE);
     this.root.position.set(pos.x, pos.y, pos.z);
-    this._applyOrientation();
+    // Base orientation: Y locale allineato alla normale sferica.
+    // Calcolato qui (raro) e riusato ogni frame in tick().
+    _pNormal.set(pos.x, pos.y, pos.z).normalize();
+    this._baseQuat.setFromUnitVectors(_up, _pNormal);
+    this._applySpin();
   }
 
-  /**
-   * +Y locale lungo la normale uscente dal pianeta (stella “dritta”), poi spin attorno a quell'asse.
-   * lookAt(0,0,0) lasciava il modello nel piano tangente (orizzontale rispetto alla radiale).
-   */
-  _applyOrientation() {
-    const pos = this.root.position;
-    const normal = pos.clone().normalize();
-    this.root.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
-    this.root.rotateY(this._spinAngle);
+  _applySpin() {
+    _spinQuat.setFromAxisAngle(_spinAxis, this._spinAngle);
+    this.root.quaternion.copy(this._baseQuat).multiply(_spinQuat);
   }
 
   update(theta, phi) {
@@ -116,10 +122,9 @@ export class PowerUpEntity {
 
   tick(delta) {
     this._spinAngle += delta * 1.8;
-    this._applyOrientation();
+    this._applySpin(); // no setFromUnitVectors — base già calcolata in _updatePosition
     const t = performance.now() / 800;
-    const scale = 1 + Math.sin(t) * 0.15;
-    this.root.scale.setScalar(scale);
+    this.root.scale.setScalar(1 + Math.sin(t) * 0.15);
   }
 
   dispose(scene) {
