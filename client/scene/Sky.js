@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { FLY_ALTITUDE } from '../../shared/constants.js';
 
+// Temporaries for shooting star animation — no per-frame allocation
+const _ssHead = new THREE.Vector3();
+const _ssTail = new THREE.Vector3();
+
 /**
  * Velocità del ciclo giorno/notte.
  * Unità: "transizioni di stato al secondo". Con 5 stati in skyStates:
@@ -374,7 +378,11 @@ export function createSky(scene, lights) {
     const trailLength = 18  + Math.random() * 22;
     const duration    = 0.9 + Math.random() * 0.6;
 
-    const geo = new THREE.BufferGeometry().setFromPoints([start.clone(), start.clone()]);
+    const trailPositions = new Float32Array([start.x, start.y, start.z, start.x, start.y, start.z]);
+    const geo = new THREE.BufferGeometry();
+    const _trailAttr = new THREE.BufferAttribute(trailPositions, 3);
+    _trailAttr.usage = THREE.DynamicDrawUsage;
+    geo.setAttribute('position', _trailAttr);
     const trailHue = [0xffffff, 0xcceeff, 0xaaffff, 0xffe8f8, 0xeeccff][Math.floor(Math.random() * 5)];
     const mat = new THREE.LineBasicMaterial({
       color: trailHue,
@@ -412,13 +420,13 @@ export function createSky(scene, lights) {
         continue;
       }
 
-      const head = s.start.clone().addScaledVector(s.dir, s.speed * s.age);
+      _ssHead.copy(s.start).addScaledVector(s.dir, s.speed * s.age);
       const tailOffset = Math.min(s.trailLength, s.speed * s.age);
-      const tail = head.clone().addScaledVector(s.dir, -tailOffset);
+      _ssTail.copy(_ssHead).addScaledVector(s.dir, -tailOffset);
 
       const pos = s.geo.attributes.position;
-      pos.setXYZ(0, tail.x, tail.y, tail.z);
-      pos.setXYZ(1, head.x, head.y, head.z);
+      pos.setXYZ(0, _ssTail.x, _ssTail.y, _ssTail.z);
+      pos.setXYZ(1, _ssHead.x, _ssHead.y, _ssHead.z);
       pos.needsUpdate = true;
 
       // fade-in rapido, fade-out sull'ultimo 35%

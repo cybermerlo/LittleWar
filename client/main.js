@@ -392,9 +392,10 @@ const net = new NetworkManager({
         localState = p;
         // Sincronizza stato extreme boost dal server (source of truth)
         localHasExtremeBoost = !!p.hasExtremeBoost;
-        if (!p.extremeBoosting && extremeBoostTimer <= 0) {
-          // server conferma che non è attivo e il timer locale è già scaduto: nessun conflitto
-        }
+        // Se il server dice che il boost non è attivo, azzeriamo il timer locale
+        // immediatamente — evita che il client continui a usare la velocità boost
+        // dopo che il server l'ha già disattivata.
+        if (!p.extremeBoosting) extremeBoostTimer = 0;
         return;
       }
       if (!remoteAirplanes.has(p.id)) {
@@ -600,6 +601,12 @@ function ensureLocalAirplane(color, model) {
 
 const clock = new THREE.Clock();
 
+// Cache posizione camera per throttle su billboard lookAt (vedi aggiornamento edifici).
+// Soglia conservativa: 0.25 unità di movimento (distanceSq > 0.0625) produce un
+// cambio angolare < 1° su barre conquista a ~30 unità → impercettibile.
+const _prevCamPos = new THREE.Vector3(Infinity, Infinity, Infinity);
+const CAM_MOVE_THRESHOLD_SQ = 0.0625;
+
 function animate() {
   requestAnimationFrame(animate);
   const delta = clock.getDelta();
@@ -760,10 +767,16 @@ function animate() {
   // Anima target
   targetEntity?.tick();
 
-  // Aggiorna edifici: billboard barra progresso + beacon notturno lampeggiante
+  // Aggiorna edifici: billboard barra progresso + beacon notturno lampeggiante.
+  // Il lookAt sulla progressGroup è costoso; la saltiamo quando la camera non si
+  // è mossa abbastanza (e forziamo l'update alla prima apparizione della barra).
+  const camMovedEnough =
+    _prevCamPos.distanceToSquared(camera.position) >= CAM_MOVE_THRESHOLD_SQ;
+  if (camMovedEnough) _prevCamPos.copy(camera.position);
   for (const be of buildingEntities.values()) {
-    if (be.progressGroup.visible) {
+    if (be.progressGroup.visible && (camMovedEnough || !be._progressOriented)) {
       be.progressGroup.lookAt(camera.position);
+      be._progressOriented = true;
     }
     be.tick(delta, nightFactor);
   }
