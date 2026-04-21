@@ -245,6 +245,10 @@ let boostEnergy = BOOST_MAX;
 // Extreme Boost locale (ottimistico — sincronizzato dal game-state)
 let localHasExtremeBoost = false;
 let extremeBoostTimer = 0; // secondi rimanenti; > 0 = attivo
+// True dal momento in cui il client attiva il boost fino alla conferma del server.
+// Finché è true, i game-state con extremeBoosting:false non azzerano il timer
+// (evita che il polling lento cancelli l'effetto ottimistico prima della conferma).
+let _extremeBoostPendingConfirm = false;
 
 // ── Lobby + Network ───────────────────────────────────────────────────────────
 
@@ -410,12 +414,35 @@ const net = new NetworkManager({
     state.players.forEach(p => {
       if (p.id === localPlayerId) {
         localState = p;
-        // Sincronizza stato extreme boost dal server (source of truth)
-        localHasExtremeBoost = !!p.hasExtremeBoost;
-        // Se il server dice che il boost non è attivo, azzeriamo il timer locale
-        // immediatamente — evita che il client continui a usare la velocità boost
-        // dopo che il server l'ha già disattivata.
-        if (!p.extremeBoosting) extremeBoostTimer = 0;
+        // Bug fix: se il powerup viene appena raccolto (transizione false→true),
+        // consuma eventuali double-tap pendenti per evitare l'attivazione automatica
+        // involontaria che si verificava quando il giocatore aveva premuto Spazio
+        // due volte di fila per volare verso il powerup.
+        if (_extremeBoostPendingConfirm && extremeBoostTimer <= 0 && !p.extremeBoosting) {
+          _extremeBoostPendingConfirm = false;
+        }
+        if (!localHasExtremeBoost && p.hasExtremeBoost) {
+          input.boostDoubleTap = false;
+          input.touch.boostDoubleTap = false;
+        }
+        // Non risincronizzare "ready" se il server non ha ancora processato activate-extreme-boost:
+        // per un tick il server può avere ancora hasExtremeBoost:true mentre il client ha già
+        // consumato il powerup in modo ottimistico — altrimenti localHas torna true e il boost
+        // può riattivarsi / duplicare input.
+        if (!(_extremeBoostPendingConfirm && extremeBoostTimer > 0 && !p.extremeBoosting)) {
+          localHasExtremeBoost = !!p.hasExtremeBoost;
+        }
+        if (p.extremeBoosting) {
+          // Server conferma boost attivo: rimuovi il flag pendente e assicura
+          // che il timer sia positivo (per l'effetto visivo lato client).
+          _extremeBoostPendingConfirm = false;
+          if (extremeBoostTimer <= 0) extremeBoostTimer = EXTREME_BOOST_DURATION;
+        } else if (!_extremeBoostPendingConfirm) {
+          // Reset solo se non stiamo aspettando la conferma del server:
+          // evita che il polling lento azzeri il timer ottimistico subito dopo
+          // l'attivazione, prima che il server abbia processato l'evento.
+          extremeBoostTimer = 0;
+        }
         return;
       }
       if (!remoteAirplanes.has(p.id)) {
@@ -683,6 +710,7 @@ function animate() {
       net.sendActivateExtremeBoost();
       localHasExtremeBoost = false;
       extremeBoostTimer = EXTREME_BOOST_DURATION;
+      _extremeBoostPendingConfirm = true;
     }
     if (extremeBoostTimer > 0) {
       extremeBoostTimer = Math.max(0, extremeBoostTimer - delta);
