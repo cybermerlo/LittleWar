@@ -17,6 +17,10 @@ const trailMat = new THREE.LineBasicMaterial({
   depthWrite: false,
 });
 
+// Reused every frame — safe because JS is single-threaded
+const _dir = new THREE.Vector3();
+const _lookTarget = new THREE.Vector3();
+
 export class ProjectileEntity {
   /**
    * @param {THREE.Scene} scene
@@ -38,10 +42,12 @@ export class ProjectileEntity {
     this.currPosition = new THREE.Vector3();
     this.initialized = false;
 
-    this.trailGeometry = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(),
-      new THREE.Vector3(),
-    ]);
+    const trailPositions = new Float32Array(6);
+    this._trailPositions = trailPositions;
+    const trailAttr = new THREE.BufferAttribute(trailPositions, 3);
+    trailAttr.usage = THREE.DynamicDrawUsage;
+    this.trailGeometry = new THREE.BufferGeometry();
+    this.trailGeometry.setAttribute('position', trailAttr);
     this.trail = new THREE.Line(this.trailGeometry, trailMat);
     this.trail.frustumCulled = false;
     this.trail.renderOrder = 2;
@@ -61,18 +67,23 @@ export class ProjectileEntity {
     }
     this.mesh.position.copy(this.currPosition);
 
-    const dir = new THREE.Vector3().subVectors(this.currPosition, this.prevPosition);
-    if (dir.lengthSq() > 1e-6) {
-      dir.normalize();
-      const up = dir.clone().multiplyScalar(0.22).add(this.currPosition);
-      this.mesh.lookAt(up);
+    _dir.subVectors(this.currPosition, this.prevPosition);
+    if (_dir.lengthSq() > 1e-6) {
+      _dir.normalize();
+      _lookTarget.copy(_dir).multiplyScalar(0.22).add(this.currPosition);
+      this.mesh.lookAt(_lookTarget);
       this.mesh.rotateX(Math.PI / 2);
     }
 
-    const trailStart = this.currPosition.clone();
-    const trailEnd = this.currPosition.clone().sub(dir.setLength(0.6));
-    this.trailGeometry.setFromPoints([trailStart, trailEnd]);
-    this.trailGeometry.computeBoundingSphere();
+    const tp = this._trailPositions;
+    tp[0] = this.currPosition.x;
+    tp[1] = this.currPosition.y;
+    tp[2] = this.currPosition.z;
+    _lookTarget.copy(this.currPosition).sub(_dir.setLength(0.6));
+    tp[3] = _lookTarget.x;
+    tp[4] = _lookTarget.y;
+    tp[5] = _lookTarget.z;
+    this.trailGeometry.attributes.position.needsUpdate = true;
   }
 
   dispose(scene) {
