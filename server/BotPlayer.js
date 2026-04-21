@@ -1,12 +1,26 @@
 import { Player } from './Player.js';
 import {
   FLY_ALTITUDE,
+  PLANET_RADIUS,
   BOT_DETECTION_RANGE,
   BOT_SHOOT_RANGE,
   BOT_WAYPOINT_THRESHOLD,
   BOT_AIM_ERROR,
   BOT_TURN_RATE,
+  BOT_BOMB_SURFACE_RANGE,
+  BOT_BOMB_COOLDOWN,
+  BOT_CONQUER_SEARCH_RANGE,
+  BUILDING_CONQUEST_RADIUS,
 } from '../shared/constants.js';
+
+export const BOT_NAMES = [
+  'Asso', 'Falco', 'Viper', 'Cobra', 'Ghost',
+  'Razor', 'Blaze', 'Storm', 'Raven', 'Titan',
+  'Maverick', 'Shadow', 'Hunter', 'Eagle', 'Hornet',
+  'Striker', 'Vector', 'Cipher', 'Atlas', 'Lynx',
+  'Specter', 'Neon', 'Drift', 'Talon', 'Zephyr',
+  'Surge', 'Nova', 'Banshee', 'Phoenix', 'Bolt',
+];
 
 export class BotPlayer extends Player {
   constructor(nickname, color, sectorMin, sectorMax) {
@@ -15,19 +29,25 @@ export class BotPlayer extends Player {
     this.sectorMin = sectorMin ?? 0;
     this.sectorMax = sectorMax ?? Math.PI;
 
-    this.state = 'wander'; // 'wander' | 'chase'
+    this.state = 'wander'; // 'wander' | 'chase' | 'conquer' | 'bomb_turret'
     this.targetPlayerId = null;
+    this.buildingTarget = null; // { id, theta, phi }
     this.shootCooldown = 0;
+    this.bombCooldown = 0;
     this.aimOffset = 0;
     this.aimOffsetTarget = 0;
     this.aimOffsetTimer = 0;
     this.waypoint = null;
+    this.orbitSign = 1; // direzione orbita attorno agli edifici
     this.moveForward = true;
 
     this._pickNewWaypoint();
   }
 
   tickAI(game, dt) {
+    this.shootCooldown = Math.max(0, this.shootCooldown - dt);
+    this.bombCooldown = Math.max(0, this.bombCooldown - dt);
+
     // Aggiorna errore di mira ogni 0.4s (lerp verso nuovo target random)
     this.aimOffsetTimer -= dt;
     if (this.aimOffsetTimer <= 0) {
@@ -36,16 +56,13 @@ export class BotPlayer extends Player {
     }
     this.aimOffset += (this.aimOffsetTarget - this.aimOffset) * 0.3;
 
-    // Rilevamento: player umano vivo più vicino entro BOT_DETECTION_RANGE
+    // Priorità 1: player umano vivo più vicino entro BOT_DETECTION_RANGE
     let closest = null;
     let closestDist = BOT_DETECTION_RANGE;
     for (const p of game.players.values()) {
       if (p.isBot || !p.alive) continue;
       const dist = game.distanceSphere(this.theta, this.phi, p.theta, p.phi, FLY_ALTITUDE);
-      if (dist < closestDist) {
-        closestDist = dist;
-        closest = p;
-      }
+      if (dist < closestDist) { closestDist = dist; closest = p; }
     }
 
     if (closest) {
@@ -56,17 +73,32 @@ export class BotPlayer extends Player {
         phi: closest.phi,
         timestamp: Date.now(),
       };
-    } else {
-      this.state = 'wander';
-    }
-
-    if (this.state === 'chase') {
       this._doChase(game, dt, closestDist, closest);
-    } else {
-      this._doWander(game, dt);
+      return;
     }
 
-    this.shootCooldown = Math.max(0, this.shootCooldown - dt);
+    // Priorità 2: torretta nemica (owner = player umano) più vicina
+    const enemyBuilding = this._findNearestEnemyBuilding(game);
+    if (enemyBuilding) {
+      this.state = 'bomb_turret';
+      this.buildingTarget = enemyBuilding;
+      this._doBombTurret(game, dt);
+      return;
+    }
+
+    // Priorità 3: edificio neutro più vicino
+    const neutralBuilding = this._findNearestNeutralBuilding(game);
+    if (neutralBuilding) {
+      this.state = 'conquer';
+      this.buildingTarget = neutralBuilding;
+      this._doConquer(game, dt);
+      return;
+    }
+
+    // Default: wander
+    this.state = 'wander';
+    this.buildingTarget = null;
+    this._doWander(game, dt);
   }
 
   _doChase(game, dt, distance, target) {
@@ -76,6 +108,55 @@ export class BotPlayer extends Player {
     if (distance < BOT_SHOOT_RANGE && this.shootCooldown <= 0) {
       game.createProjectile(this, this.heading + this.aimOffset);
       this.shootCooldown = 0.35;
+    }
+  }
+
+  _doConquer(game, dt) {
+    const b = this.buildingTarget;
+    if (!b) { this.state = 'wander'; return; }
+
+    const building = game.buildings.get(b.id);
+    if (!building || building.ownerId !== null) {
+      // Edificio conquistato (da chiunque) → cerca altro
+      this.buildingTarget = null;
+      this.state = 'wander';
+      return;
+    }
+
+    const dist = building.distanceTo(this.theta, this.phi, FLY_ALTITUDE);
+
+    if (dist > BUILDING_CONQUEST_RADIUS) {
+      // Fuori zona → vola verso edificio
+      this._rotateToward(this._headingToPoint(b.theta, b.phi), dt);
+      this.orbitSign = Math.random() < 0.5 ? 1 : -1;
+    } else {
+      // Dentro zona → orbita perpendicolare all'edificio
+      const headingToBuilding = this._headingToPoint(b.theta, b.phi);
+      this._rotateToward(headingToBuilding + (Math.PI / 2) * this.orbitSign, dt);
+    }
+    this.moveForward = true;
+  }
+
+  _doBombTurret(game, dt) {
+    const b = this.buildingTarget;
+    if (!b) { this.state = 'wander'; return; }
+
+    const building = game.buildings.get(b.id);
+    if (!building || !building.ownerId || game.getPlayerById(building.ownerId)?.isBot) {
+      // Torretta distrutta o ora di un bot → cambia obiettivo
+      this.buildingTarget = null;
+      this.state = 'wander';
+      return;
+    }
+
+    this._rotateToward(this._headingToPoint(b.theta, b.phi), dt);
+    this.moveForward = true;
+
+    // Distanza proiettata su PLANET_RADIUS: se < BOT_BOMB_SURFACE_RANGE, droppa
+    const surfaceDist = game.distanceSphere(this.theta, this.phi, b.theta, b.phi, PLANET_RADIUS);
+    if (surfaceDist < BOT_BOMB_SURFACE_RANGE && this.bombCooldown <= 0) {
+      game.botDropBomb(this);
+      this.bombCooldown = BOT_BOMB_COOLDOWN;
     }
   }
 
@@ -98,6 +179,29 @@ export class BotPlayer extends Player {
     if (dist < BOT_WAYPOINT_THRESHOLD) {
       this._pickNewWaypoint();
     }
+  }
+
+  _findNearestEnemyBuilding(game) {
+    let nearest = null;
+    let nearestDist = BOT_CONQUER_SEARCH_RANGE;
+    for (const b of game.buildings.values()) {
+      if (!b.ownerId) continue;
+      if (game.getPlayerById(b.ownerId)?.isBot) continue; // bot-owned non è nemico
+      const dist = b.distanceTo(this.theta, this.phi, FLY_ALTITUDE);
+      if (dist < nearestDist) { nearestDist = dist; nearest = b; }
+    }
+    return nearest ? { id: nearest.id, theta: nearest.theta, phi: nearest.phi } : null;
+  }
+
+  _findNearestNeutralBuilding(game) {
+    let nearest = null;
+    let nearestDist = BOT_CONQUER_SEARCH_RANGE;
+    for (const b of game.buildings.values()) {
+      if (b.ownerId !== null) continue;
+      const dist = b.distanceTo(this.theta, this.phi, FLY_ALTITUDE);
+      if (dist < nearestDist) { nearestDist = dist; nearest = b; }
+    }
+    return nearest ? { id: nearest.id, theta: nearest.theta, phi: nearest.phi } : null;
   }
 
   _rotateToward(targetHeading, dt) {

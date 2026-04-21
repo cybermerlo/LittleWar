@@ -1,5 +1,5 @@
 import { Player } from './Player.js';
-import { BotPlayer } from './BotPlayer.js';
+import { BotPlayer, BOT_NAMES } from './BotPlayer.js';
 import { Projectile } from './Projectile.js';
 import { PowerUp } from './PowerUp.js';
 import { Target } from './Target.js';
@@ -784,12 +784,22 @@ export class Game {
     if (!human) return;
 
     const botColors = ['#ff4444', '#ffdd22', '#44dd44'];
-    const botNames = ['Bot-Alfa', 'Bot-Bravo', 'Bot-Gamma'];
+    const botNames = BOT_NAMES.slice().sort(() => Math.random() - 0.5);
 
     for (let i = 0; i < BOT_COUNT; i++) {
       const sectorMin = (i / BOT_COUNT) * Math.PI;
       const sectorMax = ((i + 1) / BOT_COUNT) * Math.PI;
       this.addBot(sectorMin, sectorMax, human, botNames[i], botColors[i]);
     }
+  }
+
+  botDropBomb(bot) {
+    this.bombs.push({
+      id: String(Date.now()) + Math.random(),
+      ownerId: bot.id,
+      theta: bot.theta,
+      phi: bot.phi,
+      altitude: FLY_ALTITUDE,
+    });
   }
 }
