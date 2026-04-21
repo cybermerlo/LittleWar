@@ -521,54 +521,87 @@ export class BuildingEntity {
   }
 }
 
+// ── Distruzione torretta: geometrie e materiali pre-allocati ──────────────────
+// Dimensioni e colori deterministici precalcolati per evitare new Geometry a runtime.
+const SHARD_COUNT = 14;
+const _shardSizes  = [0.10, 0.22, 0.15, 0.30, 0.18, 0.25, 0.12, 0.28, 0.20, 0.13, 0.26, 0.17, 0.23, 0.11];
+const _shardColors = [0xaaaaaa, 0x886644, 0xaaaaaa, 0x886644, 0xaaaaaa, 0x886644, 0xaaaaaa,
+                      0x886644, 0xaaaaaa, 0x886644, 0xaaaaaa, 0x886644, 0xaaaaaa, 0x886644];
+const _shardGeos = _shardSizes.map((s, i) =>
+  i % 2 === 0 ? new THREE.BoxGeometry(s, s, s) : new THREE.TetrahedronGeometry(s),
+);
+const _shardMats = _shardColors.map(c =>
+  new THREE.MeshLambertMaterial({ color: c, flatShading: true, transparent: true }),
+);
+const _flashGeo = new THREE.SphereGeometry(1.5, 6, 6);
+const _flashMat = new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true });
+
+// Velocità angolari precalcolate (rad/frame) per evitare moltiplicazioni ripetute
+const _shardAngles = Array.from({ length: SHARD_COUNT }, (_, i) =>
+  (i / SHARD_COUNT) * Math.PI * 2 + (i % 3) * 0.1,
+);
+const _shardSpeeds = [1.5, 2.8, 2.1, 3.2, 1.8, 2.5, 2.0, 3.4, 1.6, 2.9, 2.3, 1.7, 3.0, 2.2];
+const _shardVY0    = [2.0, 4.5, 3.2, 4.0, 2.8, 3.8, 3.5, 4.8, 2.3, 4.2, 3.6, 2.6, 4.1, 3.3];
+
+// Pool di effetti (max 3 simultanei)
+const DESTR_POOL_SIZE = 3;
+const _destrPool = Array.from({ length: DESTR_POOL_SIZE }, () => {
+  const group = new THREE.Group();
+  group.visible = false;
+  const shards = [];
+  for (let i = 0; i < SHARD_COUNT; i++) {
+    const mesh = new THREE.Mesh(_shardGeos[i], _shardMats[i].clone());
+    group.add(mesh);
+    shards.push({ mesh, vx: 0, vy: 0, vz: 0 });
+  }
+  const flash = new THREE.Mesh(_flashGeo, _flashMat.clone());
+  group.add(flash);
+  group._shards = shards;
+  group._flash = flash;
+  return group;
+});
+let _destrPoolIdx = 0;
+
 /**
  * Effetto particellare di distruzione torre.
  */
 export function spawnTurretDestruction(scene, theta, phi) {
   const pos = sphericalToCartesian(theta, phi, PLANET_RADIUS + 1.5);
-  const group = new THREE.Group();
+
+  const group = _destrPool[_destrPoolIdx % DESTR_POOL_SIZE];
+  _destrPoolIdx++;
+  group._cancelled = true; // ferma eventuale animazione precedente su questo slot
+
   group.position.set(pos.x, pos.y, pos.z);
+  group.visible = true;
+  if (!group.parent) scene.add(group);
 
-  const shardCount = 14;
-  const shards = [];
+  const { _shards: shards, _flash: flash } = group;
 
-  for (let i = 0; i < shardCount; i++) {
-    const size = 0.1 + Math.random() * 0.25;
-    const geo = Math.random() > 0.5
-      ? new THREE.BoxGeometry(size, size, size)
-      : new THREE.TetrahedronGeometry(size);
-    const color = Math.random() > 0.5 ? 0xaaaaaa : 0x886644;
-    const mesh = new THREE.Mesh(
-      geo,
-      new THREE.MeshLambertMaterial({ color, flatShading: true }),
-    );
-
-    const angle = (i / shardCount) * Math.PI * 2 + Math.random() * 0.3;
-    const speed = 1.5 + Math.random() * 2;
-    const vx = Math.cos(angle) * speed;
-    const vz = Math.sin(angle) * speed;
-    const vy = 2 + Math.random() * 3;
-
-    shards.push({ mesh, vx, vy, vz });
-    group.add(mesh);
+  for (let i = 0; i < SHARD_COUNT; i++) {
+    const s = shards[i];
+    const speed = _shardSpeeds[i];
+    s.vx = Math.cos(_shardAngles[i]) * speed;
+    s.vz = Math.sin(_shardAngles[i]) * speed;
+    s.vy = _shardVY0[i];
+    s.mesh.position.set(0, 0, 0);
+    s.mesh.rotation.set(0, 0, 0);
+    s.mesh.material.opacity = 1;
   }
-
-  const flash = new THREE.Mesh(
-    new THREE.SphereGeometry(1.5, 6, 6),
-    new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.9 }),
-  );
-  group.add(flash);
-
-  scene.add(group);
+  flash.scale.setScalar(1);
+  flash.material.opacity = 0.9;
 
   let elapsed = 0;
   const duration = 1200;
   const gravity = -8;
+  group._cancelled = false;
 
   const animate = () => {
+    if (group._cancelled) return;
     const dt = 16 / 1000;
     elapsed += 16;
     const t = elapsed / duration;
+    const op = Math.max(0, 1 - t);
 
     for (const s of shards) {
       s.vy += gravity * dt;
@@ -577,8 +610,7 @@ export function spawnTurretDestruction(scene, theta, phi) {
       s.mesh.position.z += s.vz * dt;
       s.mesh.rotation.x += dt * 5;
       s.mesh.rotation.z += dt * 3;
-      s.mesh.material.opacity = Math.max(0, 1 - t);
-      s.mesh.material.transparent = true;
+      s.mesh.material.opacity = op;
     }
 
     flash.scale.setScalar(1 + t * 3);
@@ -587,7 +619,7 @@ export function spawnTurretDestruction(scene, theta, phi) {
     if (t < 1) {
       requestAnimationFrame(animate);
     } else {
-      scene.remove(group);
+      group.visible = false;
     }
   };
   requestAnimationFrame(animate);

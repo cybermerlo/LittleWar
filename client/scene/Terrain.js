@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { surfaceAt, radiusAt, PLANET_RADIUS, heightAt01 } from './planetHeight.js';
 
 const TREE_MODEL_URLS = [
@@ -393,6 +394,50 @@ function makeHospital(hospitalTemplates) {
 }
 
 /**
+ * Fonde tutte le mesh statiche del terreno raggruppandole per materiale.
+ * Riduce centinaia di draw call individuali (alberi, edifici, ospedali) a
+ * poche decine — una per ogni materiale unico nel gruppo.
+ *
+ * Object3D.clone() condivide geometry e material con il template originale,
+ * quindi material.uuid è stabile e usabile come chiave di raggruppamento.
+ * Le normali vengono trasformate correttamente da applyMatrix4.
+ */
+function mergeStaticTerrain(group) {
+  const byMat = new Map(); // material.uuid → { material, geos[] }
+
+  group.traverse(obj => {
+    if (!(obj instanceof THREE.Mesh)) return;
+    if (!obj.geometry || !obj.material || Array.isArray(obj.material)) return;
+
+    obj.updateWorldMatrix(true, false);
+    const geo = obj.geometry.clone();
+    geo.applyMatrix4(obj.matrixWorld);
+
+    // Rimuovi attributi non usati per ridurre memoria (es. uv2, color se presenti)
+    // ma mantieni position, normal, uv che servono ai materiali Lambert/Standard.
+    const keep = new Set(['position', 'normal', 'uv']);
+    for (const name of Object.keys(geo.attributes)) {
+      if (!keep.has(name)) geo.deleteAttribute(name);
+    }
+
+    const key = obj.material.uuid;
+    if (!byMat.has(key)) byMat.set(key, { material: obj.material, geos: [] });
+    byMat.get(key).geos.push(geo);
+  });
+
+  // Svuota il gruppo e aggiungi le mesh fuse
+  group.clear();
+
+  for (const { material, geos } of byMat.values()) {
+    if (geos.length === 0) continue;
+    const merged = mergeGeometries(geos, false);
+    for (const g of geos) g.dispose();
+    if (!merged) continue;
+    group.add(new THREE.Mesh(merged, material));
+  }
+}
+
+/**
  * @param {THREE.Mesh}         planetMesh         - mesh terreno per raycast agli angoli della base
  * @param {THREE.Object3D[]} [treeTemplates]     - risultato di loadTreeTemplates()
  * @param {THREE.Object3D[]} [buildingTemplates] - risultato di loadBuildingTemplates()
@@ -523,6 +568,7 @@ export function createTerrain(scene, heightData, posAttr, _planetMesh, treeTempl
     trees++;
   }
 
+  mergeStaticTerrain(terrainGroup);
   scene.add(terrainGroup);
   return terrainGroup;
 }

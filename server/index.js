@@ -110,6 +110,8 @@ io.on('connection', (socket) => {
     getGameForSocket(socket.id)?.activateExtremeBoost(socket.id);
   });
 
+  socket.on('perf-ping', (_, cb) => typeof cb === 'function' && cb());
+
   socket.on('disconnect', () => {
     console.log(`[-] Socket disconnesso: ${socket.id}`);
     const game = getGameForSocket(socket.id);

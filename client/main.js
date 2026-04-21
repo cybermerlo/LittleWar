@@ -56,6 +56,10 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.03;
+// Disabilita auto-reset: EffectComposer chiama render() più volte per frame (uno per
+// pass), e ogni call resetterebbe renderer.info.render azzerando il conteggio totale.
+// Resettiamo manualmente una volta per frame in animate().
+renderer.info.autoReset = false;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -126,6 +130,10 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyG' && !e.repeat) {
     _dbgVisible = !_dbgVisible;
     _dbgVisible ? scene.add(_dbgPlanet, _dbgWater) : scene.remove(_dbgPlanet, _dbgWater);
+  }
+  if (e.code === 'KeyH' && !e.repeat) {
+    _perfVisible = !_perfVisible;
+    document.getElementById('perf-overlay').classList.toggle('visible', _perfVisible);
   }
 });
 Promise.all([
@@ -319,6 +327,8 @@ const net = new NetworkManager({
     for (const [, plane] of remoteAirplanes) plane.dispose(scene);
     remoteAirplanes.clear();
     remoteWasDead.clear();
+    for (const [, e] of projectileEntities) e.dispose(scene);
+    projectileEntities.clear();
     for (const [, e] of powerupEntities) e.dispose(scene);
     powerupEntities.clear();
     powerupPositions.clear();
@@ -383,6 +393,7 @@ const net = new NetworkManager({
   },
 
   onGameState(state) {
+    _perfGsCount++;
     allPlayerStates = state.players;
 
     // Rimuovi aerei remoti non più presenti nel game-state
@@ -606,6 +617,19 @@ function ensureLocalAirplane(color, model) {
   }
 }
 
+// ── Performance Overlay ───────────────────────────────────────────────────────
+
+let _perfVisible = false;
+let _perfFrameCount = 0;
+let _perfLastFpsTime = performance.now();
+let _perfFps = 0;
+let _perfFrameMs = 0;
+let _perfPingMs = -1;
+let _perfLastPingTime = 0;
+let _perfGsCount = 0;
+let _perfLastGsTime = performance.now();
+let _perfGsRate = 0;
+
 // ── Game Loop ─────────────────────────────────────────────────────────────────
 
 const clock = new THREE.Clock();
@@ -620,6 +644,22 @@ function animate() {
   requestAnimationFrame(animate);
   const delta = clock.getDelta();
   const now = performance.now();
+
+  // ── Perf overlay ────────────────────────────────────────────────────────────
+  _perfFrameCount++;
+  _perfFrameMs = delta * 1000;
+  if (now - _perfLastFpsTime >= 500) {
+    _perfFps = Math.round(_perfFrameCount * 1000 / (now - _perfLastFpsTime));
+    _perfGsRate = _perfGsCount * 1000 / (now - _perfLastGsTime);
+    _perfFrameCount = 0;
+    _perfGsCount = 0;
+    _perfLastFpsTime = now;
+    _perfLastGsTime = now;
+  }
+  if (_perfVisible && now - _perfLastPingTime > 2000) {
+    _perfLastPingTime = now;
+    net.measurePing(ms => { _perfPingMs = ms; });
+  }
 
   sky.update(delta);
   updatePlanet(delta, camera.position);
@@ -801,7 +841,38 @@ function animate() {
     );
   }
 
+  renderer.info.reset();
   composer.render();
+
+  // Overlay letto dopo il render: renderer.info accumula su tutti i pass del composer
+  if (_perfVisible) {
+    const mem = performance.memory;
+    const ri = renderer.info.render;
+    const col  = (v, w, e, s) => `<span style="color:${v>=e?'#ff4444':v>=w?'#ffcc00':'#00ff99'}">${s}</span>`;
+    const coli = (v, w, e, s) => `<span style="color:${v<=e?'#ff4444':v<=w?'#ffcc00':'#00ff99'}">${s}</span>`;
+    const heapMB = mem ? mem.usedJSHeapSize / 1048576 : -1;
+    const lines = [
+      `── Rendering ─────────────`,
+      `FPS        ${coli(_perfFps,  50, 30, String(_perfFps).padStart(6))}`,
+      `Frame      ${col(_perfFrameMs, 20, 33, _perfFrameMs.toFixed(1).padStart(5)+' ms')}`,
+      `Draw calls ${col(ri.calls, 300, 600, String(ri.calls).padStart(6))}`,
+      `Triangoli  ${col(ri.triangles/1000, 200, 500, (ri.triangles/1000).toFixed(1).padStart(5)+' k')}`,
+      heapMB >= 0 ? `Heap JS    ${col(heapMB, 200, 400, heapMB.toFixed(1).padStart(4)+' MB')}` : '',
+      ``,
+      `── Rete ──────────────────`,
+      `Ping       ${_perfPingMs < 0 ? '     …' : col(_perfPingMs, 100, 300, String(_perfPingMs).padStart(4)+' ms')}`,
+      `Transport  ${net.getTransport().padStart(9)}`,
+      `GS/s       ${coli(_perfGsRate, 30, 20, _perfGsRate.toFixed(1).padStart(6))}`,
+      ``,
+      `── Entità ────────────────`,
+      `Giocatori  ${String(allPlayerStates.length).padStart(6)}`,
+      `Proiettili ${String(projectileEntities.size).padStart(6)}`,
+      `Powerup    ${String(powerupEntities.size).padStart(6)}`,
+      `Bombe      ${String(bombEntities.size).padStart(6)}`,
+      `Edifici    ${String(buildingEntities.size).padStart(6)}`,
+    ].filter(Boolean).join('\n');
+    document.getElementById('perf-content').innerHTML = lines;
+  }
 }
 
 animate();

@@ -1381,6 +1381,32 @@
       opacity: 0.6;
     }
 
+    #perf-overlay {
+      display: none;
+      position: fixed;
+      top: 52px;
+      left: 8px;
+      z-index: 210;
+      background: rgba(0, 0, 0, 0.80);
+      color: #00ff99;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 11px;
+      line-height: 1.55;
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid rgba(0, 255, 150, 0.25);
+      pointer-events: none;
+      user-select: none;
+    }
+    #perf-overlay.visible { display: block; }
+    #perf-overlay pre {
+      margin: 0;
+      font-family: inherit;
+      font-size: inherit;
+      color: inherit;
+      white-space: pre;
+    }
+
     #rotate-prompt {
       position: fixed;
       inset: 0;
@@ -1645,6 +1671,9 @@
       <p id="death-countdown">Respawn in 3…</p>
     </div>
   </div>
+
+  <!-- Performance overlay (H per mostrare/nascondere) -->
+  <div id="perf-overlay"><pre id="perf-content"></pre></div>
 
   <script type="module" src="./main.js"></script>
 </body>

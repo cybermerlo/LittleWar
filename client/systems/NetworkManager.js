@@ -93,4 +93,13 @@ export class NetworkManager {
   sendActivateExtremeBoost() {
     this.socket.emit('activate-extreme-boost');
   }
+
+  measurePing(callback) {
+    const t0 = performance.now();
+    this.socket.emit('perf-ping', null, () => callback(Math.round(performance.now() - t0)));
+  }
+
+  getTransport() {
+    return this.socket.io?.engine?.transport?.name ?? 'unknown';
+  }
 }
