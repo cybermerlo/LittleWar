@@ -1,4 +1,5 @@
 import { Player } from './Player.js';
+import { BotPlayer } from './BotPlayer.js';
 import { Projectile } from './Projectile.js';
 import { PowerUp } from './PowerUp.js';
 import { Target } from './Target.js';
@@ -35,6 +36,7 @@ import {
   EXTREME_BOOST_MULT,
   EXTREME_BOOST_DURATION,
   PLANE_COLLISION_RADIUS,
+  BOT_COUNT,
 } from '../shared/constants.js';
 
 const TICK_DT = TICK_INTERVAL / 1000; // secondi per tick
@@ -55,9 +57,10 @@ function clampTheta(theta) {
 }
 
 export class Game {
-  constructor(io) {
+  constructor(io, roomId = 'default') {
     this.io = io;
-    this.players = new Map();   // socketId → Player
+    this.roomId = roomId;
+    this.players = new Map();   // socketId → Player (umani) | bot.id → BotPlayer
     this.projectiles = new Map();
     this.powerups = new Map();
     this.target = new Target(); // obiettivo condiviso unico
@@ -67,8 +70,23 @@ export class Game {
 
     this.lastPowerupSpawn = Date.now();
 
-    setInterval(() => this.tick(), TICK_INTERVAL);
-    setInterval(() => this.spawnRandomPowerup(), POWERUP_RANDOM_INTERVAL);
+    // Stato condiviso tra i bot (ultima posizione nota del player)
+    this.botSharedState = { lastKnownTarget: null };
+
+    this._tickInterval = setInterval(() => this.tick(), TICK_INTERVAL);
+    this._powerupInterval = setInterval(() => this.spawnRandomPowerup(), POWERUP_RANDOM_INTERVAL);
+  }
+
+  destroy() {
+    clearInterval(this._tickInterval);
+    clearInterval(this._powerupInterval);
+    this.players.clear();
+    this.projectiles.clear();
+    this.powerups.clear();
+  }
+
+  hasSocket(socketId) {
+    return this.players.has(socketId);
   }
 
   // ── Giocatori ──────────────────────────────────────────────────────────────
@@ -77,8 +95,10 @@ export class Game {
     return [...this.players.values()].map(p => p.color);
   }
 
-  /** Invia lobby-info (colori occupati + contatore) a uno o tutti i socket */
+  /** Invia lobby-info (colori occupati + contatore) a uno o tutti i socket.
+   *  Solo per la game multiplayer default — le sessioni solo non influenzano la lobby. */
   broadcastLobbyInfo(target = this.io) {
+    if (this.roomId !== 'default') return;
     target.emit('lobby-info', {
       takenColors: this.getTakenColors(),
       online: this.players.size,
@@ -105,6 +125,9 @@ export class Game {
     const player = new Player(socket.id, nickname, color, safeModel);
     this.players.set(socket.id, player);
 
+    // Entra nella room Socket.IO di questa istanza di gioco
+    socket.join(this.roomId);
+
     const allPlayers = [...this.players.values()].map(p => p.toState());
     const allPowerups = [...this.powerups.values()].map(p => p.toState());
 
@@ -116,7 +139,7 @@ export class Game {
       buildings: [...this.buildings.values()].map(b => b.toState()),
     });
 
-    socket.broadcast.emit('player-joined', player.toPublicInfo());
+    socket.to(this.roomId).emit('player-joined', player.toPublicInfo());
 
     // Aggiorna tutti i client in lobby con i colori ora occupati
     this.broadcastLobbyInfo();
@@ -142,7 +165,7 @@ export class Game {
       }
     }
 
-    this.io.emit('player-left', { id: player.id });
+    this.io.to(this.roomId).emit('player-left', { id: player.id });
 
     // Aggiorna tutti i client in lobby: il colore è di nuovo disponibile
     this.broadcastLobbyInfo();
@@ -198,9 +221,13 @@ export class Game {
     player.phi     = phi;
     player.heading = heading;
 
-    const config = WEAPON_CONFIGS[player.weaponLevel];
+    this.createProjectile(player, heading);
+  }
 
-    // Genera N proiettili con spread
+  // Crea proiettili per un player a partire dal suo heading (usato anche dai bot).
+  createProjectile(player, heading) {
+    const wl = Math.min(player.weaponLevel, WEAPON_CONFIGS.length - 1);
+    const config = WEAPON_CONFIGS[wl];
     for (let i = 0; i < config.bullets; i++) {
       const offset = config.bullets === 1
         ? 0
@@ -234,6 +261,11 @@ export class Game {
 
   tick() {
     const now = Date.now();
+
+    // Bot AI: aggiorna heading e flags prima del calcolo del movimento
+    for (const player of this.players.values()) {
+      if (player.isBot && player.alive) player.tickAI(this, TICK_DT);
+    }
 
     // Predizione movimento: il server muove ogni player nella direzione corrente
     // tra un input e l'altro, così il game-state contiene sempre posizioni fresche.
@@ -326,7 +358,7 @@ export class Game {
     }
 
     // Broadcast stato
-    this.io.emit('game-state', {
+    this.io.to(this.roomId).emit('game-state', {
       players: [...this.players.values()].map(p => p.toState()),
       projectiles: [...this.projectiles.values()].map(p => p.toState()),
       powerups: [...this.powerups.values()].map(p => p.toState()),
@@ -345,7 +377,7 @@ export class Game {
       victim.hasShield = false;
       victim.shieldInvincible = true;
       setTimeout(() => { victim.shieldInvincible = false; }, SHIELD_INVINCIBILITY);
-      this.io.emit('shield-broken', { playerId: victim.id });
+      this.io.to(this.roomId).emit('shield-broken', { playerId: victim.id });
       return;
     }
 
@@ -365,7 +397,7 @@ export class Game {
     const killer = this.getPlayerById(killerId);
     if (killer) killer.kills++;
 
-    this.io.emit('player-killed', {
+    this.io.to(this.roomId).emit('player-killed', {
       killerId,
       victimId: victim.id,
       theta: victim.theta,
@@ -391,7 +423,7 @@ export class Game {
     if (Math.random() < POWERUP_DROP_CHANCE) {
       const pu = new PowerUp('weapon', victim.theta, victim.phi);
       this.powerups.set(pu.id, pu);
-      this.io.emit('powerup-spawned', pu.toState());
+      this.io.to(this.roomId).emit('powerup-spawned', pu.toState());
     }
   }
 
@@ -431,7 +463,7 @@ export class Game {
         const destroyer = this.getPlayerById(bomb.ownerId);
         const awardedKill = !!(destroyer && bomb.ownerId !== turretOwnerId);
         if (awardedKill) destroyer.kills++;
-        this.io.emit('building-destroyed', {
+        this.io.to(this.roomId).emit('building-destroyed', {
           buildingId: building.id,
           theta: building.theta,
           phi: building.phi,
@@ -446,7 +478,7 @@ export class Game {
     const dist = this.distanceSphere(bomb.theta, bomb.phi, this.target.theta, this.target.phi, PLANET_RADIUS);
     const hit = dist < BOMB_HIT_RADIUS;
 
-    this.io.emit('bomb-exploded', {
+    this.io.to(this.roomId).emit('bomb-exploded', {
       theta: bomb.theta,
       phi: bomb.phi,
       ownerId: bomb.ownerId,
@@ -459,7 +491,7 @@ export class Game {
 
       // Nuovo obiettivo condiviso — visibile a tutti
       this.target = new Target();
-      this.io.emit('new-target', this.target.toState());
+      this.io.to(this.roomId).emit('new-target', this.target.toState());
       this.emitKillFeedMessage(`${player?.nickname ?? 'Sconosciuto'} ha distrutto l'obiettivo principale!`, {
         kind: 'main-objective-destroyed',
         actor: {
@@ -559,7 +591,7 @@ export class Game {
       player.hasExtremeBoost = true;
     }
 
-    this.io.emit('powerup-collected', {
+    this.io.to(this.roomId).emit('powerup-collected', {
       playerId: player.id,
       powerupId: pu.id,
       type: pu.type,
@@ -581,13 +613,13 @@ export class Game {
     if (!player) return;
     const safeText = String(text ?? '').trim().slice(0, 120);
     if (!safeText) return;
-    this.io.emit('chat-message', { nickname: player.nickname, color: player.color, text: safeText });
+    this.io.to(this.roomId).emit('chat-message', { nickname: player.nickname, color: player.color, text: safeText });
   }
 
   emitKillFeedMessage(text, meta = null) {
     const safeText = String(text ?? '').trim().slice(0, 160);
     if (!safeText) return;
-    this.io.emit('chat-message', {
+    this.io.to(this.roomId).emit('chat-message', {
       nickname: 'KILL FEED',
       color: '#ffb86b',
       text: safeText,
@@ -622,7 +654,7 @@ export class Game {
         victim.hasShield = false;
         victim.shieldInvincible = true;
         setTimeout(() => { victim.shieldInvincible = false; }, SHIELD_INVINCIBILITY);
-        this.io.emit('shield-broken', { playerId: victim.id });
+        this.io.to(this.roomId).emit('shield-broken', { playerId: victim.id });
         continue;
       }
 
@@ -639,7 +671,7 @@ export class Game {
       victim.extremeBoostTimer = 0;
       anyDied = true;
 
-      this.io.emit('player-killed', {
+      this.io.to(this.roomId).emit('player-killed', {
         killerId: null,
         victimId: victim.id,
         theta: victim.theta,
@@ -650,7 +682,7 @@ export class Game {
       if (Math.random() < POWERUP_DROP_CHANCE) {
         const pu = new PowerUp('weapon', victim.theta, victim.phi);
         this.powerups.set(pu.id, pu);
-        this.io.emit('powerup-spawned', pu.toState());
+        this.io.to(this.roomId).emit('powerup-spawned', pu.toState());
       }
     }
 
@@ -679,7 +711,7 @@ export class Game {
     const type = r < 0.56 ? 'weapon' : r < 0.80 ? 'shield' : 'extreme_boost';
     const pu = new PowerUp(type);
     this.powerups.set(pu.id, pu);
-    this.io.emit('powerup-spawned', pu.toState());
+    this.io.to(this.roomId).emit('powerup-spawned', pu.toState());
   }
 
   // ── Utils ─────────────────────────────────────────────────────────────────
@@ -715,5 +747,49 @@ export class Game {
     const player = this.getPlayerById(playerId);
     if (!player) return null;
     return this.io.sockets.sockets.get(player.socketId) ?? null;
+  }
+
+  // ── Bot (solo sessions) ────────────────────────────────────────────────────
+
+  addBot(sectorMin, sectorMax, humanPlayer, nickname, color) {
+    const bot = new BotPlayer(nickname, color, sectorMin, sectorMax);
+
+    // Spawn lontano dal player umano: prova 8 punti, sceglie il più distante
+    if (humanPlayer) {
+      let bestTheta = sectorMin + Math.random() * (sectorMax - sectorMin);
+      let bestPhi = Math.random() * Math.PI * 2;
+      let bestDist = 0;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const t = sectorMin + Math.random() * (sectorMax - sectorMin);
+        const p = Math.random() * Math.PI * 2;
+        const dist = this.distanceSphere(t, p, humanPlayer.theta, humanPlayer.phi, FLY_ALTITUDE);
+        if (dist > bestDist) { bestDist = dist; bestTheta = t; bestPhi = p; }
+      }
+      bot.theta = bestTheta;
+      bot.phi = bestPhi;
+      bot.heading = Math.random() * Math.PI * 2;
+    }
+
+    // Chiave = bot.id (non socketId, che è null per i bot)
+    this.players.set(bot.id, bot);
+
+    // Notifica il client: il bot appare come un aereo normale
+    this.io.to(this.roomId).emit('player-joined', bot.toPublicInfo());
+
+    return bot;
+  }
+
+  addBotsForSoloSession(humanSocketId) {
+    const human = this.players.get(humanSocketId);
+    if (!human) return;
+
+    const botColors = ['#ff4444', '#ffdd22', '#44dd44'];
+    const botNames = ['Bot-Alfa', 'Bot-Bravo', 'Bot-Gamma'];
+
+    for (let i = 0; i < BOT_COUNT; i++) {
+      const sectorMin = (i / BOT_COUNT) * Math.PI;
+      const sectorMax = ((i + 1) / BOT_COUNT) * Math.PI;
+      this.addBot(sectorMin, sectorMax, human, botNames[i], botColors[i]);
+    }
   }
 }

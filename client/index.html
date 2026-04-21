@@ -463,6 +463,39 @@
       filter: grayscale(0.3);
     }
 
+    #solo-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      padding: 0.65rem 1rem;
+      border-radius: 0.9rem;
+      border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 35%, transparent);
+      cursor: pointer;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-weight: 700;
+      font-size: clamp(0.85rem, 1.4vw, 1rem);
+      letter-spacing: 0.02em;
+      color: var(--lw-on-surface-variant);
+      background: color-mix(in srgb, var(--lw-surface-container-highest) 70%, transparent);
+      transition: transform 0.15s ease, border-color 0.2s ease, color 0.2s ease;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+
+    #solo-btn:hover:not(:disabled) {
+      border-color: color-mix(in srgb, var(--lw-primary) 50%, transparent);
+      color: var(--lw-on-surface);
+      transform: scale(1.01);
+    }
+
+    #solo-btn:active:not(:disabled) { transform: scale(0.97); }
+
+    #solo-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
     .lw-online-pill {
       display: inline-flex;
       align-items: center;
@@ -1509,6 +1542,7 @@
         </div>
 
         <button type="button" id="play-btn">GIOCA</button>
+        <button type="button" id="solo-btn">Gioca da solo</button>
 
         <div class="lw-online-pill">
           <span class="lw-ping-wrap" aria-hidden="true"><span class="lw-ping-dot"></span></span>

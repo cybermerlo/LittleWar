@@ -240,7 +240,7 @@ let extremeBoostTimer = 0; // secondi rimanenti; > 0 = attivo
 
 // ── Lobby + Network ───────────────────────────────────────────────────────────
 
-const lobby = new LobbyScreen((nickname, color, model) => {
+function _enterGame(nickname, color, model, solo = false) {
   if (!_isIOS) {
     const el = document.documentElement;
     if (el.requestFullscreen) el.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
@@ -248,9 +248,18 @@ const lobby = new LobbyScreen((nickname, color, model) => {
   }
   AudioManager.startMusic();
   AudioManager.startEngine();
-  net.join(nickname, color, model);
+  if (solo) {
+    net.joinSolo(nickname, color, model);
+  } else {
+    net.join(nickname, color, model);
+  }
   lobby.setMessage('Connessione…');
-});
+}
+
+const lobby = new LobbyScreen(
+  (nickname, color, model) => _enterGame(nickname, color, model, false),
+  (nickname, color, model) => _enterGame(nickname, color, model, true),
+);
 
 const net = new NetworkManager({
   onConnect() {

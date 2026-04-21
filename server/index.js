@@ -55,45 +55,73 @@ app.get('*', (req, res) => {
   res.sendFile(join(__dirname, '../dist/index.html'));
 });
 
-const game = new Game(io);
+// Map di tutte le istanze di gioco: roomId → Game
+const games = new Map();
+const defaultGame = new Game(io, 'default');
+games.set('default', defaultGame);
+
+function getGameForSocket(socketId) {
+  for (const g of games.values()) {
+    if (g.hasSocket(socketId)) return g;
+  }
+  return null;
+}
 
 io.on('connection', (socket) => {
   console.log(`[+] Socket connesso: ${socket.id}`);
 
   // Invia subito i colori occupati al nuovo client (per aggiornare la lobby)
-  game.broadcastLobbyInfo(socket);
+  defaultGame.broadcastLobbyInfo(socket);
 
   socket.on('join', ({ nickname, color, model }) => {
-    game.addPlayer(socket, nickname, color, model);
+    defaultGame.addPlayer(socket, nickname, color, model);
+  });
+
+  socket.on('join-solo', ({ nickname, color, model }) => {
+    const roomId = `solo-${socket.id}`;
+    socket.join(roomId);
+    const soloGame = new Game(io, roomId);
+    games.set(roomId, soloGame);
+    soloGame.addPlayer(socket, nickname, color, model);
+    soloGame.addBotsForSoloSession(socket.id);
   });
 
   socket.on('player-input', (input) => {
-    game.updatePlayerInput(socket.id, input);
+    getGameForSocket(socket.id)?.updatePlayerInput(socket.id, input);
   });
 
   socket.on('shoot', (data) => {
-    game.playerShoot(socket.id, data);
+    getGameForSocket(socket.id)?.playerShoot(socket.id, data);
   });
 
   socket.on('drop-bomb', (data) => {
-    game.playerDropBomb(socket.id, data);
+    getGameForSocket(socket.id)?.playerDropBomb(socket.id, data);
   });
 
   socket.on('chat', ({ text }) => {
-    game.broadcastChat(socket.id, text);
+    getGameForSocket(socket.id)?.broadcastChat(socket.id, text);
   });
 
   socket.on('try-collect', ({ powerupId }) => {
-    game.tryCollectPowerup(socket.id, powerupId);
+    getGameForSocket(socket.id)?.tryCollectPowerup(socket.id, powerupId);
   });
 
   socket.on('activate-extreme-boost', () => {
-    game.activateExtremeBoost(socket.id);
+    getGameForSocket(socket.id)?.activateExtremeBoost(socket.id);
   });
 
   socket.on('disconnect', () => {
     console.log(`[-] Socket disconnesso: ${socket.id}`);
+    const game = getGameForSocket(socket.id);
+    if (!game) return;
     game.removePlayer(socket.id);
+
+    // Distruggi le sessioni solo quando il giocatore esce
+    if (game.roomId !== 'default') {
+      game.destroy();
+      games.delete(game.roomId);
+      console.log(`[solo] Sessione ${game.roomId} terminata`);
+    }
   });
 });
 
