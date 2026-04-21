@@ -7,8 +7,9 @@ const MODELS = [
 ];
 
 export class LobbyScreen {
-  constructor(onPlay) {
+  constructor(onPlay, onPlaySolo) {
     this.onPlay = onPlay;
+    this.onPlaySolo = onPlaySolo;
     this.selectedColor = PLAYER_COLORS[0];
     this.selectedModel = MODELS[0].id;
     this._isFull = false;
@@ -16,6 +17,7 @@ export class LobbyScreen {
     this._lobbyEl   = document.getElementById('lobby');
     this._nicknameEl = document.getElementById('nickname');
     this._playBtn   = document.getElementById('play-btn');
+    this._soloBtnEl = document.getElementById('solo-btn');
     this._msgEl     = document.getElementById('lobby-msg');
     this._countEl   = document.getElementById('online-count');
     this._colorEl   = document.getElementById('color-options');
@@ -26,6 +28,7 @@ export class LobbyScreen {
     this._buildColorPicker();
     this._buildModelPicker();
     this._playBtn.addEventListener('click', () => this._handlePlay());
+    this._soloBtnEl?.addEventListener('click', () => this._handlePlaySolo());
     const onNicknameMaybeChanged = () => this._updatePlayState();
     this._nicknameEl.addEventListener('input', onNicknameMaybeChanged);
     this._nicknameEl.addEventListener('change', onNicknameMaybeChanged);
@@ -74,6 +77,7 @@ export class LobbyScreen {
     const nickname = this._getNicknameTrimmed();
     const valid = nickname.length > 0;
     this._playBtn.disabled = this._isFull || !valid;
+    if (this._soloBtnEl) this._soloBtnEl.disabled = !valid;
     if (this._isFull) return;
     if (!valid) {
       this._msgEl.textContent = 'Inserisci un nickname per giocare.';
@@ -157,6 +161,17 @@ export class LobbyScreen {
     }
     this._persistNickname(nickname);
     this.onPlay(nickname, this.selectedColor, this.selectedModel);
+  }
+
+  _handlePlaySolo() {
+    const nickname = this._getNicknameTrimmed();
+    if (!nickname) {
+      this._updatePlayState();
+      this._nicknameEl?.focus();
+      return;
+    }
+    this._persistNickname(nickname);
+    this.onPlaySolo?.(nickname, this.selectedColor, this.selectedModel);
   }
 
   setOnlineCount(n, max) {

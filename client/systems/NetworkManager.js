@@ -28,9 +28,9 @@ export class NetworkManager {
     this.socket.on('building-destroyed', (d) => h.onBuildingDestroyed?.(d));
     this.socket.on('connect', () => {
       if (this._pendingJoin) {
-        const payload = this._pendingJoin;
+        const { payload, event } = this._pendingJoin;
         this._pendingJoin = null;
-        this.socket.emit('join', payload);
+        this.socket.emit(event, payload);
       }
       h.onConnect?.();
     });
@@ -50,7 +50,17 @@ export class NetworkManager {
       this.socket.emit('join', payload);
       return;
     }
-    this._pendingJoin = payload;
+    this._pendingJoin = { payload, event: 'join' };
+    this.socket.connect();
+  }
+
+  joinSolo(nickname, color, model) {
+    const payload = { nickname, color, model };
+    if (this.socket.connected) {
+      this.socket.emit('join-solo', payload);
+      return;
+    }
+    this._pendingJoin = { payload, event: 'join-solo' };
     this.socket.connect();
   }
 
