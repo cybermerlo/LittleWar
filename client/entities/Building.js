@@ -337,9 +337,11 @@ export class BuildingEntity {
 
   /**
    * Aggiorna lo stato visivo dell'edificio dal game-state server.
-   * Anche `camera` e `nightFactor` sono opzionali per retro-compatibilità.
+   * `nightFactor` è opzionale per retro-compatibilità.
+   * L'orientamento della barra di progresso verso la camera è gestito
+   * dal loop animate() in main.js (per-frame, con threshold su movimento).
    */
-  update(state, allPlayerStates, camera, nightFactor = 0) {
+  update(state, allPlayerStates, _camera, nightFactor = 0) {
     this.ownerId = state.ownerId;
     this.ownerColor = state.ownerColor;
     this.conquestProgress = state.conquestProgress;
@@ -369,6 +371,7 @@ export class BuildingEntity {
     }
 
     // Barra di progresso conquista
+    const justBecameVisible = isBeingConquered && !this.progressGroup.visible;
     this.progressGroup.visible = isBeingConquered;
     if (isBeingConquered) {
       const p = Math.max(0, Math.min(1, state.conquestProgress));
@@ -377,7 +380,10 @@ export class BuildingEntity {
       const r = 1 - p * 0.5;
       const g = 0.5 + p * 0.5;
       this.progressFillMat.color.setRGB(r, g, 0.2);
-      if (camera) this.progressGroup.lookAt(camera.position);
+      // Segnala al loop animate() che serve un lookAt immediato al prossimo frame
+      if (justBecameVisible) this._progressOriented = false;
+    } else {
+      this._progressOriented = false;
     }
 
     // Puntamento continuo (solo quando la torretta conquistata è visibile)
