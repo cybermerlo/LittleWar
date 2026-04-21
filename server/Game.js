@@ -789,7 +789,9 @@ export class Game {
     for (let i = 0; i < BOT_COUNT; i++) {
       const sectorMin = (i / BOT_COUNT) * Math.PI;
       const sectorMax = ((i + 1) / BOT_COUNT) * Math.PI;
-      this.addBot(sectorMin, sectorMax, human, botNames[i], botColors[i]);
+      const bot = this.addBot(sectorMin, sectorMax, human, botNames[i], botColors[i]);
+      // Primo bot: aggressivo (insegue il player). Gli altri: strategici (priorità edifici)
+      bot.role = i === 0 ? 'aggressor' : 'strategist';
     }
   }
 

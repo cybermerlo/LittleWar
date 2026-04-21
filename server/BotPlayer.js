@@ -3,6 +3,7 @@ import {
   FLY_ALTITUDE,
   PLANET_RADIUS,
   BOT_DETECTION_RANGE,
+  BOT_SHORT_DETECTION_RANGE,
   BOT_SHOOT_RANGE,
   BOT_WAYPOINT_THRESHOLD,
   BOT_AIM_ERROR,
@@ -30,6 +31,9 @@ export class BotPlayer extends Player {
     this.sectorMax = sectorMax ?? Math.PI;
 
     this.state = 'wander'; // 'wander' | 'chase' | 'conquer' | 'bomb_turret'
+    // 'aggressor': insegue sempre il player (priorità chase)
+    // 'strategist': priorità edifici, insegue solo se il player è vicinissimo
+    this.role = 'aggressor';
     this.targetPlayerId = null;
     this.buildingTarget = null; // { id, theta, phi }
     this.shootCooldown = 0;
@@ -56,9 +60,9 @@ export class BotPlayer extends Player {
     }
     this.aimOffset += (this.aimOffsetTarget - this.aimOffset) * 0.3;
 
-    // Priorità 1: player umano vivo più vicino entro BOT_DETECTION_RANGE
+    // Trova il player umano più vicino (serve per entrambi i ruoli)
     let closest = null;
-    let closestDist = BOT_DETECTION_RANGE;
+    let closestDist = Infinity;
     for (const p of game.players.values()) {
       if (p.isBot || !p.alive) continue;
       const dist = game.distanceSphere(this.theta, this.phi, p.theta, p.phi, FLY_ALTITUDE);
@@ -66,39 +70,49 @@ export class BotPlayer extends Player {
     }
 
     if (closest) {
-      this.state = 'chase';
-      this.targetPlayerId = closest.id;
       game.botSharedState.lastKnownTarget = {
         theta: closest.theta,
         phi: closest.phi,
         timestamp: Date.now(),
       };
+    }
+
+    if (this.role === 'aggressor') {
+      this._selectStateAggressor(game, dt, closest, closestDist);
+    } else {
+      this._selectStateStrategist(game, dt, closest, closestDist);
+    }
+  }
+
+  // Aggressivo: insegue sempre, usa edifici come fallback
+  _selectStateAggressor(game, dt, closest, closestDist) {
+    if (closest && closestDist < BOT_DETECTION_RANGE) {
+      this.state = 'chase';
+      this.targetPlayerId = closest.id;
       this._doChase(game, dt, closestDist, closest);
       return;
     }
+    const enemy = this._findNearestEnemyBuilding(game);
+    if (enemy) { this.state = 'bomb_turret'; this.buildingTarget = enemy; this._doBombTurret(game, dt); return; }
+    const neutral = this._findNearestNeutralBuilding(game);
+    if (neutral) { this.state = 'conquer'; this.buildingTarget = neutral; this._doConquer(game, dt); return; }
+    this.state = 'wander'; this.buildingTarget = null; this._doWander(game, dt);
+  }
 
-    // Priorità 2: torretta nemica (owner = player umano) più vicina
-    const enemyBuilding = this._findNearestEnemyBuilding(game);
-    if (enemyBuilding) {
-      this.state = 'bomb_turret';
-      this.buildingTarget = enemyBuilding;
-      this._doBombTurret(game, dt);
+  // Strategico: priorità edifici, insegue solo se il player è a tiro
+  _selectStateStrategist(game, dt, closest, closestDist) {
+    const enemy = this._findNearestEnemyBuilding(game);
+    if (enemy) { this.state = 'bomb_turret'; this.buildingTarget = enemy; this._doBombTurret(game, dt); return; }
+    const neutral = this._findNearestNeutralBuilding(game);
+    if (neutral) { this.state = 'conquer'; this.buildingTarget = neutral; this._doConquer(game, dt); return; }
+    // Nessun edificio utile: insegue se il player è abbastanza vicino
+    if (closest && closestDist < BOT_SHORT_DETECTION_RANGE) {
+      this.state = 'chase';
+      this.targetPlayerId = closest.id;
+      this._doChase(game, dt, closestDist, closest);
       return;
     }
-
-    // Priorità 3: edificio neutro più vicino
-    const neutralBuilding = this._findNearestNeutralBuilding(game);
-    if (neutralBuilding) {
-      this.state = 'conquer';
-      this.buildingTarget = neutralBuilding;
-      this._doConquer(game, dt);
-      return;
-    }
-
-    // Default: wander
-    this.state = 'wander';
-    this.buildingTarget = null;
-    this._doWander(game, dt);
+    this.state = 'wander'; this.buildingTarget = null; this._doWander(game, dt);
   }
 
   _doChase(game, dt, distance, target) {

@@ -117,11 +117,12 @@ export const TURRET_BULLET_LIFETIME = 1800;  // ms (leggermente superiore ai nor
 
 // Bot AI (modalità singleplayer)
 export const BOT_COUNT = 3;
-export const BOT_DETECTION_RANGE = 30;  // distanza cartesiana per "vedere" il player
-export const BOT_SHOOT_RANGE = 22;      // distanza per aprire il fuoco
-export const BOT_WAYPOINT_THRESHOLD = 8; // distanza per considerare il waypoint raggiunto
-export const BOT_AIM_ERROR = 0.25;      // radianti errore mira max (mira pessima)
-export const BOT_TURN_RATE = 1.2;       // rad/sec velocità rotazione heading
-export const BOT_BOMB_SURFACE_RANGE = 5.0; // distanza su PLANET_RADIUS per droppare bomba
-export const BOT_BOMB_COOLDOWN = 7;        // secondi tra bombe del bot
+export const BOT_DETECTION_RANGE = 30;        // distanza per "vedere" il player (bot aggressivo)
+export const BOT_SHORT_DETECTION_RANGE = 16;  // distanza per "vedere" il player (bot strategico)
+export const BOT_SHOOT_RANGE = 22;            // distanza per aprire il fuoco
+export const BOT_WAYPOINT_THRESHOLD = 8;      // distanza per considerare il waypoint raggiunto
+export const BOT_AIM_ERROR = 0.25;            // radianti errore mira max
+export const BOT_TURN_RATE = 1.2;             // rad/sec velocità rotazione heading
+export const BOT_BOMB_SURFACE_RANGE = 5.0;    // distanza su PLANET_RADIUS per droppare bomba
+export const BOT_BOMB_COOLDOWN = 7;           // secondi tra bombe del bot
 export const BOT_CONQUER_SEARCH_RANGE = 55; // raggio ricerca edifici (unità cartesiane a FLY_ALTITUDE)
