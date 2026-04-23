@@ -133,8 +133,32 @@ const boost = trySound({
 
 let _boostPlaying = false;
 
+/** Attenuazione sparo “remoto” (nemici / torrette): volume in funzione della distanza 3D sul raggio di volo. */
+const SHOOT_REMOTE_BASE_VOL = 0.4;
+const SHOOT_REMOTE_NEAR = 5;
+const SHOOT_REMOTE_FAR = 92;
+
 export const AudioManager = {
   playShoot()     { sounds.shoot?.play(); },
+
+  /**
+   * Sparo udibile in base alla distanza dal giocatore locale (stessa metrica di `sphereDist` in main).
+   * Usa un'istanza Howler separata con volume dedicato, così non interferisce con `playShoot()`.
+   */
+  playShootAtDistance(distance) {
+    const h = sounds.shoot;
+    if (!h || !Number.isFinite(distance)) return;
+    if (distance >= SHOOT_REMOTE_FAR) return;
+    const span = SHOOT_REMOTE_FAR - SHOOT_REMOTE_NEAR;
+    const t = span > 0
+      ? Math.max(0, Math.min(1, (distance - SHOOT_REMOTE_NEAR) / span))
+      : 0;
+    const gain = (1 - t) * (1 - t);
+    const vol = SHOOT_REMOTE_BASE_VOL * gain;
+    if (vol < 0.018) return;
+    const id = h.play();
+    h.volume(vol, id);
+  },
   playExplosion() { sounds.explosion?.play(); },
   playPowerup()   { sounds.powerup?.play(); },
   playBomb()      { sounds.bomb?.play(); },

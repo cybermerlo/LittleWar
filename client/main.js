@@ -476,8 +476,23 @@ const net = new NetworkManager({
     for (const [id, e] of projectileEntities) {
       if (!serverProjIds.has(id)) { e.dispose(scene); projectileEntities.delete(id); }
     }
+    /** Un solo “bang” per salvo (stesso ownerId), così le armi multi-colpo non saturano l’audio. */
+    const remoteShootSoundPlayed = new Set();
     state.projectiles.forEach(p => {
       if (!projectileEntities.has(p.id)) {
+        if (
+          localState
+          && p.ownerId !== localPlayerId
+          && !remoteShootSoundPlayed.has(p.ownerId)
+        ) {
+          remoteShootSoundPlayed.add(p.ownerId);
+          const dist = sphereDist(
+            p.theta, p.phi,
+            localState.theta, localState.phi,
+            FLY_ALTITUDE,
+          );
+          AudioManager.playShootAtDistance(dist);
+        }
         // Se è un proiettile da torretta, lo renderizziamo alla quota del tip
         // del cannone (~53.2 dal centro del pianeta) anziché FLY_ALTITUDE (56):
         // altrimenti il proiettile appare 2-3 unità sopra la bocca del cannone.
