@@ -362,7 +362,13 @@ export class Game {
       players: [...this.players.values()].map(p => p.toState()),
       projectiles: [...this.projectiles.values()].map(p => p.toState()),
       powerups: [...this.powerups.values()].map(p => p.toState()),
-      bombs: this.bombs.map(b => ({ id: b.id, theta: b.theta, phi: b.phi, altitude: b.altitude })),
+      bombs: this.bombs.map(b => ({
+        id: b.id,
+        ownerId: b.ownerId,
+        theta: b.theta,
+        phi: b.phi,
+        altitude: b.altitude,
+      })),
       buildings: [...this.buildings.values()].map(b => b.toState()),
     });
   }

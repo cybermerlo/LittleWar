@@ -520,6 +520,18 @@ const net = new NetworkManager({
     }
     state.bombs.forEach(b => {
       if (!bombEntities.has(b.id)) {
+        if (
+          localState
+          && b.ownerId
+          && b.ownerId !== localPlayerId
+        ) {
+          const dist = sphereDist(
+            b.theta, b.phi,
+            localState.theta, localState.phi,
+            FLY_ALTITUDE,
+          );
+          AudioManager.playBombAtDistance(dist);
+        }
         bombEntities.set(b.id, new BombEntity(scene, b.id, b.theta, b.phi, b.altitude));
       } else {
         bombEntities.get(b.id).update(b.theta, b.phi, b.altitude);
@@ -600,7 +612,7 @@ const net = new NetworkManager({
 
   onBombExploded({ theta: t, phi: p, hit, ownerId }) {
     spawnExplosion(scene, t, p, 50, hit ? 0xffcc00 : 0x884400);
-    AudioManager.playBomb();
+    // Suono all’impatto: es. `AudioManager.playExplosion()` — disattivato per ora.
     if (hit && ownerId === localPlayerId) {
       hud.showBombHitNotice();
     }
@@ -622,7 +634,6 @@ const net = new NetworkManager({
     awardedKill = true,
   }) {
     spawnTurretDestruction(scene, theta, phi);
-    AudioManager.playBomb();
     if (destroyerId === localPlayerId) {
       if (awardedKill) hud.showTowerDestroyedNotice();
       else hud.showOwnTowerDestroyedNotice();
@@ -812,9 +823,10 @@ function animate() {
       lastShootTime = now;
     }
 
-    // Bomba
+    // Bomba: audio solo allo sgancio (suono impatto bomba eventualmente in onBombExploded).
     if (input.consumeBomb() && now - lastBombTime > BOMB_COOLDOWN) {
       net.sendBomb(theta, phi);
+      AudioManager.playBomb();
       lastBombTime = now;
     }
 

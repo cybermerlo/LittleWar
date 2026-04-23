@@ -9,7 +9,7 @@ function trySound(config) {
 
 const sounds = {
   shoot:     trySound({ src: ['/sounds/shoot.mp3'],     volume: 0.4 }),
-  explosion: trySound({ src: ['/sounds/explosion.mp3'], volume: 0.6 }),
+  explosion: trySound({ src: ['/sounds/explosion.wav'], volume: 0.6 }),
   powerup:   trySound({ src: ['/sounds/powerup.mp3'],   volume: 0.5 }),
   bomb:      trySound({ src: ['/sounds/bomb.mp3'],      volume: 0.7 }),
   chatPop:   trySound({ src: ['/sounds/chat-pop.mp3'], volume: 0.5 }),
@@ -138,6 +138,11 @@ const SHOOT_REMOTE_BASE_VOL = 0.4;
 const SHOOT_REMOTE_NEAR = 5;
 const SHOOT_REMOTE_FAR = 92;
 
+/** Sgancio bomba udibile lontano (stessa logica degli spari remoti). */
+const BOMB_DROP_REMOTE_BASE_VOL = 0.7;
+const BOMB_DROP_REMOTE_NEAR = 5;
+const BOMB_DROP_REMOTE_FAR = 92;
+
 export const AudioManager = {
   playShoot()     { sounds.shoot?.play(); },
 
@@ -155,6 +160,22 @@ export const AudioManager = {
       : 0;
     const gain = (1 - t) * (1 - t);
     const vol = SHOOT_REMOTE_BASE_VOL * gain;
+    if (vol < 0.018) return;
+    const id = h.play();
+    h.volume(vol, id);
+  },
+
+  /** Suono “caduta / sgancio” bomba per altri giocatori, attenuato con la distanza. */
+  playBombAtDistance(distance) {
+    const h = sounds.bomb;
+    if (!h || !Number.isFinite(distance)) return;
+    if (distance >= BOMB_DROP_REMOTE_FAR) return;
+    const span = BOMB_DROP_REMOTE_FAR - BOMB_DROP_REMOTE_NEAR;
+    const t = span > 0
+      ? Math.max(0, Math.min(1, (distance - BOMB_DROP_REMOTE_NEAR) / span))
+      : 0;
+    const gain = (1 - t) * (1 - t);
+    const vol = BOMB_DROP_REMOTE_BASE_VOL * gain;
     if (vol < 0.018) return;
     const id = h.play();
     h.volume(vol, id);
