@@ -21,6 +21,7 @@ import { AudioManager } from './systems/AudioManager.js';
 import { ChatManager } from './systems/ChatManager.js';
 import { LobbyScreen } from './ui/LobbyScreen.js';
 import { DeathScreen } from './ui/DeathScreen.js';
+import { WaveOverlay } from './ui/WaveOverlay.js';
 import { moveOnSphere } from './utils/SphereUtils.js';
 import {
   BASE_SPEED, SPEED_REDUCTION_PER_LEVEL, MIN_SPEED,
@@ -240,7 +241,11 @@ let extremeBoostTimer = 0; // secondi rimanenti; > 0 = attivo
 
 // ── Lobby + Network ───────────────────────────────────────────────────────────
 
-function _enterGame(nickname, color, model, solo = false) {
+// 'multi' | 'solo' | 'sfida'
+let _gameMode = 'multi';
+
+function _enterGame(nickname, color, model, mode = 'multi') {
+  _gameMode = mode;
   if (!_isIOS) {
     const el = document.documentElement;
     if (el.requestFullscreen) el.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
@@ -248,8 +253,10 @@ function _enterGame(nickname, color, model, solo = false) {
   }
   AudioManager.startMusic();
   AudioManager.startEngine();
-  if (solo) {
+  if (mode === 'solo') {
     net.joinSolo(nickname, color, model);
+  } else if (mode === 'sfida') {
+    net.joinSfida(nickname, color, model);
   } else {
     net.join(nickname, color, model);
   }
@@ -257,9 +264,15 @@ function _enterGame(nickname, color, model, solo = false) {
 }
 
 const lobby = new LobbyScreen(
-  (nickname, color, model) => _enterGame(nickname, color, model, false),
-  (nickname, color, model) => _enterGame(nickname, color, model, true),
+  (nickname, color, model) => _enterGame(nickname, color, model, 'multi'),
+  (nickname, color, model) => _enterGame(nickname, color, model, 'solo'),
+  (nickname, color, model) => _enterGame(nickname, color, model, 'sfida'),
 );
+
+const waveOverlay = new WaveOverlay(() => {
+  // Retry/back: disconnetti e torna alla lobby
+  net.disconnectVoluntary();
+});
 
 const net = new NetworkManager({
   onConnect() {
@@ -272,6 +285,8 @@ const net = new NetworkManager({
     AudioManager.stopEngine();
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     death.hide();
+    waveOverlay.hideAll();
+    _gameMode = 'multi';
     lobby.show();
     lobby.setMessage(voluntary ? '' : 'Disconnesso. Ricarica la pagina.');
     inGame = false;
@@ -364,6 +379,7 @@ const net = new NetworkManager({
     chat.enable();
     inGame = true;
     document.body.classList.add('in-game');
+    if (_gameMode === 'sfida') waveOverlay.showHUD();
   },
 
   onPlayerJoined(info) {
@@ -591,6 +607,36 @@ const net = new NetworkManager({
 
   onChatMessage(msg) {
     chat.receive(msg);
+  },
+
+  // ── Sfida events ──────────────────────────────────────────────────────────
+  onWaveStart(data) {
+    waveOverlay.onWaveStart(data);
+  },
+  onWaveCountdown(data) {
+    waveOverlay.onWaveCountdown(data);
+  },
+  onWaveActive(data) {
+    waveOverlay.onWaveActive(data);
+  },
+  onWaveComplete(data) {
+    waveOverlay.onWaveComplete(data);
+    // Nascondi schermata morte se aperta (wave pulisce i bot)
+    death.hide();
+  },
+  onChallengeState(data) {
+    if (_gameMode === 'sfida') waveOverlay.onChallengeState(data);
+  },
+  onBossHit(data) {
+    waveOverlay.onBossHit(data);
+  },
+  onChallengeFailed(data) {
+    death.hide();
+    waveOverlay.onChallengeFailed(data);
+  },
+  onChallengeComplete(data) {
+    death.hide();
+    waveOverlay.onChallengeComplete(data);
   },
 });
 

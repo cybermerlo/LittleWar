@@ -34,6 +34,8 @@ export class BotPlayer extends Player {
     // 'aggressor': insegue sempre il player (priorità chase)
     // 'strategist': priorità edifici, insegue solo se il player è vicinissimo
     this.role = 'aggressor';
+    // 'enemy': attacca i giocatori umani | 'ally': attacca i bot nemici
+    this.faction = 'enemy';
     this.targetPlayerId = null;
     this.buildingTarget = null; // { id, theta, phi }
     this.shootCooldown = 0;
@@ -60,16 +62,26 @@ export class BotPlayer extends Player {
     }
     this.aimOffset += (this.aimOffsetTarget - this.aimOffset) * 0.3;
 
-    // Trova il player umano più vicino (serve per entrambi i ruoli)
+    // Trova il bersaglio più vicino:
+    // - bot nemici (faction='enemy') cercano i giocatori umani
+    // - bot alleati (faction='ally') cercano i bot nemici
     let closest = null;
     let closestDist = Infinity;
     for (const p of game.players.values()) {
-      if (p.isBot || !p.alive) continue;
+      if (!p.alive) continue;
+      if (this.faction === 'ally') {
+        // Gli alleati attaccano i bot nemici
+        if (!p.isBot || p.faction !== 'enemy') continue;
+      } else {
+        // I nemici attaccano i giocatori umani
+        if (p.isBot) continue;
+      }
       const dist = game.distanceSphere(this.theta, this.phi, p.theta, p.phi, FLY_ALTITUDE);
       if (dist < closestDist) { closestDist = dist; closest = p; }
     }
 
-    if (closest) {
+    if (closest && !closest.isBot) {
+      // Solo i bersagli umani aggiornano lastKnownTarget (usato da wander)
       game.botSharedState.lastKnownTarget = {
         theta: closest.theta,
         phi: closest.phi,
@@ -156,8 +168,16 @@ export class BotPlayer extends Player {
     if (!b) { this.state = 'wander'; return; }
 
     const building = game.buildings.get(b.id);
-    if (!building || !building.ownerId || game.getPlayerById(building.ownerId)?.isBot) {
-      // Torretta distrutta o ora di un bot → cambia obiettivo
+    if (!building || !building.ownerId) {
+      this.buildingTarget = null; this.state = 'wander'; return;
+    }
+    const bOwner = game.getPlayerById(building.ownerId);
+    // L'edificio è ancora "nemico"?
+    const isStillEnemy = this.faction === 'ally'
+      ? (bOwner?.isBot && bOwner?.faction === 'enemy')
+      : !bOwner?.isBot;
+    if (!isStillEnemy) {
+      // Torretta distrutta o cambiata fazione → cambia obiettivo
       this.buildingTarget = null;
       this.state = 'wander';
       return;
@@ -200,7 +220,14 @@ export class BotPlayer extends Player {
     let nearestDist = BOT_CONQUER_SEARCH_RANGE;
     for (const b of game.buildings.values()) {
       if (!b.ownerId) continue;
-      if (game.getPlayerById(b.ownerId)?.isBot) continue; // bot-owned non è nemico
+      const owner = game.getPlayerById(b.ownerId);
+      if (this.faction === 'ally') {
+        // Bot alleati bombardano edifici di bot nemici
+        if (!owner?.isBot || owner?.faction !== 'enemy') continue;
+      } else {
+        // Bot nemici bombardano edifici dei giocatori umani
+        if (owner?.isBot) continue;
+      }
       const dist = b.distanceTo(this.theta, this.phi, FLY_ALTITUDE);
       if (dist < nearestDist) { nearestDist = dist; nearest = b; }
     }

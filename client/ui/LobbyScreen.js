@@ -7,18 +7,20 @@ const MODELS = [
 ];
 
 export class LobbyScreen {
-  constructor(onPlay, onPlaySolo) {
+  constructor(onPlay, onPlaySolo, onPlaySfida) {
     this.onPlay = onPlay;
     this.onPlaySolo = onPlaySolo;
+    this.onPlaySfida = onPlaySfida;
     this.selectedColor = PLAYER_COLORS[0];
     this.selectedModel = MODELS[0].id;
     this._isFull = false;
 
-    this._lobbyEl   = document.getElementById('lobby');
+    this._lobbyEl    = document.getElementById('lobby');
     this._nicknameEl = document.getElementById('nickname');
-    this._playBtn   = document.getElementById('play-btn');
-    this._soloBtnEl = document.getElementById('solo-btn');
-    this._msgEl     = document.getElementById('lobby-msg');
+    this._playBtn    = document.getElementById('play-btn');
+    this._soloBtnEl  = document.getElementById('solo-btn');
+    this._sfidaBtnEl = document.getElementById('sfida-btn');
+    this._msgEl      = document.getElementById('lobby-msg');
     this._countEl   = document.getElementById('online-count');
     this._colorEl   = document.getElementById('color-options');
     this._modelEl   = document.getElementById('model-options');
@@ -29,6 +31,7 @@ export class LobbyScreen {
     this._buildModelPicker();
     this._playBtn.addEventListener('click', () => this._handlePlay());
     this._soloBtnEl?.addEventListener('click', () => this._handlePlaySolo());
+    this._sfidaBtnEl?.addEventListener('click', () => this._handlePlaySfida());
     const onNicknameMaybeChanged = () => this._updatePlayState();
     this._nicknameEl.addEventListener('input', onNicknameMaybeChanged);
     this._nicknameEl.addEventListener('change', onNicknameMaybeChanged);
@@ -77,7 +80,8 @@ export class LobbyScreen {
     const nickname = this._getNicknameTrimmed();
     const valid = nickname.length > 0;
     this._playBtn.disabled = this._isFull || !valid;
-    if (this._soloBtnEl) this._soloBtnEl.disabled = !valid;
+    if (this._soloBtnEl)  this._soloBtnEl.disabled = !valid;
+    if (this._sfidaBtnEl) this._sfidaBtnEl.disabled = !valid;
     if (this._isFull) return;
     if (!valid) {
       this._msgEl.textContent = 'Inserisci un nickname per giocare.';
@@ -172,6 +176,17 @@ export class LobbyScreen {
     }
     this._persistNickname(nickname);
     this.onPlaySolo?.(nickname, this.selectedColor, this.selectedModel);
+  }
+
+  _handlePlaySfida() {
+    const nickname = this._getNicknameTrimmed();
+    if (!nickname) {
+      this._updatePlayState();
+      this._nicknameEl?.focus();
+      return;
+    }
+    this._persistNickname(nickname);
+    this.onPlaySfida?.(nickname, this.selectedColor, this.selectedModel);
   }
 
   setOnlineCount(n, max) {

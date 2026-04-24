@@ -6,6 +6,7 @@ import { dirname, join } from 'path';
 import { readdirSync, statSync } from 'fs';
 import { get as httpsGet } from 'https';
 import { Game } from './Game.js';
+import { ChallengeGame } from './ChallengeGame.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -84,6 +85,15 @@ io.on('connection', (socket) => {
     games.set(roomId, soloGame);
     soloGame.addPlayer(socket, nickname, color, model);
     soloGame.addBotsForSoloSession(socket.id);
+  });
+
+  socket.on('join-sfida', ({ nickname, color, model }) => {
+    const roomId = `sfida-${socket.id}`;
+    socket.join(roomId);
+    const challengeGame = new ChallengeGame(io, roomId, socket.id);
+    games.set(roomId, challengeGame);
+    challengeGame.addPlayer(socket, nickname, color, model);
+    challengeGame.startChallenge();
   });
 
   socket.on('player-input', (input) => {

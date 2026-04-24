@@ -42,6 +42,16 @@ export class NetworkManager {
     this.socket.on('lobby-info',        (d) => h.onLobbyInfo?.(d));
     this.socket.on('color-taken',       (d) => h.onColorTaken?.(d));
     this.socket.on('chat-message',      (d) => h.onChatMessage?.(d));
+    // Sfida events
+    this.socket.on('wave-start',              (d) => h.onWaveStart?.(d));
+    this.socket.on('wave-countdown',          (d) => h.onWaveCountdown?.(d));
+    this.socket.on('wave-active',             (d) => h.onWaveActive?.(d));
+    this.socket.on('wave-complete',           (d) => h.onWaveComplete?.(d));
+    this.socket.on('challenge-state',         (d) => h.onChallengeState?.(d));
+    this.socket.on('challenge-target-destroyed', (d) => h.onChallengeTargetDestroyed?.(d));
+    this.socket.on('boss-hit',                (d) => h.onBossHit?.(d));
+    this.socket.on('challenge-failed',        (d) => h.onChallengeFailed?.(d));
+    this.socket.on('challenge-complete',      (d) => h.onChallengeComplete?.(d));
   }
 
   join(nickname, color, model) {
@@ -61,6 +71,16 @@ export class NetworkManager {
       return;
     }
     this._pendingJoin = { payload, event: 'join-solo' };
+    this.socket.connect();
+  }
+
+  joinSfida(nickname, color, model) {
+    const payload = { nickname, color, model };
+    if (this.socket.connected) {
+      this.socket.emit('join-sfida', payload);
+      return;
+    }
+    this._pendingJoin = { payload, event: 'join-sfida' };
     this.socket.connect();
   }
 
