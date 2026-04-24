@@ -15,15 +15,15 @@ let multishotGltf = null;
 let shieldGltf = null;
 let speedGltf = null;
 
-const multishotPromise = loader.loadAsync('/models/Powerup_Multishot.glb').then(gltf => {
-  multishotGltf = gltf;
-});
-const shieldPromise = loader.loadAsync('/models/Powerup_Shield.glb').then(gltf => {
-  shieldGltf = gltf;
-});
-const speedPromise = loader.loadAsync('/models/Powerup_Speed.glb').then(gltf => {
-  speedGltf = gltf;
-});
+function loadPowerupTemplate(url, assign) {
+  return loader.loadAsync(url)
+    .then((gltf) => { assign(gltf); return gltf; })
+    .catch(() => null);
+}
+
+const multishotPromise = loadPowerupTemplate('/models/Powerup_Multishot.glb', (gltf) => { multishotGltf = gltf; });
+const shieldPromise = loadPowerupTemplate('/models/Powerup_Shield.glb', (gltf) => { shieldGltf = gltf; });
+const speedPromise = loadPowerupTemplate('/models/Powerup_Speed.glb', (gltf) => { speedGltf = gltf; });
 
 function powerupModelPromise(type) {
   if (type === 'extreme_boost') return speedPromise;
@@ -41,6 +41,12 @@ function powerupGltfForType(type) {
 const WEAPON_COLOR = new THREE.Color(0xffd700);
 const SHIELD_COLOR = new THREE.Color(0x44aaff);
 const EXTREME_BOOST_COLOR = new THREE.Color(0xff3300);
+const FALLBACK_GEO = new THREE.BoxGeometry(0.7, 0.7, 0.7);
+const FALLBACK_MATS = {
+  weapon: new THREE.MeshLambertMaterial({ color: WEAPON_COLOR, flatShading: true }),
+  shield: new THREE.MeshLambertMaterial({ color: SHIELD_COLOR, flatShading: true }),
+  extreme_boost: new THREE.MeshLambertMaterial({ color: EXTREME_BOOST_COLOR, flatShading: true }),
+};
 
 export class PowerUpEntity {
   constructor(scene, id, type, theta, phi) {
@@ -65,6 +71,7 @@ export class PowerUpEntity {
     } else {
       this._addFallback();
       powerupModelPromise(type).then(() => {
+        if (!this.root.parent) return;
         this._removeFallback();
         this._attachModel();
       });
@@ -72,12 +79,7 @@ export class PowerUpEntity {
   }
 
   _addFallback() {
-    const geo = new THREE.BoxGeometry(0.7, 0.7, 0.7);
-    const mat = new THREE.MeshLambertMaterial({
-      color: this.type === 'weapon' ? WEAPON_COLOR : this.type === 'extreme_boost' ? EXTREME_BOOST_COLOR : SHIELD_COLOR,
-      flatShading: true,
-    });
-    this._fallback = new THREE.Mesh(geo, mat);
+    this._fallback = new THREE.Mesh(FALLBACK_GEO, FALLBACK_MATS[this.type] ?? FALLBACK_MATS.weapon);
     this.root.add(this._fallback);
   }
 

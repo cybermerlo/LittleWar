@@ -30,6 +30,10 @@ export class HUD {
     this._playerArrowMap = new Map();
     this._tmpRemote = new THREE.Vector3();
     this._tmpProj = new THREE.Vector3();
+    this._tmpTarget = new THREE.Vector3();
+    this._scoreboardHtml = '';
+    this._scoreboardAt = -Infinity;
+    this._lastHudText = new Map();
   }
 
   show() { this.el.hud.style.display = 'block'; }
@@ -125,11 +129,11 @@ export class HUD {
     const speedPct = getWeaponMoveSpeedPercent(wl);
 
     const isMobile = document.body.classList.contains('is-mobile');
-    this.el.kills.textContent  = isMobile ? `⚔️ ${localPlayer.kills}` : `Kill: ${localPlayer.kills}`;
+    this._setText(this.el.kills, isMobile ? `⚔️ ${localPlayer.kills}` : `Kill: ${localPlayer.kills}`);
     const turretCount = (buildings || []).filter((b) => b.ownerId === localPlayer.id).length;
-    if (this.el.turrets) this.el.turrets.textContent = isMobile ? `🏠 ${turretCount}` : `Torrette: ${turretCount}`;
-    this.el.weapon.textContent = `🔫 Lv.${wl}`;
-    if (this.el.speed) this.el.speed.textContent = `🚀 ${speedPct}%`;
+    this._setText(this.el.turrets, isMobile ? `🏠 ${turretCount}` : `Torrette: ${turretCount}`);
+    this._setText(this.el.weapon, `🔫 Lv.${wl}`);
+    this._setText(this.el.speed, `🚀 ${speedPct}%`);
     const weaponBar = Math.max(0.1, Math.min(1, wl / WEAPON_HUD_BAR_FULL_LEVEL));
     const speedBar = Math.max(0.06, Math.min(1, speedPct / 100));
     if (this.el.weaponFill) this.el.weaponFill.style.transform = `scaleX(${weaponBar})`;
@@ -155,23 +159,11 @@ export class HUD {
       ebEl.classList.toggle('hud-extreme--ready', hasExtremeBoost && !ebActive);
       const label = ebEl.querySelector('#hud-extreme-label');
       if (label) {
-        label.textContent = ebActive ? `🔥 ${Math.ceil(extremeBoostTimer)}s` : '🔥 Boost+';
+        this._setText(label, ebActive ? `🔥 ${Math.ceil(extremeBoostTimer)}s` : '🔥 Boost+');
       }
     }
 
-    // Lista giocatori: ordine per punteggio totale (kill + bombe), decrescente
-    const byScore = [...allPlayers].sort((a, b) => {
-      const sa = (a.kills || 0) + (a.bombPoints || 0);
-      const sb = (b.kills || 0) + (b.bombPoints || 0);
-      if (sb !== sa) return sb - sa;
-      return (a.nickname || '').localeCompare(b.nickname || '', undefined, { sensitivity: 'base' });
-    });
-    this.el.playerList.innerHTML = byScore
-      .map((p) => {
-        const pts = (p.kills || 0) + (p.bombPoints || 0);
-        return `<div class="player-entry" style="color:${p.color}">${p.nickname} — ${pts}</div>`;
-      })
-      .join('');
+    this._updateScoreboard(allPlayers);
 
     // Freccia obiettivo
     if (target && camera) {
@@ -182,11 +174,39 @@ export class HUD {
     }
   }
 
+  _setText(el, text) {
+    if (!el) return;
+    const next = String(text);
+    if (this._lastHudText.get(el) === next) return;
+    this._lastHudText.set(el, next);
+    el.textContent = next;
+  }
+
+  _updateScoreboard(allPlayers) {
+    const now = performance.now();
+    if (now - this._scoreboardAt < 250) return;
+    this._scoreboardAt = now;
+
+    const byScore = [...allPlayers].sort((a, b) => {
+      const sa = (a.kills || 0) + (a.bombPoints || 0);
+      const sb = (b.kills || 0) + (b.bombPoints || 0);
+      if (sb !== sa) return sb - sa;
+      return (a.nickname || '').localeCompare(b.nickname || '', undefined, { sensitivity: 'base' });
+    });
+    const html = byScore
+      .map((p) => {
+        const pts = (p.kills || 0) + (p.bombPoints || 0);
+        return `<div class="player-entry" style="color:${p.color}">${p.nickname} — ${pts}</div>`;
+      })
+      .join('');
+    if (html === this._scoreboardHtml) return;
+    this._scoreboardHtml = html;
+    this.el.playerList.innerHTML = html;
+  }
+
   _updateArrow(localPlayer, target, camera) {
     const tPos = sphericalToCartesian(target.theta, target.phi, 50);
-    const targetVec = new THREE.Vector3(tPos.x, tPos.y, tPos.z);
-
-    const projected = targetVec.clone().project(camera);
+    const projected = this._tmpTarget.set(tPos.x, tPos.y, tPos.z).project(camera);
     const el = this.el.arrow;
 
     const W = window.innerWidth;
@@ -250,12 +270,20 @@ export class HUD {
   }
 
   _updateNearestPlayerArrows(localPlayer, allPlayers, camera) {
-    const enemies = allPlayers
-      .filter((p) => p.id !== localPlayer.id && p.alive)
-      .map((p) => ({ player: p, dist: this._distanceBetweenPlayers(localPlayer, p) }))
-      .sort((a, b) => a.dist - b.dist)
-      .slice(0, 3)
-      .map((x) => x.player);
+    const enemies = [];
+    const dists = [];
+    for (const p of allPlayers) {
+      if (p.id === localPlayer.id || !p.alive) continue;
+      const dist = this._distanceBetweenPlayers(localPlayer, p);
+      let slot = enemies.length;
+      while (slot > 0 && dist < dists[slot - 1]) slot--;
+      enemies.splice(slot, 0, p);
+      dists.splice(slot, 0, dist);
+      if (enemies.length > 3) {
+        enemies.pop();
+        dists.pop();
+      }
+    }
 
     const activeIds = new Set(enemies.map((p) => p.id));
     for (const [id, entry] of this._playerArrowMap) {

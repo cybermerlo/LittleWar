@@ -27,9 +27,9 @@ import {
   BOOST_MAX, BOOST_SPEED_MULT, BOOST_DRAIN_PER_SEC, BOOST_REGEN_PER_SEC,
   FORWARD_ACCEL, BACKWARD_ACCEL,
   EXTREME_BOOST_MULT, EXTREME_BOOST_DURATION,
-  WEAPON_CONFIGS, FLY_ALTITUDE, MAX_PLAYERS, CLIENT_INPUT_SEND_MS,
+  FLY_ALTITUDE, MAX_PLAYERS, CLIENT_INPUT_SEND_MS,
   POWERUP_COLLECT_RADIUS,
-  RESPAWN_INVINCIBILITY,
+  RESPAWN_INVINCIBILITY, SHOOT_COOLDOWN_MS,
 } from '../shared/constants.js';
 
 /** Distanza 3D tra due punti sferici allo stesso raggio — stessa formula del server. */
@@ -50,9 +50,14 @@ function remoteBoostAmount(p) {
 
 // ── Renderer + Scena ──────────────────────────────────────────────────────────
 
+const IS_TOUCH_DEVICE = isTouchDevice();
+const BASE_RENDER_DPR = Math.min(window.devicePixelRatio || 1, IS_TOUCH_DEVICE ? 1.25 : 1.5);
+const MIN_RENDER_DPR = IS_TOUCH_DEVICE ? 1.0 : 1.15;
+const BLOOM_SCALE = IS_TOUCH_DEVICE ? 0.45 : (window.devicePixelRatio > 1.5 ? 0.55 : 0.75);
+
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(BASE_RENDER_DPR);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.03;
@@ -67,24 +72,47 @@ const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerH
 camera.position.set(0, 80, 0);
 
 const composer = new EffectComposer(renderer);
+composer.setPixelRatio(BASE_RENDER_DPR);
 const renderPass = new RenderPass(scene, camera);
 composer.addPass(renderPass);
 
-const bloomScale = window.devicePixelRatio > 1.5 ? 0.65 : 1.0;
 const bloomPass = new UnrealBloomPass(
-  new THREE.Vector2(window.innerWidth * bloomScale, window.innerHeight * bloomScale),
-  0.34,
-  0.72,
-  0.84,
+  new THREE.Vector2(window.innerWidth * BLOOM_SCALE, window.innerHeight * BLOOM_SCALE),
+  IS_TOUCH_DEVICE ? 0.16 : 0.28,
+  0.62,
+  0.88,
 );
 composer.addPass(bloomPass);
+
+let renderQualityStage = 0;
+let slowFrameStreak = 0;
+function setRenderDpr(dpr) {
+  renderer.setPixelRatio(dpr);
+  composer.setPixelRatio(dpr);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function maybeLowerRenderQuality(frameMs) {
+  if (renderQualityStage >= 2) return;
+  slowFrameStreak = frameMs > 24 ? slowFrameStreak + 1 : Math.max(0, slowFrameStreak - 2);
+  if (slowFrameStreak < 90) return;
+  slowFrameStreak = 0;
+  renderQualityStage++;
+  if (renderQualityStage === 1) {
+    setRenderDpr(MIN_RENDER_DPR);
+    bloomPass.strength *= 0.65;
+  } else {
+    bloomPass.enabled = false;
+  }
+}
 
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   composer.setSize(window.innerWidth, window.innerHeight);
-  bloomPass.resolution.set(window.innerWidth * bloomScale, window.innerHeight * bloomScale);
+  bloomPass.resolution.set(window.innerWidth * BLOOM_SCALE, window.innerHeight * BLOOM_SCALE);
 });
 
 // Tasti chat (T, L, P) — delegati al ChatManager
@@ -159,7 +187,7 @@ document.getElementById('hud-back')?.addEventListener('click', () => {
   if (!inGame) return;
   net.disconnectVoluntary();
 });
-const mobile   = isTouchDevice() ? new MobileControls(input) : null;
+const mobile   = IS_TOUCH_DEVICE ? new MobileControls(input) : null;
 if (mobile) document.body.classList.add('is-mobile');
 
 // iOS non supporta requestFullscreen — mostra il banner "Aggiungi a schermata Home" se non già standalone
@@ -216,6 +244,7 @@ let   currentTarget      = null;
 let   allPlayerStates    = [];
 /** Ultimo nightFactor campionato (aggiornato ogni frame): serve al beacon torrette in onGameState. */
 let   currentNightFactor = 0;
+let   lastDeathFxAt      = 0;
 
 // Powerup: posizioni note (da game-state) + timestamp ultimo try-collect per ID.
 // Non marchiamo più i powerup come "tentati una volta" — se la prima richiesta
@@ -232,7 +261,7 @@ let lastInputSend = 0;
 
 // Shoot cooldown
 let lastShootTime = 0;
-const SHOOT_COOLDOWN = 200; // ms
+const SHOOT_COOLDOWN = SHOOT_COOLDOWN_MS; // ms
 
 // Bomb cooldown
 let lastBombTime = 0;
@@ -258,6 +287,7 @@ function _enterGame(nickname, color, model, solo = false) {
     if (el.requestFullscreen) el.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
     else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
   }
+  AudioManager.warmupSfx();
   AudioManager.startMusic();
   AudioManager.startEngine();
   if (solo) {
@@ -571,8 +601,12 @@ const net = new NetworkManager({
   },
 
   onPlayerKilled({ killerId, victimId, theta: t, phi: p, byTurret }) {
-    spawnExplosion(scene, t, p, FLY_ALTITUDE);
-    AudioManager.playExplosion();
+    const fxNow = performance.now();
+    if (fxNow - lastDeathFxAt > 90) {
+      lastDeathFxAt = fxNow;
+      spawnExplosion(scene, t, p, FLY_ALTITUDE);
+      AudioManager.playExplosion();
+    }
 
     if (victimId === localPlayerId) {
       isAlive = false;
@@ -701,6 +735,7 @@ function animate() {
   // ── Perf overlay ────────────────────────────────────────────────────────────
   _perfFrameCount++;
   _perfFrameMs = delta * 1000;
+  maybeLowerRenderQuality(_perfFrameMs);
   if (now - _perfLastFpsTime >= 500) {
     _perfFps = Math.round(_perfFrameCount * 1000 / (now - _perfLastFpsTime));
     _perfGsRate = _perfGsCount * 1000 / (now - _perfLastGsTime);

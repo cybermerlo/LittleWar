@@ -88,6 +88,8 @@ export function getWeaponMoveSpeedPercent(level) {
 export const BULLET_SPEED = 0.95;
 export const BULLET_LIFETIME = 1600;  // ms
 export const BULLET_HIT_RADIUS = 0.9;
+export const SHOOT_COOLDOWN_MS = 200; // cooldown autoritativo server/client
+export const MAX_ACTIVE_PROJECTILES = 160; // sotto il pool client da 200 istanze
 
 // Bombe (unità al SECONDO)
 export const BOMB_FALL_SPEED = 4.0;

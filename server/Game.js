@@ -10,6 +10,8 @@ import {
   PLAYER_COLORS,
   TICK_INTERVAL,
   WEAPON_CONFIGS,
+  SHOOT_COOLDOWN_MS,
+  MAX_ACTIVE_PROJECTILES,
   MAX_WEAPON_LEVEL,
   BASE_SPEED,
   SPEED_REDUCTION_PER_LEVEL,
@@ -209,6 +211,9 @@ export class Game {
   playerShoot(socketId, data) {
     const player = this.players.get(socketId);
     if (!player || !player.alive) return;
+    const now = Date.now();
+    if (now - (player.lastShootAt || 0) < SHOOT_COOLDOWN_MS) return;
+    player.lastShootAt = now;
 
     // Usa la posizione/heading inviati dal client — più accurati della
     // predizione server, soprattutto quando il giocatore sta girando.
@@ -229,6 +234,7 @@ export class Game {
     const wl = Math.min(player.weaponLevel, WEAPON_CONFIGS.length - 1);
     const config = WEAPON_CONFIGS[wl];
     for (let i = 0; i < config.bullets; i++) {
+      if (this.projectiles.size >= MAX_ACTIVE_PROJECTILES) break;
       const offset = config.bullets === 1
         ? 0
         : (i / (config.bullets - 1) - 0.5) * config.spread;

@@ -333,6 +333,7 @@ export class Airplane {
     /** Boost visivo remoto 0..1 (da game-state server). */
     this._netBoostAmount = 0;
     this._remoteNetReady = false;
+    this._fxVisible = true;
     this._spinDirection = 0;
     this._spinProgress = 0;
     this._spinRoll = 0;
@@ -448,6 +449,8 @@ export class Airplane {
   /** Nasconde le particelle turbo e le wingtip trails (oggetti separati dalla mesh; es. giocatore morto). */
   setBoostParticlesVisible(visible) {
     if (!this._boostPoints) return;
+    if (this._fxVisible === visible) return;
+    this._fxVisible = visible;
     this._boostPoints.visible = visible;
     if (!visible && this._boostLife) {
       for (let i = 0; i < BOOST_PARTICLE_COUNT; i++) this._boostLife[i] = 0;

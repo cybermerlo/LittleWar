@@ -135,7 +135,7 @@ export class ChatManager {
   // ── Ricezione messaggi ─────────────────────────────────────────────────────
 
   receive({ nickname, color, text, variant, meta }) {
-    this._onAudio();
+    if (variant !== 'kill-feed') this._onAudio();
 
     const entry = document.createElement('div');
     entry.className = 'chat-entry';

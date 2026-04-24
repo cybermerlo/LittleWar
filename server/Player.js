@@ -32,6 +32,7 @@ export class Player {
     this.hasExtremeBoost = false;
     this.extremeBoostActive = false;
     this.extremeBoostTimer = 0;
+    this.lastShootAt = 0;
 
     // Target bombardamento (assegnato dal server)
     this.targetId = null;

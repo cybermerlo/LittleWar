@@ -16,6 +16,18 @@ const sounds = {
   radioPing: trySound({ src: ['/sounds/radio-ping.mp3'], volume: 0.8 }),
 };
 
+let _sfxPrimed = false;
+let _lastExplosionAt = 0;
+
+function _primeHowl(howl) {
+  if (!howl) return;
+  try {
+    if (howl.state && howl.state() === 'unloaded') howl.load();
+  } catch {
+    // Best-effort warmup only: normal playback still works if the browser refuses.
+  }
+}
+
 // ── Stazioni radio ─────────────────────────────────────────────────────────────
 // Le stazioni da cartella vengono caricate da /api/music-stations al primo avvio.
 // "Giornale Radio" è una stazione speciale (type:'news') sempre iniettata in fondo.
@@ -180,10 +192,27 @@ export const AudioManager = {
     const id = h.play();
     h.volume(vol, id);
   },
-  playExplosion() { sounds.explosion?.play(); },
+  playExplosion() {
+    const now = performance.now();
+    if (now - _lastExplosionAt < 120) return;
+    _lastExplosionAt = now;
+    const h = sounds.explosion;
+    if (!h) return;
+    h.volume(0.6);
+    h.play();
+  },
   playPowerup()   { sounds.powerup?.play(); },
   playBomb()      { sounds.bomb?.play(); },
   playChatPop()   { sounds.chatPop?.play(); },
+
+  /** Prepara SFX brevi durante il gesto utente di ingresso, evitando decode spike alla prima kill. */
+  warmupSfx() {
+    if (_sfxPrimed) return;
+    _sfxPrimed = true;
+    for (const h of Object.values(sounds)) _primeHowl(h);
+    _primeHowl(engine);
+    _primeHowl(boost);
+  },
 
   /** Carica le stazioni dal server. Va chiamato all'avvio, prima di startMusic(). */
   async init() {

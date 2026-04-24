@@ -1159,38 +1159,187 @@
       align-items: center;
       justify-content: center;
       z-index: 50;
-      background: color-mix(in srgb, var(--lw-error-container) 55%, var(--lw-deep-0));
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
+      padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right))
+               max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+      overflow: hidden;
+      background:
+        linear-gradient(180deg, rgba(8, 8, 30, 0.72), rgba(33, 7, 22, 0.84)),
+        radial-gradient(circle at 50% 44%, rgba(255, 180, 80, 0.22), transparent 34%),
+        color-mix(in srgb, var(--lw-error-container) 46%, var(--lw-deep-0));
+    }
+
+    #death-screen::before,
+    #death-screen::after {
+      content: "";
+      position: absolute;
+      inset: -20%;
+      pointer-events: none;
+    }
+
+    #death-screen::before {
+      background:
+        repeating-linear-gradient(
+          0deg,
+          rgba(255, 255, 255, 0.055) 0,
+          rgba(255, 255, 255, 0.055) 1px,
+          transparent 1px,
+          transparent 7px
+        );
+      opacity: 0.26;
+      animation: death-scan 5s linear infinite;
+    }
+
+    #death-screen::after {
+      background:
+        radial-gradient(circle at center, transparent 0 38%, rgba(0, 0, 0, 0.28) 72%, rgba(0, 0, 0, 0.62) 100%);
+      opacity: 0.82;
     }
 
     #death-box {
-      max-width: 22rem;
+      position: relative;
+      z-index: 1;
+      max-width: 28rem;
       width: calc(100% - 2rem);
-      background: color-mix(in srgb, var(--lw-surface-container-low) 88%, transparent);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border-radius: 1rem;
-      padding: 2rem 1.75rem;
+      min-height: 21rem;
+      display: grid;
+      justify-items: center;
+      align-content: center;
+      gap: 1rem;
+      background:
+        linear-gradient(180deg, rgba(39, 39, 70, 0.82), rgba(16, 16, 46, 0.74)),
+        color-mix(in srgb, var(--lw-surface-container-low) 78%, transparent);
+      border-radius: 8px;
+      padding: 2.15rem 1.75rem 1.85rem;
       text-align: center;
       color: var(--lw-on-surface);
-      border: 1px solid color-mix(in srgb, var(--lw-error) 25%, transparent);
-      box-shadow: 0 32px 64px rgba(0, 0, 0, 0.45);
+      border: 1px solid color-mix(in srgb, var(--lw-error) 36%, transparent);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.10),
+        0 34px 80px rgba(0, 0, 0, 0.54),
+        0 0 54px color-mix(in srgb, var(--lw-error-container) 42%, transparent);
+      animation: death-card-in 0.32s ease-out both;
+    }
+
+    .death-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      min-height: 1.75rem;
+      padding: 0.35rem 0.7rem;
+      border: 1px solid color-mix(in srgb, var(--lw-error) 38%, transparent);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--lw-error-container) 28%, transparent);
+      color: #ffe0cc;
+      font: 800 0.74rem/1 'Plus Jakarta Sans', sans-serif;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .death-status-dot {
+      width: 0.44rem;
+      height: 0.44rem;
+      border-radius: 50%;
+      background: #ff6f3d;
+      box-shadow: 0 0 14px rgba(255, 111, 61, 0.9);
+      animation: death-pulse 0.8s ease-in-out infinite alternate;
+    }
+
+    .death-radar {
+      position: relative;
+      width: 7.25rem;
+      aspect-ratio: 1;
+      display: grid;
+      place-items: center;
+      margin: 0.15rem 0;
+    }
+
+    .death-ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background:
+        conic-gradient(
+          from -90deg,
+          #ffd36b calc(var(--death-progress, 1) * 1turn),
+          rgba(255, 255, 255, 0.11) 0
+        );
+      box-shadow:
+        0 0 34px rgba(255, 150, 70, 0.35),
+        inset 0 0 24px rgba(255, 255, 255, 0.06);
+    }
+
+    .death-ring::before {
+      content: "";
+      position: absolute;
+      inset: 0.55rem;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle, rgba(255, 255, 255, 0.12), transparent 54%),
+        color-mix(in srgb, var(--lw-deep-0) 78%, transparent);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+    }
+
+    .death-count-badge {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 4.8rem;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      color: #fff3d8;
+      font: 800 2.5rem/1 'Plus Jakarta Sans', sans-serif;
+      text-shadow: 0 0 22px rgba(255, 211, 107, 0.58);
     }
 
     #death-box h2 {
       font-family: 'Plus Jakarta Sans', sans-serif;
-      font-size: 1.35rem;
+      font-size: clamp(1.35rem, 3vw, 1.8rem);
       font-weight: 800;
-      margin-bottom: 0.5rem;
-      color: var(--lw-error);
+      margin: 0;
+      max-width: 22rem;
+      color: #fff0ea;
+      text-wrap: balance;
+      text-shadow: 0 2px 18px rgba(147, 0, 10, 0.6);
     }
 
     #death-box p {
       font-family: 'Be Vietnam Pro', sans-serif;
-      font-size: 1rem;
-      font-weight: 500;
-      color: color-mix(in srgb, var(--lw-error) 85%, var(--lw-on-surface));
+      font-size: 0.95rem;
+      font-weight: 700;
+      margin: 0;
+      color: color-mix(in srgb, var(--lw-secondary-fixed-dim) 74%, var(--lw-on-surface));
+    }
+
+    .death-tip {
+      max-width: 20rem;
+      color: color-mix(in srgb, var(--lw-on-surface-variant) 88%, transparent);
+      font: 600 0.78rem/1.45 'Be Vietnam Pro', sans-serif;
+    }
+
+    @keyframes death-card-in {
+      from { opacity: 0; transform: translateY(16px) scale(0.96); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @keyframes death-pulse {
+      from { transform: scale(0.82); opacity: 0.72; }
+      to { transform: scale(1.25); opacity: 1; }
+    }
+
+    @keyframes death-scan {
+      from { transform: translateY(-3rem); }
+      to { transform: translateY(3rem); }
+    }
+
+    @media (max-width: 680px) {
+      #death-box {
+        max-width: 22rem;
+        min-height: 19.5rem;
+        padding: 1.65rem 1.25rem;
+      }
+
+      .death-radar { width: 6.25rem; }
+      .death-count-badge { font-size: 2.1rem; }
     }
 
     /* ── Controlli mobile (joystick + bottoni touch) ─────────────────────── */
@@ -1667,8 +1816,14 @@
   <!-- Schermata morte -->
   <div id="death-screen">
     <div id="death-box">
+      <div class="death-status"><span class="death-status-dot"></span><span>Mayday</span></div>
+      <div class="death-radar" aria-hidden="true">
+        <div class="death-ring"></div>
+        <div id="death-count-number" class="death-count-badge">3</div>
+      </div>
       <h2 id="death-msg">Sei stato eliminato!</h2>
       <p id="death-countdown">Respawn in 3…</p>
+      <div class="death-tip">Rientro automatico in quota. Tieni d'occhio chi ti ha preso.</div>
     </div>
   </div>
 
