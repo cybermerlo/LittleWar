@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { createGLTFLoader } from '../utils/createGLTFLoader.js';
 import { sphericalToCartesian } from '../utils/SphereUtils.js';
 import { PLANET_RADIUS, FLY_ALTITUDE, BUILDING_CONQUEST_RADIUS } from '../../shared/constants.js';
 
@@ -68,7 +68,7 @@ function blinkGate(t) {
 
 // ── Pre-caricamento singolo di entrambi i modelli ─────────────────────────────
 
-const _loader = new GLTFLoader();
+const _loader = createGLTFLoader();
 let _cesareGltf = null;
 let _preGltf = null;
 const _cesarePromise = _loader

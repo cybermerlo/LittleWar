@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { createGLTFLoader } from '../utils/createGLTFLoader.js';
 import { sphericalToCartesian, cartesianToSpherical, sphereOrientation } from '../utils/SphereUtils.js';
 import {
   FLY_ALTITUDE,
@@ -14,7 +14,7 @@ const _bankOnlyQuat = new THREE.Quaternion();
 const _axisX = new THREE.Vector3(1, 0, 0);
 /** Smussatura posizione aerei remoti (1/s, verso lo stato rete). */
 const REMOTE_NET_SMOOTH = 14;
-const _modelLoader = new GLTFLoader();
+const _modelLoader = createGLTFLoader();
 const _modelTemplateCache = new Map();
 
 const MODEL_PATHS = {

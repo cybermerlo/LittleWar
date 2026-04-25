@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { createGLTFLoader } from '../utils/createGLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { surfaceAt, radiusAt, PLANET_RADIUS, heightAt01 } from './planetHeight.js';
 
@@ -35,7 +35,7 @@ const TREE_GROUND_NORMAL_OFFSET = 0;
 const BUILDING_GROUND_NORMAL_OFFSET = 0.6;
 const HOSPITAL_GROUND_NORMAL_OFFSET = 0.2;
 
-const _treeLoader = new GLTFLoader();
+const _treeLoader = createGLTFLoader();
 let _treeTemplatesPromise    = null;
 let _buildingTemplatesPromise = null;
 let _hospitalTemplatesPromise = null;

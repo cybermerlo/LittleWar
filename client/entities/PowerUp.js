@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { createGLTFLoader } from '../utils/createGLTFLoader.js';
 import { sphericalToCartesian } from '../utils/SphereUtils.js';
 import { FLY_ALTITUDE } from '../../shared/constants.js';
 
@@ -9,7 +9,7 @@ const _pNormal  = new THREE.Vector3();
 const _spinAxis = new THREE.Vector3(0, 1, 0);
 const _spinQuat = new THREE.Quaternion();
 
-const loader = new GLTFLoader();
+const loader = createGLTFLoader();
 
 let multishotGltf = null;
 let shieldGltf = null;
