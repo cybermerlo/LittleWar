@@ -133,6 +133,7 @@ Aggiornamento spike kill/respawn:
 - `AudioManager.warmupSfx()` viene chiamato nel click di ingresso in partita per evitare decode/play spike al primo suono di morte/respawn.
 - Gli effetti di morte ravvicinati sono coalescenti lato client: collisioni con due `player-killed` quasi simultanei non generano due esplosioni/audio nello stesso frame.
 - Il kill feed non riproduce più il pop chat.
+- I suoni SFX puntano agli asset finali OGG in `public/sounds/*.ogg`; `popup.ogg` viene riprodotto quando il giocatore locale elimina qualcuno, sia con sparo sia tramite propria torretta.
 - Gli effetti separati degli aerei morti (boost particles + wingtip trails) non vengono resettati a ogni game-state se sono già nascosti.
 - I fallback dei powerup riusano geometria/materiali condivisi.
 - La death screen resta stilizzata ma non usa più `backdrop-filter`, perché blur/saturate sul frame della morte può causare jank.

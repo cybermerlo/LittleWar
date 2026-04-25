@@ -621,6 +621,7 @@ const net = new NetworkManager({
     if (killerId === localPlayerId) {
       const victim = allPlayerStates.find(pl => pl.id === victimId);
       hud.showKillNotice(victim?.nickname ?? null, byTurret ?? false);
+      AudioManager.playPopup();
     }
   },
 

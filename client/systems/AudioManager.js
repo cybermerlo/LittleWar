@@ -8,12 +8,13 @@ function trySound(config) {
 }
 
 const sounds = {
-  shoot:     trySound({ src: ['/sounds/shoot.mp3'],     volume: 0.4 }),
-  explosion: trySound({ src: ['/sounds/explosion.wav'], volume: 0.6 }),
-  powerup:   trySound({ src: ['/sounds/powerup.mp3'],   volume: 0.5 }),
-  bomb:      trySound({ src: ['/sounds/bomb.mp3'],      volume: 0.7 }),
-  chatPop:   trySound({ src: ['/sounds/chat-pop.mp3'], volume: 0.5 }),
-  radioPing: trySound({ src: ['/sounds/radio-ping.mp3'], volume: 0.8 }),
+  shoot:     trySound({ src: ['/sounds/shoot.ogg'],     volume: 0.4 }),
+  explosion: trySound({ src: ['/sounds/explosion.ogg'], volume: 0.6 }),
+  powerup:   trySound({ src: ['/sounds/powerup.ogg'],   volume: 0.5 }),
+  bomb:      trySound({ src: ['/sounds/bomb.ogg'],      volume: 0.7 }),
+  chatPop:   trySound({ src: ['/sounds/chat-pop.ogg'], volume: 0.5 }),
+  radioPing: trySound({ src: ['/sounds/radio-ping.ogg'], volume: 0.8 }),
+  popup:     trySound({ src: ['/sounds/popup.ogg'], volume: 0.7 }),
 };
 
 let _sfxPrimed = false;
@@ -127,7 +128,7 @@ const ENGINE_VOL_BOOST  = 0.154;
 const ENGINE_FADE_SPEED = 2.5;
 
 const engine = trySound({
-  src: ['/sounds/engine.mp3'],
+  src: ['/sounds/engine.ogg'],
   loop: true,
   volume: 0,
 });
@@ -138,7 +139,7 @@ let _engineCurrentVol = 0;
 
 // ── Boost ─────────────────────────────────────────────────────────────────────
 const boost = trySound({
-  src: ['/sounds/boost.mp3'],
+  src: ['/sounds/boost.ogg'],
   loop: true,
   volume: 0.35,
 });
@@ -204,6 +205,7 @@ export const AudioManager = {
   playPowerup()   { sounds.powerup?.play(); },
   playBomb()      { sounds.bomb?.play(); },
   playChatPop()   { sounds.chatPop?.play(); },
+  playPopup()     { sounds.popup?.play(); },
 
   /** Prepara SFX brevi durante il gesto utente di ingresso, evitando decode spike alla prima kill. */
   warmupSfx() {
