@@ -22,6 +22,7 @@ import { ChatManager } from './systems/ChatManager.js';
 import { LobbyScreen } from './ui/LobbyScreen.js';
 import { DeathScreen } from './ui/DeathScreen.js';
 import { moveOnSphere } from './utils/SphereUtils.js';
+import { isLowPowerQuality, watchBatteryLowPower } from './utils/performanceProfile.js';
 import {
   BASE_SPEED, SPEED_REDUCTION_PER_LEVEL, MIN_SPEED,
   BOOST_MAX, BOOST_SPEED_MULT, BOOST_DRAIN_PER_SEC, BOOST_REGEN_PER_SEC,
@@ -51,11 +52,18 @@ function remoteBoostAmount(p) {
 // ── Renderer + Scena ──────────────────────────────────────────────────────────
 
 const IS_TOUCH_DEVICE = isTouchDevice();
-const BASE_RENDER_DPR = Math.min(window.devicePixelRatio || 1, IS_TOUCH_DEVICE ? 1.25 : 1.5);
-const MIN_RENDER_DPR = IS_TOUCH_DEVICE ? 1.0 : 1.15;
-const BLOOM_SCALE = IS_TOUCH_DEVICE ? 0.45 : (window.devicePixelRatio > 1.5 ? 0.55 : 0.75);
+const LOW_POWER_DEFAULTS = isLowPowerQuality();
+const DEVICE_DPR = window.devicePixelRatio || 1;
+const BASE_RENDER_DPR = LOW_POWER_DEFAULTS ? 1.0 : Math.min(DEVICE_DPR, IS_TOUCH_DEVICE ? 1.15 : 1.25);
+const MIN_RENDER_DPR = IS_TOUCH_DEVICE ? 0.9 : 1.0;
+const LOW_RENDER_DPR = IS_TOUCH_DEVICE ? 0.85 : 1.0;
+const BLOOM_SCALE = LOW_POWER_DEFAULTS ? 0.35 : (IS_TOUCH_DEVICE ? 0.4 : (DEVICE_DPR > 1.5 ? 0.45 : 0.55));
+const BLOOM_INITIAL_STRENGTH = LOW_POWER_DEFAULTS ? 0 : (IS_TOUCH_DEVICE ? 0.12 : 0.22);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({
+  antialias: !LOW_POWER_DEFAULTS,
+  powerPreference: 'high-performance',
+});
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(BASE_RENDER_DPR);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -78,13 +86,14 @@ composer.addPass(renderPass);
 
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth * BLOOM_SCALE, window.innerHeight * BLOOM_SCALE),
-  IS_TOUCH_DEVICE ? 0.16 : 0.28,
+  BLOOM_INITIAL_STRENGTH,
   0.62,
   0.88,
 );
+bloomPass.enabled = !LOW_POWER_DEFAULTS;
 composer.addPass(bloomPass);
 
-let renderQualityStage = 0;
+let renderQualityStage = LOW_POWER_DEFAULTS ? 2 : 0;
 let slowFrameStreak = 0;
 function setRenderDpr(dpr) {
   renderer.setPixelRatio(dpr);
@@ -93,18 +102,30 @@ function setRenderDpr(dpr) {
   composer.setSize(window.innerWidth, window.innerHeight);
 }
 
+function applyRenderQualityStage(stage) {
+  if (stage <= renderQualityStage) return;
+  renderQualityStage = stage;
+  slowFrameStreak = 0;
+
+  if (renderQualityStage >= 2) {
+    setRenderDpr(LOW_RENDER_DPR);
+    bloomPass.enabled = false;
+  } else if (renderQualityStage === 1) {
+    setRenderDpr(MIN_RENDER_DPR);
+    bloomPass.strength = BLOOM_INITIAL_STRENGTH * 0.5;
+  }
+
+  sky?.setQualityStage?.(renderQualityStage);
+  setPlanetQualityStage?.(renderQualityStage);
+}
+
 function maybeLowerRenderQuality(frameMs) {
   if (renderQualityStage >= 2) return;
-  slowFrameStreak = frameMs > 24 ? slowFrameStreak + 1 : Math.max(0, slowFrameStreak - 2);
-  if (slowFrameStreak < 90) return;
+  const threshold = renderQualityStage === 0 ? 22 : 26;
+  slowFrameStreak = frameMs > threshold ? slowFrameStreak + 1 : Math.max(0, slowFrameStreak - 2);
+  if (slowFrameStreak < 45) return;
   slowFrameStreak = 0;
-  renderQualityStage++;
-  if (renderQualityStage === 1) {
-    setRenderDpr(MIN_RENDER_DPR);
-    bloomPass.strength *= 0.65;
-  } else {
-    bloomPass.enabled = false;
-  }
+  applyRenderQualityStage(renderQualityStage + 1);
 }
 
 window.addEventListener('resize', () => {
@@ -121,8 +142,16 @@ window.addEventListener('keydown', (e) => chat.handleKey(e));
 // ── Costruzione mondo ─────────────────────────────────────────────────────────
 
 const lights = setupLighting(scene);
-const sky = createSky(scene, lights);
-const { mesh: planetMesh, water: waterMesh, heightData, posAttr, update: updatePlanet } = createPlanet(scene);
+const sky = createSky(scene, lights, { qualityStage: renderQualityStage });
+const {
+  mesh: planetMesh,
+  water: waterMesh,
+  heightData,
+  posAttr,
+  update: updatePlanet,
+  setQualityStage: setPlanetQualityStage,
+} = createPlanet(scene, { qualityStage: renderQualityStage });
+watchBatteryLowPower(() => applyRenderQualityStage(2));
 
 // ── DEBUG: rete di superficie locale (tasto G per toggle) ─────────────────────
 // Shader che scarta i segmenti oltre DBG_RADIUS unità dalla camera, con fade.
@@ -946,6 +975,7 @@ function animate() {
       `── Rendering ─────────────`,
       `FPS        ${coli(_perfFps,  50, 30, String(_perfFps).padStart(6))}`,
       `Frame      ${col(_perfFrameMs, 20, 33, _perfFrameMs.toFixed(1).padStart(5)+' ms')}`,
+      `Qualita    ${['auto', 'low', 'battery'][renderQualityStage] ?? 'battery'}`,
       `Draw calls ${col(ri.calls, 300, 600, String(ri.calls).padStart(6))}`,
       `Triangoli  ${col(ri.triangles/1000, 200, 500, (ri.triangles/1000).toFixed(1).padStart(5)+' k')}`,
       heapMB >= 0 ? `Heap JS    ${col(heapMB, 200, 400, heapMB.toFixed(1).padStart(4)+' MB')}` : '',

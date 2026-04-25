@@ -187,7 +187,8 @@ const skyStates = [
  *        Restituite da `setupLighting(scene)` — necessarie per il ciclo giorno/notte.
  * @returns {{sky:THREE.Mesh, stars:THREE.Points, cloudRoot:THREE.Group, update:(delta:number)=>void}}
  */
-export function createSky(scene, lights) {
+export function createSky(scene, lights, options = {}) {
+  let qualityStage = Math.max(0, options.qualityStage ?? 0);
   // Il cielo shader copre tutta la vista: niente scene.background.
   scene.background = null;
 
@@ -197,7 +198,7 @@ export function createSky(scene, lights) {
     bottomColor: { value: skyStates[0].bottom.clone() },
   };
 
-  const skyGeo = new THREE.SphereGeometry(400, 32, 32);
+  const skyGeo = new THREE.SphereGeometry(400, qualityStage >= 2 ? 20 : 28, qualityStage >= 2 ? 16 : 24);
   const skyMat = new THREE.ShaderMaterial({
     vertexShader: skyVertexShader,
     fragmentShader: skyFragmentShader,
@@ -212,7 +213,7 @@ export function createSky(scene, lights) {
   scene.add(sky);
 
   // ── Nebulosa / via lattea stilizzata (sfera dietro alle stelle) ───────────
-  const nebulaGeo = new THREE.SphereGeometry(368, 40, 40);
+  const nebulaGeo = new THREE.SphereGeometry(368, qualityStage >= 2 ? 20 : 28, qualityStage >= 2 ? 16 : 24);
   const galaxyPole = new THREE.Vector3(0.22, 0.91, 0.12).normalize();
   const nebulaUniforms = {
     uOpacity: { value: 0 },
@@ -232,10 +233,11 @@ export function createSky(scene, lights) {
   const nebula = new THREE.Mesh(nebulaGeo, nebulaMat);
   nebula.frustumCulled = false;
   nebula.renderOrder = -1;
+  nebula.visible = qualityStage < 1;
   scene.add(nebula);
 
   // ── Campo stellare: colori e dimensioni variabili + twinkle in shader ─────
-  const starsCount = 1800;
+  const starsCount = qualityStage >= 2 ? 600 : 1200;
   const starPos = new Float32Array(starsCount * 3);
   const starColors = new Float32Array(starsCount * 3);
   const starSizes = new Float32Array(starsCount);
@@ -343,8 +345,9 @@ export function createSky(scene, lights) {
     parent.add(group);
   }
 
-  const cloudCount = 12;
+  const cloudCount = qualityStage >= 2 ? 4 : 8;
   for (let c = 0; c < cloudCount; c++) addCumulusCloud(cloudRoot);
+  cloudRoot.visible = qualityStage < 2;
   scene.add(cloudRoot);
 
   // Intensità base di fill/rim per poterle scalare col "giorno"
@@ -401,6 +404,7 @@ export function createSky(scene, lights) {
   }
 
   function updateShootingStars(delta, nightFactor) {
+    if (qualityStage >= 2) return;
     shootingStarTimer -= delta;
     if (shootingStarTimer <= 0) {
       spawnShootingStar();
@@ -439,6 +443,20 @@ export function createSky(scene, lights) {
   let time = 0;
   let lastNightFactor = 0;
 
+  function setQualityStage(stage) {
+    qualityStage = Math.max(qualityStage, stage ?? 0);
+    if (qualityStage >= 1) nebula.visible = false;
+    if (qualityStage >= 2) {
+      stars.visible = false;
+      cloudRoot.visible = false;
+      for (const s of shootingStars.splice(0)) {
+        scene.remove(s.line);
+        s.geo.dispose();
+        s.mat.dispose();
+      }
+    }
+  }
+
   function update(delta) {
     time += delta * CYCLE_SPEED;
     const total = skyStates.length;
@@ -466,22 +484,30 @@ export function createSky(scene, lights) {
     if (lights?.rim)  lights.rim.intensity  = baseRim  * dayFactor;
 
     const fieldOpacity = THREE.MathUtils.lerp(cur.starOpacity, nxt.starOpacity, t);
-    starUniforms.uOpacity.value = fieldOpacity;
+    const starOpacity = qualityStage >= 2 ? 0 : fieldOpacity;
+    starUniforms.uOpacity.value = starOpacity;
     lastNightFactor = fieldOpacity;
     // Soglie alte: la nebulosa sale solo in tarda sera / notte piena
-    nebulaUniforms.uOpacity.value = THREE.MathUtils.smoothstep(fieldOpacity, 0.78, 1.0) * 0.95;
+    const nebulaOpacity = qualityStage >= 1 ? 0 : THREE.MathUtils.smoothstep(fieldOpacity, 0.78, 1.0) * 0.95;
+    nebulaUniforms.uOpacity.value = nebulaOpacity;
 
-    starUniforms.uTime.value += delta;
-    nebulaUniforms.uTime.value += delta * 0.4;
+    stars.visible = starOpacity > 0.03;
+    nebula.visible = nebulaOpacity > 0.03;
+    if (stars.visible) starUniforms.uTime.value += delta;
+    if (nebula.visible) nebulaUniforms.uTime.value += delta * 0.4;
 
     // Fog color segue il bordo del cielo per transizione fluida sull'orizzonte
     if (scene.fog) scene.fog.color.copy(skyUniforms.topColor.value);
 
     // Lenta rotazione della volta stellata (frame-rate independent)
-    stars.rotation.y += 0.012 * delta;
-    stars.rotation.x += 0.006 * delta;
-    nebula.rotation.y += 0.0055 * delta;
-    nebula.rotation.x -= 0.003 * delta;
+    if (stars.visible) {
+      stars.rotation.y += 0.012 * delta;
+      stars.rotation.x += 0.006 * delta;
+    }
+    if (nebula.visible) {
+      nebula.rotation.y += 0.0055 * delta;
+      nebula.rotation.x -= 0.003 * delta;
+    }
 
     // Nuvole: tint verso il cielo, quasi invisibili quando le stelle sono al massimo
     // Stessa “notte” delle stelle (0=giorno, 1=notte): nuvole spariscono in morbida
@@ -489,11 +515,14 @@ export function createSky(scene, lights) {
     // smoothstep(x, min, max): 0 se x<=min, 1 se x>=max — x deve essere nf
     const cloudNightFade = 1.0 - THREE.MathUtils.smoothstep(nf, 0.2, 0.9);
     cloudMat.opacity = 0.52 * cloudNightFade;
+    cloudRoot.visible = qualityStage < 2 && cloudMat.opacity > 0.03;
     cloudTintScratch.set(0xf0f5ff).lerp(skyUniforms.topColor.value, 0.2 + nf * 0.14);
     cloudMat.color.copy(cloudTintScratch);
 
-    cloudRoot.rotation.y += 0.005 * delta;
-    cloudRoot.rotation.x += 0.0025 * delta;
+    if (cloudRoot.visible) {
+      cloudRoot.rotation.y += 0.005 * delta;
+      cloudRoot.rotation.x += 0.0025 * delta;
+    }
 
     updateShootingStars(delta, fieldOpacity);
   }
@@ -503,6 +532,7 @@ export function createSky(scene, lights) {
     stars,
     cloudRoot,
     update,
+    setQualityStage,
     /** 0..1: 0=giorno, 1=notte (derivato da opacità stelle) */
     getNightFactor: () => lastNightFactor,
   };

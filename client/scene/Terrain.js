@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createGLTFLoader } from '../utils/createGLTFLoader.js';
+import { terrainDensityScale, useDetailedTerrainModels } from '../utils/performanceProfile.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { surfaceAt, radiusAt, PLANET_RADIUS, heightAt01 } from './planetHeight.js';
 
@@ -55,7 +56,9 @@ const TREE_CLEARANCE = 0.14;
 /** Angolo massimo (rad) da un albero “genitore”; esponente < 1 favorisce vicinanza */
 const TREE_CLUSTER_ANGLE_MAX = 0.2;
 const TREE_ATTACH_PROB = 0.8;
-const MAX_TREE_FILL_ATTEMPTS = 5200;
+const TERRAIN_DENSITY_SCALE = terrainDensityScale();
+const USE_DETAILED_TERRAIN_MODELS = useDetailedTerrainModels();
+const MAX_TREE_FILL_ATTEMPTS = Math.round(5200 * TERRAIN_DENSITY_SCALE);
 
 const _candDir = new THREE.Vector3();
 const _forestT = new THREE.Vector3();
@@ -257,18 +260,21 @@ function loadTemplates(urls, prepare) {
 }
 
 export function loadTreeTemplates() {
+  if (!USE_DETAILED_TERRAIN_MODELS) return Promise.resolve([]);
   if (!_treeTemplatesPromise)
     _treeTemplatesPromise = loadTemplates(TREE_MODEL_URLS, prepareTreeTemplate);
   return _treeTemplatesPromise;
 }
 
 export function loadBuildingTemplates() {
+  if (!USE_DETAILED_TERRAIN_MODELS) return Promise.resolve([]);
   if (!_buildingTemplatesPromise)
     _buildingTemplatesPromise = loadTemplates(BUILDING_MODEL_URLS, prepareBuildingTemplate);
   return _buildingTemplatesPromise;
 }
 
 export function loadHospitalTemplates() {
+  if (!USE_DETAILED_TERRAIN_MODELS) return Promise.resolve([]);
   if (!_hospitalTemplatesPromise)
     _hospitalTemplatesPromise = loadTemplates(HOSPITAL_MODEL_URLS, prepareHospitalTemplate);
   return _hospitalTemplatesPromise;
@@ -299,7 +305,7 @@ function makeProceduralTree() {
 }
 
 function makeTree(treeTemplates) {
-  if (treeTemplates.length > 0) {
+  if (USE_DETAILED_TERRAIN_MODELS && treeTemplates.length > 0) {
     const template = treeTemplates[Math.floor(Math.random() * treeTemplates.length)];
     const inst = template.clone(true);
     const jitter = 0.78 + Math.random() * 0.5;
@@ -340,7 +346,7 @@ function makeProceduralBuilding() {
 }
 
 function makeBuilding(buildingTemplates) {
-  if (buildingTemplates.length > 0) {
+  if (USE_DETAILED_TERRAIN_MODELS && buildingTemplates.length > 0) {
     const template = buildingTemplates[Math.floor(Math.random() * buildingTemplates.length)];
     const inst = template.clone(true);
     const jitter = 0.85 + Math.random() * 0.3;
@@ -383,7 +389,7 @@ function makeProceduralHospital() {
 }
 
 function makeHospital(hospitalTemplates) {
-  if (hospitalTemplates.length > 0) {
+  if (USE_DETAILED_TERRAIN_MODELS && hospitalTemplates.length > 0) {
     const template = hospitalTemplates[Math.floor(Math.random() * hospitalTemplates.length)];
     const inst = template.clone(true);
     const jitter = 0.92 + Math.random() * 0.22;
@@ -455,9 +461,9 @@ export function createTerrain(scene, heightData, posAttr, _planetMesh, treeTempl
   }
 
   let trees = 0, buildings = 0;
-  const MAX_TREES = 180;
-  const MAX_BUILDINGS = 80;
-  const MAX_HOSPITALS = 12;
+  const MAX_TREES = Math.max(45, Math.round(180 * TERRAIN_DENSITY_SCALE));
+  const MAX_BUILDINGS = Math.max(18, Math.round(80 * TERRAIN_DENSITY_SCALE));
+  const MAX_HOSPITALS = Math.max(3, Math.round(12 * TERRAIN_DENSITY_SCALE));
   let hospitals = 0;
 
   const placedBuildings = [];

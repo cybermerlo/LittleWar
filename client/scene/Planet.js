@@ -256,7 +256,8 @@ function createAtmosphereMaterial() {
 }
 
 // ── Factory ───────────────────────────────────────────────────────────────────
-export function createPlanet(scene) {
+export function createPlanet(scene, options = {}) {
+  let qualityStage = Math.max(0, options.qualityStage ?? 0);
   const geo = new THREE.IcosahedronGeometry(PLANET_RADIUS, DETAIL);
   const posAttr = geo.attributes.position;
   const count = posAttr.count;
@@ -296,25 +297,37 @@ export function createPlanet(scene) {
 
   // Acqua: ora un guscio leggermente più in basso per non coprire le spiagge,
   // con onde generate in vertex shader.
-  const waterGeo = new THREE.SphereGeometry(PLANET_RADIUS + 0.02, 96, 64);
+  const waterSegX = qualityStage >= 2 ? 48 : 64;
+  const waterSegY = qualityStage >= 2 ? 24 : 40;
+  const waterGeo = new THREE.SphereGeometry(PLANET_RADIUS + 0.02, waterSegX, waterSegY);
   const waterMat = createWaterMaterial();
   const water = new THREE.Mesh(waterGeo, waterMat);
   water.renderOrder = 1;
   scene.add(water);
 
-  const atmosphereGeo = new THREE.SphereGeometry(PLANET_RADIUS + 1.1, 64, 48);
+  const atmosphereGeo = new THREE.SphereGeometry(
+    PLANET_RADIUS + 1.1,
+    qualityStage >= 2 ? 32 : 48,
+    qualityStage >= 2 ? 20 : 32,
+  );
   const atmosphereMat = createAtmosphereMaterial();
   const atmosphere = new THREE.Mesh(atmosphereGeo, atmosphereMat);
   atmosphere.renderOrder = 2;
+  atmosphere.visible = qualityStage < 2;
   scene.add(atmosphere);
 
+  function setQualityStage(stage) {
+    qualityStage = Math.max(qualityStage, stage ?? 0);
+    atmosphere.visible = qualityStage < 2;
+  }
+
   function update(delta, cameraWorldPos) {
-    waterMat.uniforms.uTime.value += delta;
+    if (qualityStage < 2) waterMat.uniforms.uTime.value += delta;
     if (cameraWorldPos) {
       waterMat.uniforms.uCameraPos.value.copy(cameraWorldPos);
       atmosphereMat.uniforms.uCameraPos.value.copy(cameraWorldPos);
     }
   }
 
-  return { mesh, water, atmosphere, heightData, posAttr, update };
+  return { mesh, water, atmosphere, heightData, posAttr, update, setQualityStage };
 }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createGLTFLoader } from '../utils/createGLTFLoader.js';
+import { allowTinyPointLights } from '../utils/performanceProfile.js';
 import { sphericalToCartesian } from '../utils/SphereUtils.js';
 import { PLANET_RADIUS, FLY_ALTITUDE, BUILDING_CONQUEST_RADIUS } from '../../shared/constants.js';
 
@@ -51,6 +52,7 @@ const BEACON_SPHERE_R = 0.045;
 const BEACON_LIGHT_DISTANCE = 0.55;
 const BEACON_LIGHT_DECAY = 2.0;
 const BEACON_LIGHT_INTENSITY = 2.4;
+const USE_TINY_POINT_LIGHTS = allowTinyPointLights();
 
 function smooth01(x) {
   return THREE.MathUtils.smoothstep(THREE.MathUtils.clamp(x, 0, 1), 0, 1);
@@ -192,7 +194,7 @@ export class BuildingEntity {
     this._beaconGroup.scale.setScalar(1 / CESARE_SCALE);
     this._beaconGroup.visible = false;
 
-    // Un solo puntino additivo + PointLight (niente alone a disco grande).
+    // Un solo puntino additivo; le PointLight piccole restano solo in qualita high.
     this._beaconCoreMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
@@ -207,13 +209,11 @@ export class BuildingEntity {
     this._beaconSphere.renderOrder = 5;
     this._beaconSphere.frustumCulled = false;
 
-    this._beaconLight = new THREE.PointLight(
-      0xffffff,
-      0,
-      BEACON_LIGHT_DISTANCE,
-      BEACON_LIGHT_DECAY,
-    );
-    this._beaconGroup.add(this._beaconSphere, this._beaconLight);
+    this._beaconLight = USE_TINY_POINT_LIGHTS
+      ? new THREE.PointLight(0xffffff, 0, BEACON_LIGHT_DISTANCE, BEACON_LIGHT_DECAY)
+      : null;
+    this._beaconGroup.add(this._beaconSphere);
+    if (this._beaconLight) this._beaconGroup.add(this._beaconLight);
     this.conqueredWrapper.add(this._beaconGroup);
 
     // Attach async (dopo beacon: così _attachCesareModel può riparentare subito)
@@ -406,15 +406,17 @@ export class BuildingEntity {
     if (!isConquered || nightVis <= 0.001) {
       this._beaconGroup.visible = false;
       this._beaconCoreMat.opacity = 0;
-      this._beaconLight.intensity = 0;
+      if (this._beaconLight) this._beaconLight.intensity = 0;
       return;
     }
     this._beaconGroup.visible = true;
     const intensity = nightVis * blinkGate(this._beaconTime);
     this._beaconCoreMat.color.copy(this._beaconColor);
     this._beaconCoreMat.opacity = intensity; // come opacity luci alari
-    this._beaconLight.color.copy(this._beaconColor);
-    this._beaconLight.intensity = intensity * BEACON_LIGHT_INTENSITY;
+    if (this._beaconLight) {
+      this._beaconLight.color.copy(this._beaconColor);
+      this._beaconLight.intensity = intensity * BEACON_LIGHT_INTENSITY;
+    }
   }
 
   /** Giocatore vivo più vicino (distanza cartesiana a FLY_ALTITUDE). */
@@ -486,9 +488,11 @@ export class BuildingEntity {
     mesh.renderOrder = 4;
     this._scene.add(mesh);
 
-    const light = new THREE.PointLight(color, 2.6, 6, 2);
-    light.position.copy(tip);
-    this._scene.add(light);
+    const light = USE_TINY_POINT_LIGHTS ? new THREE.PointLight(color, 2.6, 6, 2) : null;
+    if (light) {
+      light.position.copy(tip);
+      this._scene.add(light);
+    }
 
     const start = performance.now();
     const duration = 140;
@@ -496,7 +500,7 @@ export class BuildingEntity {
       const t = (performance.now() - start) / duration;
       if (t >= 1) {
         this._scene.remove(mesh);
-        this._scene.remove(light);
+        if (light) this._scene.remove(light);
         mat.dispose();
         mesh.geometry.dispose();
         return;
@@ -504,7 +508,7 @@ export class BuildingEntity {
       const s = 1 + t * 2.2;
       mesh.scale.setScalar(s);
       mat.opacity = 0.95 * (1 - t);
-      light.intensity = 2.6 * (1 - t);
+      if (light) light.intensity = 2.6 * (1 - t);
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
