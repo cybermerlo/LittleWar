@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Mini RTS Tank</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="game-shell" aria-label="Campo RTS 2D">
+      <div class="hud">
+        <div class="status">
+          <span class="status-dot"></span>
+          <span id="statusText">Selezionato</span>
+        </div>
+        <button id="centerTank" class="center-button" type="button" title="Centra carro armato" aria-label="Centra carro armato"></button>
+      </div>
+
+      <section id="battlefield" class="battlefield" aria-label="Muovi il carro armato con mouse o touch">
+        <div id="targetMarker" class="target-marker" aria-hidden="true"></div>
+        <div id="tank" class="tank" aria-hidden="true"></div>
+      </section>
+    </main>
+
+    <script src="game.js"></script>
+  </body>
+</html>
