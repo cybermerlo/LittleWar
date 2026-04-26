@@ -139,11 +139,11 @@ Aggiornamento spike kill/respawn:
 - La death screen resta stilizzata ma non usa più `backdrop-filter`, perché blur/saturate sul frame della morte può causare jank.
 
 Aggiornamento profilo batteria / laptop integrata (2026-04-25):
-- Aggiunto `client/utils/performanceProfile.js`: `?quality=low` o `localStorage['littlewar:quality']='low'` forza profilo leggero; `?quality=high` mantiene densita piena e luci decorative reali.
-- In modalita auto il render parte piu conservativo: DPR desktop max 1.25, bloom piu basso, terreno decorativo a densita ridotta. Se il frame time resta alto per circa 45 frame scala DPR/bloom; se il browser segnala batteria non in carica passa direttamente allo stage piu leggero.
+- Aggiunto `client/utils/performanceProfile.js`: la qualità è solo manuale (`high`/`low`) tramite selettore in lobby; default sempre `high`. Il cambio qualità salva `localStorage['littlewar:quality']` e ricarica la pagina prima dell'ingresso in partita, così mondo e asset nascono già col profilo scelto.
+- Rimossa la modalità auto: il client non scala più DPR/bloom per frame lenti e non passa più a low in base alla batteria.
 - Cielo e pianeta hanno `setQualityStage()`: stage alto disattiva bloom, atmosfera, nebulosa/stelle/nuvole costose e ferma l'animazione delle onde.
 - Le PointLight minuscole di luci alari, beacon e muzzle flash sono disabilitate salvo `quality=high`; restano i puntini additivi visivi.
-- I GLB decorativi del terreno (alberi/case/ospedali) sono caricati e usati solo con `quality=high`; in `auto/low` il terreno usa proxy procedurali fusi per abbattere triangoli e draw call. La compressione GLB riduce download/cache ma non il numero di triangoli renderizzati.
+- I GLB decorativi del terreno (alberi/case/ospedali) sono caricati e usati solo con `quality=high`; in `low` il terreno usa proxy procedurali fusi per abbattere triangoli e draw call. La compressione GLB riduce download/cache ma non il numero di triangoli renderizzati.
 
 ## Bug Log
 

@@ -2,27 +2,31 @@ const QUALITY_STORAGE_KEY = 'littlewar:quality';
 
 function normalizeQuality(value) {
   const q = String(value || '').trim().toLowerCase();
-  if (q === 'low' || q === 'battery') return 'low';
+  if (q === 'low') return 'low';
   if (q === 'high') return 'high';
-  return 'auto';
+  return 'high';
 }
 
 export function getRenderQualityPreference() {
-  if (typeof window === 'undefined') return 'auto';
-
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const fromUrl = normalizeQuality(params.get('quality'));
-    if (fromUrl !== 'auto') return fromUrl;
-  } catch (_) {
-    // Ignore unavailable URL APIs.
-  }
+  if (typeof window === 'undefined') return 'high';
 
   try {
     return normalizeQuality(window.localStorage?.getItem(QUALITY_STORAGE_KEY));
   } catch (_) {
-    return 'auto';
+    return 'high';
   }
+}
+
+export function setRenderQualityPreference(quality) {
+  const normalized = normalizeQuality(quality);
+  if (typeof window === 'undefined') return normalized;
+
+  try {
+    window.localStorage?.setItem(QUALITY_STORAGE_KEY, normalized);
+  } catch (_) {
+    // Ignore unavailable localStorage.
+  }
+  return normalized;
 }
 
 export function isLowPowerQuality() {
@@ -32,8 +36,7 @@ export function isLowPowerQuality() {
 export function terrainDensityScale() {
   const quality = getRenderQualityPreference();
   if (quality === 'high') return 1;
-  if (quality === 'low') return 0.28;
-  return 0.5;
+  return 0.28;
 }
 
 export function useDetailedTerrainModels() {
@@ -42,20 +45,4 @@ export function useDetailedTerrainModels() {
 
 export function allowTinyPointLights() {
   return getRenderQualityPreference() === 'high';
-}
-
-export function watchBatteryLowPower(onLowPower) {
-  if (getRenderQualityPreference() === 'high') return;
-  if (typeof navigator === 'undefined' || typeof navigator.getBattery !== 'function') return;
-
-  navigator.getBattery()
-    .then((battery) => {
-      const update = () => {
-        if (!battery.charging) onLowPower?.();
-      };
-      update();
-      battery.addEventListener?.('chargingchange', update);
-      battery.addEventListener?.('levelchange', update);
-    })
-    .catch(() => {});
 }

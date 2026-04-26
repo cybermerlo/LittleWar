@@ -1,9 +1,15 @@
 import { PLAYER_COLORS } from '../../shared/constants.js';
+import { getRenderQualityPreference, setRenderQualityPreference } from '../utils/performanceProfile.js';
 
 const LAST_NICKNAME_KEY = 'littlewar_last_nickname';
 
 const MODELS = [
   { id: 'spitfire', label: 'Spitfire' },
+];
+
+const QUALITY_OPTIONS = [
+  { id: 'high', label: 'High' },
+  { id: 'low', label: 'Low' },
 ];
 
 export class LobbyScreen {
@@ -12,6 +18,7 @@ export class LobbyScreen {
     this.onPlaySolo = onPlaySolo;
     this.selectedColor = PLAYER_COLORS[0];
     this.selectedModel = MODELS[0].id;
+    this.selectedQuality = getRenderQualityPreference();
     this._isFull = false;
 
     this._lobbyEl   = document.getElementById('lobby');
@@ -22,11 +29,13 @@ export class LobbyScreen {
     this._countEl   = document.getElementById('online-count');
     this._colorEl   = document.getElementById('color-options');
     this._modelEl   = document.getElementById('model-options');
+    this._qualityEl = document.getElementById('quality-options');
 
     this._restoreLastNickname();
 
     this._buildColorPicker();
     this._buildModelPicker();
+    this._buildQualityPicker();
     this._playBtn.addEventListener('click', () => this._handlePlay());
     this._soloBtnEl?.addEventListener('click', () => this._handlePlaySolo());
     const onNicknameMaybeChanged = () => this._updatePlayState();
@@ -149,6 +158,23 @@ export class LobbyScreen {
         this.selectedModel = model.id;
       });
       this._modelEl.appendChild(btn);
+    });
+  }
+
+  _buildQualityPicker() {
+    if (!this._qualityEl) return;
+
+    QUALITY_OPTIONS.forEach((quality) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'quality-btn' + (quality.id === this.selectedQuality ? ' selected' : '');
+      btn.textContent = quality.label;
+      btn.addEventListener('click', () => {
+        if (quality.id === this.selectedQuality) return;
+        setRenderQualityPreference(quality.id);
+        window.location.reload();
+      });
+      this._qualityEl.appendChild(btn);
     });
   }
 

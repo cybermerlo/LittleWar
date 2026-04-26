@@ -347,14 +347,16 @@
       justify-items: center;
     }
 
-    #model-options {
+    #model-options,
+    #quality-options {
       display: flex;
       flex-wrap: wrap;
       justify-content: center;
       gap: 0.6rem;
     }
 
-    .model-btn {
+    .model-btn,
+    .quality-btn {
       border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 35%, transparent);
       background: color-mix(in srgb, var(--lw-surface-container-highest) 85%, transparent);
       color: var(--lw-on-surface);
@@ -367,12 +369,14 @@
       transition: transform 0.12s ease, border-color 0.2s ease, background 0.2s ease;
     }
 
-    .model-btn:hover {
+    .model-btn:hover,
+    .quality-btn:hover {
       border-color: color-mix(in srgb, var(--lw-primary) 60%, transparent);
       transform: translateY(-1px);
     }
 
-    .model-btn.selected {
+    .model-btn.selected,
+    .quality-btn.selected {
       border-color: var(--lw-primary-container);
       background: color-mix(in srgb, var(--lw-primary-container) 25%, var(--lw-surface-container-highest));
       color: #ffffff;
@@ -1713,6 +1717,11 @@
           <div>
             <label class="lw-label">Modello</label>
             <div id="model-options"></div>
+          </div>
+
+          <div>
+            <label class="lw-label">Grafica</label>
+            <div id="quality-options"></div>
           </div>
         </div>
 
