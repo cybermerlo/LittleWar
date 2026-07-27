@@ -31,6 +31,8 @@ import { LobbyScreen } from './ui/LobbyScreen.js';
 import { DeathScreen } from './ui/DeathScreen.js';
 import { moveOnSphere } from './utils/SphereUtils.js';
 import { getRenderQualityPreference, isLowPowerQuality } from './utils/performanceProfile.js';
+import { PerfProbe } from './utils/perfProbe.js';
+import { AdaptiveResolution } from './utils/adaptiveResolution.js';
 import {
   BASE_SPEED, SPEED_REDUCTION_PER_LEVEL, MIN_SPEED,
   BOOST_MAX, BOOST_SPEED_MULT, BOOST_DRAIN_PER_SEC, BOOST_REGEN_PER_SEC,
@@ -64,7 +66,30 @@ const LOW_POWER_DEFAULTS = isLowPowerQuality();
 const RENDER_QUALITY_LABEL = getRenderQualityPreference();
 const DEVICE_DPR = window.devicePixelRatio || 1;
 const BASE_RENDER_DPR = LOW_POWER_DEFAULTS ? 1.0 : Math.min(DEVICE_DPR, IS_TOUCH_DEVICE ? 1.25 : 1.5);
-const BLOOM_SCALE = LOW_POWER_DEFAULTS ? 0.35 : (IS_TOUCH_DEVICE ? 0.4 : (DEVICE_DPR > 1.5 ? 0.45 : 0.55));
+/**
+ * Risoluzione del bloom, come frazione della finestra.
+ *
+ * Misurato con la sonda F9 su Intel Iris Xe a 1920×1080: il bloom costava
+ * 2.7 ms su 18.8 (il 14% del frame), secondo solo alla risoluzione di
+ * rendering — e più di acqua, atmosfera, nuvole e superficie del pianeta
+ * messe insieme. Ma è un effetto di sfocatura: la sua risoluzione non si
+ * vede, si vede solo il suo raggio. Passando da 0.55 a 0.38 l'area da
+ * elaborare si dimezza, e con essa gran parte di quei 2.7 ms.
+ *
+ * ATTENZIONE: passare una `resolution` al costruttore di UnrealBloomPass NON
+ * ha alcun effetto. `EffectComposer.addPass()` e `setPixelRatio()` chiamano
+ * `pass.setSize(larghezza × DPR, …)`, e `UnrealBloomPass.setSize()` ricalcola i
+ * propri render target da quei valori ignorando `this.resolution`. Per anni il
+ * bloom ha quindi girato a metà della risoluzione *di rendering* — 1402 px di
+ * mip invece dei 523 previsti, cioè sette volte l'area — ed è per questo che
+ * la sonda lo misurava al 44% del frame a batteria. L'unico modo per ridurlo
+ * davvero è intercettare `setSize`, come si fa qui sotto.
+ *
+ * Non abbassarlo oltre senza guardare: sotto ~0.3 i punti luce piccoli
+ * iniziano a sfarfallare, perché cadono dentro e fuori dai pixel del
+ * target ridotto mentre l'aereo si muove.
+ */
+const BLOOM_SCALE = LOW_POWER_DEFAULTS ? 0.3 : (IS_TOUCH_DEVICE ? 0.32 : (DEVICE_DPR > 1.5 ? 0.34 : 0.38));
 const BLOOM_INITIAL_STRENGTH = LOW_POWER_DEFAULTS ? 0 : (IS_TOUCH_DEVICE ? 0.12 : 0.22);
 
 const renderer = new THREE.WebGLRenderer({
@@ -98,6 +123,12 @@ const bloomPass = new UnrealBloomPass(
   0.88,
 );
 bloomPass.enabled = !LOW_POWER_DEFAULTS;
+// Deve stare PRIMA di addPass, che chiama subito setSize con la dimensione piena.
+const _bloomSetSize = UnrealBloomPass.prototype.setSize.bind(bloomPass);
+bloomPass.setSize = (width, height) => _bloomSetSize(
+  Math.max(4, Math.round(width * BLOOM_SCALE)),
+  Math.max(4, Math.round(height * BLOOM_SCALE)),
+);
 composer.addPass(bloomPass);
 
 let renderQualityStage = LOW_POWER_DEFAULTS ? 2 : 0;
@@ -106,8 +137,8 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  // setSize propaga ai pass, e il bloom applica da solo la propria frazione.
   composer.setSize(window.innerWidth, window.innerHeight);
-  bloomPass.resolution.set(window.innerWidth * BLOOM_SCALE, window.innerHeight * BLOOM_SCALE);
 });
 
 // Tasti chat (T, L, P) — delegati al ChatManager
@@ -126,6 +157,7 @@ const sky = createSky(scene, lights, { qualityStage: renderQualityStage });
 const {
   mesh: planetMesh,
   water: waterMesh,
+  atmosphere: atmosphereMesh,
   heightData,
   posAttr,
   update: updatePlanet,
@@ -171,7 +203,120 @@ window.addEventListener('keydown', (e) => {
     _perfVisible = !_perfVisible;
     document.getElementById('perf-overlay').classList.toggle('visible', _perfVisible);
   }
+  // F9 e non P: T, L e P sono già presi dalla chat.
+  if (e.code === 'F9' && !e.repeat) {
+    e.preventDefault();
+    startPerfProbe();
+  }
 });
+
+// ── Sonda prestazioni (F9) ────────────────────────────────────────────────────
+// Il costo per-pixel non si può indovinare da lontano: dipende da GPU,
+// risoluzione e fattore di scala del sistema. La sonda spegne un effetto alla
+// volta e misura, così si interviene su ciò che pesa davvero.
+
+const _setRenderScale = (scale) => {
+  renderer.setPixelRatio(scale);
+  composer.setPixelRatio(scale);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+};
+
+/** Nasconde un Object3D ripristinandone poi la visibilità originale. */
+function hideScenario(label, getObject) {
+  let previous = null;
+  return {
+    label,
+    off() {
+      const o = getObject();
+      previous = o ? o.visible : null;
+      if (o) o.visible = false;
+    },
+    on() {
+      const o = getObject();
+      if (o && previous !== null) o.visible = previous;
+      previous = null;
+    },
+  };
+}
+
+/**
+ * Regolazione automatica della risoluzione: sulla stessa macchina il tempo di
+ * frame raddoppia passando a batteria (18.8 -> 37.6 ms, misurato con F9), e il
+ * caricabatterie si stacca a metà partita, quando un selettore in lobby non
+ * serve più. Tocca solo la nitidezza, mai elementi visibili: vedi il modulo.
+ */
+const adaptiveResolution = new AdaptiveResolution({
+  baseDpr: BASE_RENDER_DPR,
+  apply: (dpr) => _setRenderScale(dpr),
+});
+
+const perfProbe = new PerfProbe([
+  {
+    label: 'bloom (post-processing)',
+    off() { bloomPass.enabled = false; },
+    on()  { bloomPass.enabled = !LOW_POWER_DEFAULTS; },
+  },
+  {
+    label: `risoluzione a 1x (ora ${BASE_RENDER_DPR}x)`,
+    off() { _setRenderScale(1); },
+    on()  { _setRenderScale(BASE_RENDER_DPR); },
+  },
+  hideScenario('acqua', () => waterMesh),
+  hideScenario('atmosfera', () => atmosphereMesh),
+  hideScenario('nebulosa', () => sky.nebula),
+  hideScenario('stelle', () => sky.stars),
+  hideScenario('nuvole', () => sky.cloudRoot),
+  hideScenario('cielo (sfondo)', () => sky.sky),
+  hideScenario('alberi e case', () => terrainGroup),
+  hideScenario('superficie del pianeta', () => planetMesh),
+  {
+    // Cambiare il numero di luci fa ricompilare gli shader: la pausa cade nei
+    // frame di riscaldamento, non nel campione.
+    label: 'luci puntiformi del pool',
+    off() { for (const s of lightPool.slots) s.light.visible = false; },
+    on()  { for (const s of lightPool.slots) s.light.visible = true; },
+  },
+], {
+  // Il ciclo giorno/notte dura ~2:45 e la sonda decine di secondi: senza
+  // congelarlo si confronterebbero scene diverse (la nebulosa a mezzogiorno
+  // non costa nulla, l'acqua a notte fonda costa il doppio).
+  freeze(frozen) { _skyFrozen = frozen; },
+  context() {
+    const r = renderer.info.render;
+    const px = Math.round(window.innerWidth * adaptiveResolution.dpr) *
+               Math.round(window.innerHeight * adaptiveResolution.dpr);
+    return [
+      `finestra ${window.innerWidth}×${window.innerHeight} × DPR ${adaptiveResolution.dpr.toFixed(2)}` +
+        ` = ${(px / 1e6).toFixed(1)} Mpixel`,
+      `qualita ${RENDER_QUALITY_LABEL} · ${(r.triangles / 1000).toFixed(0)}k triangoli` +
+        ` · ${r.calls} draw call · ${allPlayerStates.length} giocatori`,
+    ];
+  },
+});
+
+/** True mentre la sonda misura: il cielo non avanza. */
+let _skyFrozen = false;
+
+function startPerfProbe() {
+  if (perfProbe.running || !inGame) return;
+  // La sonda cambia la risoluzione da sé: le due regolazioni si darebbero
+  // battaglia e il referto sarebbe senza senso.
+  adaptiveResolution.setEnabled(false);
+  const el = document.getElementById('perf-content');
+  document.getElementById('perf-overlay')?.classList.add('visible');
+  _perfVisible = false; // la sonda scrive nell'overlay al posto delle statistiche
+  if (el) el.textContent = 'Misurazione in corso — non toccare i comandi…';
+  perfProbe.start((report) => {
+    if (el) el.textContent = report;
+    _perfVisible = false;
+    _setRenderScale(adaptiveResolution.dpr);
+    adaptiveResolution.setEnabled(true);
+  });
+}
+/** Riferimento al terreno statico, usato dalla sonda prestazioni. */
+let terrainGroup = null;
+
 // Pool degli effetti: devono stare nella scena PRIMA della pre-compilazione,
 // altrimenti il loro shader viene compilato alla prima esplosione — cioè
 // esattamente nel momento più concitato della partita.
@@ -186,7 +331,7 @@ const worldReady = Promise.all([
   preloadTurretBuildingModels(),
   preloadAirplaneModels(),
 ]).then(([treeTemplates, buildingTemplates, hospitalTemplates]) => {
-  createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates, buildingTemplates, hospitalTemplates);
+  terrainGroup = createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates, buildingTemplates, hospitalTemplates);
 });
 
 /**
@@ -809,6 +954,8 @@ function animate() {
   // ── Perf overlay ────────────────────────────────────────────────────────────
   _perfFrameCount++;
   _perfFrameMs = delta * 1000;
+  perfProbe.tick(_perfFrameMs);
+  if (inGame) adaptiveResolution.tick(_perfFrameMs);
   if (now - _perfLastFpsTime >= 500) {
     _perfFps = Math.round(_perfFrameCount * 1000 / (now - _perfLastFpsTime));
     _perfGsRate = _perfGsCount * 1000 / (now - _perfLastGsTime);
@@ -817,12 +964,16 @@ function animate() {
     _perfLastFpsTime = now;
     _perfLastGsTime = now;
   }
+  if (perfProbe.running) {
+    const el = document.getElementById('perf-content');
+    if (el && el.textContent !== perfProbe.progress) el.textContent = perfProbe.progress;
+  }
   if (_perfVisible && now - _perfLastPingTime > 2000) {
     _perfLastPingTime = now;
     net.measurePing(ms => { _perfPingMs = ms; });
   }
 
-  sky.update(delta);
+  sky.update(_skyFrozen ? 0 : delta);
   updatePlanet(delta, camera.position);
   if (_dbgVisible) _dbgMat.uniforms.uCam.value.copy(camera.position);
   const nightFactor = typeof sky.getNightFactor === 'function' ? sky.getNightFactor() : 0;
@@ -1025,6 +1176,7 @@ function animate() {
       `FPS        ${coli(_perfFps,  50, 30, String(_perfFps).padStart(6))}`,
       `Frame      ${col(_perfFrameMs, 20, 33, _perfFrameMs.toFixed(1).padStart(5)+' ms')}`,
       `Qualita    ${RENDER_QUALITY_LABEL}`,
+      `Risoluzione ${adaptiveResolution.label.padStart(9)}`,
       `Draw calls ${col(ri.calls, 300, 600, String(ri.calls).padStart(6))}`,
       `Triangoli  ${col(ri.triangles/1000, 200, 500, (ri.triangles/1000).toFixed(1).padStart(5)+' k')}`,
       heapMB >= 0 ? `Heap JS    ${col(heapMB, 200, 400, heapMB.toFixed(1).padStart(4)+' MB')}` : '',

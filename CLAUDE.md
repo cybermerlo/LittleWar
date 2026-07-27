@@ -291,6 +291,108 @@ solo un mondo diverso da quello previsto. Ora è in `public/draco/` (750 KB,
 messo in cache dal browser). Aggiornando `three`, ricopiare i file — le
 istruzioni sono in `client/utils/createGLTFLoader.js`.
 
+## Sonda prestazioni (tasto F9)
+
+Il costo per-pixel non si indovina: dipende da GPU, risoluzione e fattore di
+scala del sistema operativo. `client/utils/perfProbe.js` spegne un effetto alla
+volta durante la partita, misura il tempo di frame e stampa una classifica di
+quanto si guadagnerebbe a rinunciarci. Si avvia con **F9** (non P: T, L e P
+sono della chat) e dura una ventina di secondi.
+
+Tre accorgimenti che sembrano dettagli e non lo sono, tutti nati da una prima
+versione che dava risultati assurdi con effetti *più lenti da spenti*:
+
+- **Ogni scenario è racchiuso fra due riferimenti** e confrontato con la loro
+  media. Misurando il riferimento una volta sola all'inizio, tutta la deriva
+  accumulata in decine di secondi (throttling, altre finestre) finiva
+  attribuita all'ultimo effetto misurato.
+- **Il ciclo giorno/notte viene congelato** durante la sonda: dura 2:45 minuti,
+  meno della sonda stessa. Senza congelarlo si confrontano scene diverse — la
+  nebulosa misurata a mezzogiorno non costa nulla, l'acqua misurata a notte
+  fonda costa il doppio.
+- **Il rumore si misura come differenza seconda** del riferimento, non come
+  scarto max−min: una GPU che scala la frequenza mentre si scalda fa esplodere
+  lo scarto pur restando perfettamente correggibile, e avvisare lì porterebbe
+  solo a diffidare di dati buoni.
+
+Se il riferimento sobbalza oltre il 12% del suo valore, la sonda lo dichiara
+nel referto: sotto quella soglia i risparmi piccoli non sono attendibili.
+
+### Cosa NON era il collo di bottiglia
+
+Misurato su un Intel Iris Xe (i5-1135G7), a 1920×1080:
+
+| | prima | dopo la decimazione |
+|---|---|---|
+| triangoli | 489.6k | 170.0k |
+| FPS | 21 | 19 |
+
+Ridurre i triangoli del 65% non ha spostato il tempo di frame di un
+millisecondo. **Su questa scena la geometria non è il collo di bottiglia**: lo
+è il fill rate, cioè quanti pixel si attraversano e con quali shader. La
+decimazione resta utile (serve col multiplayer pieno e sulle macchine deboli)
+ma va cercato altrove il guadagno grosso: risoluzione di rendering, bloom,
+overdraw di acqua e atmosfera, numero di luci per frammento.
+
+## Risoluzione adattiva e la trappola del bloom (2026-07-27)
+
+### A batteria la GPU dimezza
+
+Misurato con la sonda F9 su Intel Iris Xe (i5-1135G7), stessa scena:
+
+| | a corrente | a batteria |
+|---|---|---|
+| riferimento | 18.8 ms (53 FPS) | 37.6 ms (27 FPS) |
+| bloom | −2.7 ms (14%) | **−17.5 ms (44%)** |
+| risoluzione a 1× | −3.0 ms (15%) | **−12.7 ms (32%)** |
+| tutto il resto | ≤1.5 ms | ≤3.3 ms (sotto il rumore) |
+
+Acqua, atmosfera, nuvole, nebulosa, stelle e superficie del pianeta non
+contano nulla in nessuno dei due casi. Il ciclo giorno/notte non c'entra:
+anche misurando con la nebulosa spenta il quadro non cambia.
+
+### `BLOOM_SCALE` non aveva alcun effetto
+
+`UnrealBloomPass.setSize()` **ignora `this.resolution`** e ricava i propri
+render target dalla dimensione che gli passa il composer — e sia
+`EffectComposer.addPass()` sia `setPixelRatio()` gliela passano piena, moltiplicata
+per il DPR. La `resolution` data al costruttore veniva quindi sovrascritta
+subito: il bloom girava con mip di 1402 px invece dei 523 previsti, **sette
+volte l'area**, ed è per questo che pesava il 44% del frame a batteria.
+
+L'unico modo di ridurlo davvero è intercettare `setSize` sull'istanza, come si
+fa ora in `main.js`. Se un giorno si aggiunge un altro pass con una propria
+risoluzione, verificare che non caschi nella stessa trappola.
+
+### Scala automatica della risoluzione
+
+`client/utils/adaptiveResolution.js`. Il caricabatterie si stacca a metà
+partita, quando un selettore in lobby non serve più: serve una regolazione
+continua.
+
+Tocca **solo la risoluzione**, mai elementi visibili. Una modalità automatica
+era già esistita ed era stata rimossa: il difetto di quelle regolazioni è il
+"pop" di oggetti che appaiono e spariscono mentre giochi, molto più fastidioso
+di qualche frame in meno. Un cambio di risoluzione non fa apparire né sparire
+nulla.
+
+Tre difese contro le oscillazioni, tutte necessarie:
+- **zona morta larga** fra discesa (>21 ms) e risalita (<12.5 ms);
+- **periodo di quiete** di 90 frame dopo ogni cambio;
+- **blocco per livello**: dopo due discese dallo stesso gradino, quel gradino
+  è dichiarato irraggiungibile.
+
+Si misura la **mediana** della finestra, non la media: un picco isolato (una
+raccolta della memoria, una compilazione) non deve degradare tutta la partita.
+
+Verificato a secco su quattro scenari, incluso il caso critico di una macchina
+esattamente al limite (22 ms a piena risoluzione, che scenderebbe e risalirebbe
+per sempre): scende di un gradino solo e si ferma. La macchina veloce non
+subisce alcun cambio in 6000 frame.
+
+La risoluzione effettiva è mostrata nell'overlay F9/H: un calo di nitidezza
+senza spiegazione visibile sarebbe peggio del calo stesso.
+
 ## Bug Log
 
 ### Powerup non raccoglibili in multiplayer (intermittente)
