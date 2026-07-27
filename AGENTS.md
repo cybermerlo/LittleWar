@@ -269,6 +269,57 @@ base` deve restare ~0: se non lo è, il problema non è il terreno ma il modello
 rotazione applicata — attenzione che una terna **mancina** passata a `Matrix4.makeBasis` è una
 riflessione, e `Quaternion.setFromRotationMatrix` ne ricava un quaternione privo di senso.
 
+## Peso dei modelli (2026-07-27)
+
+I GLB avevano un aspetto low-poly ma non lo erano: una casa costava **7.765
+triangoli** e un ospedale **16.996**, per oggetti alti 2–4 unità su un pianeta
+di raggio 50, guardati quasi sempre dall'alto e da lontano. Con 80 case e 12
+ospedali il solo terreno faceva **562k triangoli per frame** — l'89% della
+scena — e siccome viene fuso in poche mesh che coprono tutto il pianeta non
+viene mai scartato dal frustum culling.
+
+`tools/decimate-models.mjs` li decima con meshoptimizer (via gltf-transform):
+
+```bash
+npm i --no-save @gltf-transform/core @gltf-transform/extensions \
+                @gltf-transform/functions meshoptimizer draco3dgltf
+node tools/decimate-models.mjs
+```
+
+| modello | prima | dopo |
+|---|---|---|
+| `hospital.glb` | 16.996 | 2.208 |
+| `torretta_cesare.glb` | 13.348 | 3.751 |
+| `building-house.glb` | 7.765 | 1.604 |
+| `pre_torretta.glb` | 5.071 | 1.262 |
+| **terreno in scena** | **562k** | **151k** |
+| **totale disegnato** | **573k** | **163k** |
+
+Gli originali stanno in `public/models/original/`: lo script riparte sempre da
+lì, quindi si può ritarare un rapporto e rilanciare senza degradare due volte.
+I rapporti sono nella costante `TARGETS` in cima al file.
+
+**Cosa non è stato decimato e perché.** `spitfire.glb` ha 1.91 vertici per
+triangolo, cioè vertici spezzati da normali/UV per faccia: meshopt non collassa
+spigoli di bordo e in una mesh così ogni spigolo è di bordo, quindi si ferma al
+4% di riduzione. Servirebbe togliere le normali, saldare per sola posizione,
+semplificare e rigenerarle — ma è l'aereo del giocatore, sempre al centro dello
+schermo. Alberi e powerup sono già leggeri (56–694 triangoli).
+
+Dopo ogni decimazione **verificare i nomi**: il codice cerca il nodo
+`Turret_Pivot` e i materiali `Gesso (5)` / `Gesso (7)` in `torretta_cesare`, e
+il materiale `blue` nello spitfire. Lo script segnala ciò che sparisce.
+(Nota: l'animazione dell'elica si chiama `helice`, non `PropellerAction` come
+cerca `Airplane.js` — funziona solo grazie al fallback su `animations[0]`.)
+
+### Decoder Draco servito in locale
+
+Stava su jsDelivr. Se la CDN è lenta o irraggiungibile **tutti** i GLB compressi
+falliscono in silenzio e il gioco ricade sui proxy procedurali: nessun errore,
+solo un mondo diverso da quello previsto. Ora è in `public/draco/` (750 KB,
+messo in cache dal browser). Aggiornando `three`, ricopiare i file — le
+istruzioni sono in `client/utils/createGLTFLoader.js`.
+
 ## Bug Log
 
 ### Powerup non raccoglibili in multiplayer (intermittente)
