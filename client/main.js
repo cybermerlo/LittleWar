@@ -32,6 +32,7 @@ import { DeathScreen } from './ui/DeathScreen.js';
 import { moveOnSphere } from './utils/SphereUtils.js';
 import { getRenderQualityPreference, isLowPowerQuality } from './utils/performanceProfile.js';
 import { PerfProbe } from './utils/perfProbe.js';
+import { AdaptiveResolution } from './utils/adaptiveResolution.js';
 import {
   BASE_SPEED, SPEED_REDUCTION_PER_LEVEL, MIN_SPEED,
   BOOST_MAX, BOOST_SPEED_MULT, BOOST_DRAIN_PER_SEC, BOOST_REGEN_PER_SEC,
@@ -75,6 +76,15 @@ const BASE_RENDER_DPR = LOW_POWER_DEFAULTS ? 1.0 : Math.min(DEVICE_DPR, IS_TOUCH
  * vede, si vede solo il suo raggio. Passando da 0.55 a 0.38 l'area da
  * elaborare si dimezza, e con essa gran parte di quei 2.7 ms.
  *
+ * ATTENZIONE: passare una `resolution` al costruttore di UnrealBloomPass NON
+ * ha alcun effetto. `EffectComposer.addPass()` e `setPixelRatio()` chiamano
+ * `pass.setSize(larghezza × DPR, …)`, e `UnrealBloomPass.setSize()` ricalcola i
+ * propri render target da quei valori ignorando `this.resolution`. Per anni il
+ * bloom ha quindi girato a metà della risoluzione *di rendering* — 1402 px di
+ * mip invece dei 523 previsti, cioè sette volte l'area — ed è per questo che
+ * la sonda lo misurava al 44% del frame a batteria. L'unico modo per ridurlo
+ * davvero è intercettare `setSize`, come si fa qui sotto.
+ *
  * Non abbassarlo oltre senza guardare: sotto ~0.3 i punti luce piccoli
  * iniziano a sfarfallare, perché cadono dentro e fuori dai pixel del
  * target ridotto mentre l'aereo si muove.
@@ -113,6 +123,12 @@ const bloomPass = new UnrealBloomPass(
   0.88,
 );
 bloomPass.enabled = !LOW_POWER_DEFAULTS;
+// Deve stare PRIMA di addPass, che chiama subito setSize con la dimensione piena.
+const _bloomSetSize = UnrealBloomPass.prototype.setSize.bind(bloomPass);
+bloomPass.setSize = (width, height) => _bloomSetSize(
+  Math.max(4, Math.round(width * BLOOM_SCALE)),
+  Math.max(4, Math.round(height * BLOOM_SCALE)),
+);
 composer.addPass(bloomPass);
 
 let renderQualityStage = LOW_POWER_DEFAULTS ? 2 : 0;
@@ -121,8 +137,8 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  // setSize propaga ai pass, e il bloom applica da solo la propria frazione.
   composer.setSize(window.innerWidth, window.innerHeight);
-  bloomPass.resolution.set(window.innerWidth * BLOOM_SCALE, window.innerHeight * BLOOM_SCALE);
 });
 
 // Tasti chat (T, L, P) — delegati al ChatManager
@@ -224,6 +240,17 @@ function hideScenario(label, getObject) {
   };
 }
 
+/**
+ * Regolazione automatica della risoluzione: sulla stessa macchina il tempo di
+ * frame raddoppia passando a batteria (18.8 -> 37.6 ms, misurato con F9), e il
+ * caricabatterie si stacca a metà partita, quando un selettore in lobby non
+ * serve più. Tocca solo la nitidezza, mai elementi visibili: vedi il modulo.
+ */
+const adaptiveResolution = new AdaptiveResolution({
+  baseDpr: BASE_RENDER_DPR,
+  apply: (dpr) => _setRenderScale(dpr),
+});
+
 const perfProbe = new PerfProbe([
   {
     label: 'bloom (post-processing)',
@@ -257,10 +284,10 @@ const perfProbe = new PerfProbe([
   freeze(frozen) { _skyFrozen = frozen; },
   context() {
     const r = renderer.info.render;
-    const px = Math.round(window.innerWidth * BASE_RENDER_DPR) *
-               Math.round(window.innerHeight * BASE_RENDER_DPR);
+    const px = Math.round(window.innerWidth * adaptiveResolution.dpr) *
+               Math.round(window.innerHeight * adaptiveResolution.dpr);
     return [
-      `finestra ${window.innerWidth}×${window.innerHeight} × DPR ${BASE_RENDER_DPR.toFixed(2)}` +
+      `finestra ${window.innerWidth}×${window.innerHeight} × DPR ${adaptiveResolution.dpr.toFixed(2)}` +
         ` = ${(px / 1e6).toFixed(1)} Mpixel`,
       `qualita ${RENDER_QUALITY_LABEL} · ${(r.triangles / 1000).toFixed(0)}k triangoli` +
         ` · ${r.calls} draw call · ${allPlayerStates.length} giocatori`,
@@ -273,6 +300,9 @@ let _skyFrozen = false;
 
 function startPerfProbe() {
   if (perfProbe.running || !inGame) return;
+  // La sonda cambia la risoluzione da sé: le due regolazioni si darebbero
+  // battaglia e il referto sarebbe senza senso.
+  adaptiveResolution.setEnabled(false);
   const el = document.getElementById('perf-content');
   document.getElementById('perf-overlay')?.classList.add('visible');
   _perfVisible = false; // la sonda scrive nell'overlay al posto delle statistiche
@@ -280,6 +310,8 @@ function startPerfProbe() {
   perfProbe.start((report) => {
     if (el) el.textContent = report;
     _perfVisible = false;
+    _setRenderScale(adaptiveResolution.dpr);
+    adaptiveResolution.setEnabled(true);
   });
 }
 /** Riferimento al terreno statico, usato dalla sonda prestazioni. */
@@ -923,6 +955,7 @@ function animate() {
   _perfFrameCount++;
   _perfFrameMs = delta * 1000;
   perfProbe.tick(_perfFrameMs);
+  if (inGame) adaptiveResolution.tick(_perfFrameMs);
   if (now - _perfLastFpsTime >= 500) {
     _perfFps = Math.round(_perfFrameCount * 1000 / (now - _perfLastFpsTime));
     _perfGsRate = _perfGsCount * 1000 / (now - _perfLastGsTime);
@@ -1143,6 +1176,7 @@ function animate() {
       `FPS        ${coli(_perfFps,  50, 30, String(_perfFps).padStart(6))}`,
       `Frame      ${col(_perfFrameMs, 20, 33, _perfFrameMs.toFixed(1).padStart(5)+' ms')}`,
       `Qualita    ${RENDER_QUALITY_LABEL}`,
+      `Risoluzione ${adaptiveResolution.label.padStart(9)}`,
       `Draw calls ${col(ri.calls, 300, 600, String(ri.calls).padStart(6))}`,
       `Triangoli  ${col(ri.triangles/1000, 200, 500, (ri.triangles/1000).toFixed(1).padStart(5)+' k')}`,
       heapMB >= 0 ? `Heap JS    ${col(heapMB, 200, 400, heapMB.toFixed(1).padStart(4)+' MB')}` : '',
