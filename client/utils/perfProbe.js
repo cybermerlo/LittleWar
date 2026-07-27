@@ -7,19 +7,25 @@
  * quanto si guadagnerebbe a rinunciarci — così si interviene su ciò che pesa
  * davvero invece che su ciò che sembra pesare.
  *
- * Due accorgimenti che sembrano dettagli e non lo sono:
+ * Tre accorgimenti che sembrano dettagli e non lo sono. Nascono tutti da una
+ * prima versione che dava risultati assurdi, con effetti che risultavano *più
+ * lenti da spenti*:
  *
- * 1. **Il riferimento viene rimisurato prima di ogni scenario.** Una prima
- *    versione misurava il riferimento una volta sola all'inizio e confrontava
- *    tutto con quello: siccome l'intera sonda dura decine di secondi, qualsiasi
- *    deriva (throttling termico, altre finestre, il ciclo giorno/notte)
- *    finiva attribuita all'ultimo effetto misurato — alcuni risultavano
- *    addirittura "più lenti che accesi". Confrontando ogni scenario con il
- *    riferimento appena precedente la deriva lenta si annulla.
+ * 1. **Ogni scenario è racchiuso fra due riferimenti** e confrontato con la
+ *    loro media. Misurare il riferimento una volta sola all'inizio significa
+ *    attribuire all'ultimo effetto misurato tutta la deriva accumulata in
+ *    decine di secondi (throttling termico, altre finestre, ciclo giorno e
+ *    notte). Con la media dei due riferimenti che lo racchiudono si annulla
+ *    anche la deriva lineare, non solo quella lenta.
  *
  * 2. **Il ciclo giorno/notte va congelato** (`freeze`), altrimenti la nebulosa
  *    misurata a mezzogiorno non costa nulla e l'acqua misurata a notte fonda
  *    costa il doppio: si confronterebbero scene diverse.
+ *
+ * 3. **Il rumore si misura con la differenza seconda**, non con lo scarto
+ *    max−min. Una GPU che scala la frequenza mentre si scalda fa esplodere lo
+ *    scarto pur restando perfettamente correggibile: avvisare lì è un falso
+ *    allarme che porta a diffidare di dati buoni.
  *
  * Si avvia con il tasto F9 in partita.
  */
@@ -57,14 +63,18 @@ export class PerfProbe {
     this.running = true;
     this._onFinish = onFinish ?? null;
     this._results = [];
+    this._bases = [];
     this.hooks.freeze?.(true);
 
-    // Alterna riferimento e scenario: [rif, A, rif, B, rif, C, …]
+    // Alterna riferimento e scenario e chiude con un riferimento:
+    // [rif, A, rif, B, rif, C, rif]. La misura finale serve perché anche
+    // l'ultimo scenario sia racchiuso fra due riferimenti come tutti gli altri.
     this._steps = [];
     for (const s of this.scenarios) {
       this._steps.push({ kind: 'base' });
       this._steps.push({ kind: 'test', scenario: s });
     }
+    this._steps.push({ kind: 'base' });
     this._stepIndex = 0;
     this._enterStep();
   }
@@ -83,10 +93,11 @@ export class PerfProbe {
     const ms = median(this._samples);
     if (step.kind === 'test') {
       step.scenario.on();
-      this._results.push({ label: step.scenario.label, ms, base: this._lastBase });
+      // Il riferimento a cui confrontarsi è quello *appena prima*; in fase di
+      // referto si userà la media con quello subito dopo, che a quel punto è
+      // già stato misurato (vedi _format).
+      this._results.push({ label: step.scenario.label, ms, baseIndex: this._bases.length - 1 });
     } else {
-      this._lastBase = ms;
-      this._bases = this._bases ?? [];
       this._bases.push(ms);
     }
   }
@@ -114,12 +125,36 @@ export class PerfProbe {
   }
 
   _format() {
-    const bases = this._bases ?? [];
+    const bases = this._bases;
     const baseMedian = median(bases);
-    const spread = bases.length ? Math.max(...bases) - Math.min(...bases) : 0;
 
+    /**
+     * Rumore residuo del riferimento, come differenza seconda mediana.
+     *
+     * Non si usa lo scarto max−min: una deriva *regolare* (la GPU che scala la
+     * frequenza mentre si scalda) lo fa esplodere, ma è proprio ciò che la
+     * media fra i due riferimenti che racchiudono ogni scenario già corregge —
+     * segnalarla sarebbe un falso allarme che porta a diffidare di dati buoni.
+     * La differenza seconda vale zero su qualunque andamento lineare e cresce
+     * solo quando il riferimento sobbalza in modo imprevedibile: è quello che
+     * rende inattendibile un singolo confronto.
+     */
+    const secondDiffs = [];
+    for (let i = 0; i + 2 < bases.length; i++) {
+      secondDiffs.push(Math.abs(bases[i + 2] - 2 * bases[i + 1] + bases[i]));
+    }
+    const noise = median(secondDiffs);
+
+    // Ogni scenario è misurato fra due riferimenti: la loro media cancella
+    // anche la deriva *lineare* dentro la singola coppia, non solo quella
+    // lenta sull'intera sonda. I dati c'erano già, bastava usarli.
     const rows = this._results
-      .map(r => ({ ...r, saved: r.base - r.ms }))
+      .map(r => {
+        const before = bases[r.baseIndex] ?? baseMedian;
+        const after = bases[r.baseIndex + 1] ?? before;
+        const base = (before + after) * 0.5;
+        return { ...r, base, saved: base - r.ms };
+      })
       .sort((a, b) => b.saved - a.saved);
 
     const L = [];
@@ -140,11 +175,11 @@ export class PerfProbe {
       );
     }
     L.push('');
-    // Se il riferimento stesso oscilla molto, i singoli risparmi valgono poco.
-    if (baseMedian > 0 && spread > baseMedian * 0.15) {
-      L.push(`ATTENZIONE: il riferimento oscilla di ${spread.toFixed(1)} ms tra una`);
-      L.push('misura e l\'altra. Chiudi le altre applicazioni e ripeti: sotto');
-      L.push('questa soglia di rumore i risparmi piccoli non sono attendibili.');
+    // Se il riferimento sobbalza, i singoli risparmi valgono poco.
+    if (baseMedian > 0 && noise > baseMedian * 0.12) {
+      L.push(`ATTENZIONE: il riferimento è instabile (rumore ~${noise.toFixed(1)} ms).`);
+      L.push('Chiudi le altre applicazioni e ripeti: sotto questa soglia i');
+      L.push('risparmi piccoli non sono attendibili.');
     } else {
       L.push('Gli effetti non si sommano linearmente, ma la classifica dice');
       L.push('da dove conviene cominciare.');

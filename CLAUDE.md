@@ -299,22 +299,24 @@ volta durante la partita, misura il tempo di frame e stampa una classifica di
 quanto si guadagnerebbe a rinunciarci. Si avvia con **F9** (non P: T, L e P
 sono della chat) e dura una ventina di secondi.
 
-Due accorgimenti che sembrano dettagli e non lo sono — entrambi nati da una
-prima versione che dava risultati assurdi, con effetti che risultavano *più
-lenti da spenti*:
+Tre accorgimenti che sembrano dettagli e non lo sono, tutti nati da una prima
+versione che dava risultati assurdi con effetti *più lenti da spenti*:
 
-- **Il riferimento viene rimisurato prima di ogni scenario.** Misurandolo una
-  volta sola all'inizio, qualsiasi deriva lenta (throttling termico, altre
-  finestre, il ciclo giorno/notte) finiva attribuita all'ultimo effetto
-  misurato.
+- **Ogni scenario è racchiuso fra due riferimenti** e confrontato con la loro
+  media. Misurando il riferimento una volta sola all'inizio, tutta la deriva
+  accumulata in decine di secondi (throttling, altre finestre) finiva
+  attribuita all'ultimo effetto misurato.
 - **Il ciclo giorno/notte viene congelato** durante la sonda: dura 2:45 minuti,
   meno della sonda stessa. Senza congelarlo si confrontano scene diverse — la
   nebulosa misurata a mezzogiorno non costa nulla, l'acqua misurata a notte
   fonda costa il doppio.
+- **Il rumore si misura come differenza seconda** del riferimento, non come
+  scarto max−min: una GPU che scala la frequenza mentre si scalda fa esplodere
+  lo scarto pur restando perfettamente correggibile, e avvisare lì porterebbe
+  solo a diffidare di dati buoni.
 
-Se il riferimento oscilla di oltre il 15% tra una misura e l'altra, la sonda
-lo dichiara nel referto: sotto quella soglia di rumore i risparmi piccoli non
-sono attendibili.
+Se il riferimento sobbalza oltre il 12% del suo valore, la sonda lo dichiara
+nel referto: sotto quella soglia i risparmi piccoli non sono attendibili.
 
 ### Cosa NON era il collo di bottiglia
 
