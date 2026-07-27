@@ -46,9 +46,11 @@ export class PerfProbe {
   /**
    * @param {Array<{label: string, off: () => void, on: () => void}>} scenarios
    *        Ogni voce spegne (`off`) e riaccende (`on`) un singolo effetto.
-   * @param {{freeze?: (frozen: boolean) => void}} [hooks]
+   * @param {{freeze?: (frozen: boolean) => void, context?: () => string[]}} [hooks]
    *        `freeze` mette in pausa le animazioni che cambierebbero la scena
-   *        durante la misura (ciclo giorno/notte).
+   *        durante la misura (ciclo giorno/notte); `context` descrive le
+   *        condizioni in cui la misura è avvenuta, così due referti presi in
+   *        momenti diversi si possono confrontare.
    */
   constructor(scenarios, hooks = {}) {
     this.scenarios = scenarios;
@@ -160,6 +162,9 @@ export class PerfProbe {
     const L = [];
     L.push('── Costo di rendering su questa macchina ──');
     L.push(`riferimento ${baseMedian.toFixed(1)} ms/frame (${(1000 / baseMedian).toFixed(0)} FPS)`);
+    // Senza queste righe due referti non sono confrontabili: la stessa scena
+    // in una finestra più piccola, o con meno oggetti in vista, costa tutt'altro.
+    for (const line of this.hooks.context?.() ?? []) L.push(line);
     L.push('');
     L.push('spegnendo…'.padEnd(30) + 'ms'.padStart(7) + 'risparmio'.padStart(11) + '%'.padStart(7) + '  FPS');
     L.push('─'.repeat(57));

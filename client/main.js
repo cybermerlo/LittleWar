@@ -65,7 +65,21 @@ const LOW_POWER_DEFAULTS = isLowPowerQuality();
 const RENDER_QUALITY_LABEL = getRenderQualityPreference();
 const DEVICE_DPR = window.devicePixelRatio || 1;
 const BASE_RENDER_DPR = LOW_POWER_DEFAULTS ? 1.0 : Math.min(DEVICE_DPR, IS_TOUCH_DEVICE ? 1.25 : 1.5);
-const BLOOM_SCALE = LOW_POWER_DEFAULTS ? 0.35 : (IS_TOUCH_DEVICE ? 0.4 : (DEVICE_DPR > 1.5 ? 0.45 : 0.55));
+/**
+ * Risoluzione del bloom, come frazione della finestra.
+ *
+ * Misurato con la sonda F9 su Intel Iris Xe a 1920×1080: il bloom costava
+ * 2.7 ms su 18.8 (il 14% del frame), secondo solo alla risoluzione di
+ * rendering — e più di acqua, atmosfera, nuvole e superficie del pianeta
+ * messe insieme. Ma è un effetto di sfocatura: la sua risoluzione non si
+ * vede, si vede solo il suo raggio. Passando da 0.55 a 0.38 l'area da
+ * elaborare si dimezza, e con essa gran parte di quei 2.7 ms.
+ *
+ * Non abbassarlo oltre senza guardare: sotto ~0.3 i punti luce piccoli
+ * iniziano a sfarfallare, perché cadono dentro e fuori dai pixel del
+ * target ridotto mentre l'aereo si muove.
+ */
+const BLOOM_SCALE = LOW_POWER_DEFAULTS ? 0.3 : (IS_TOUCH_DEVICE ? 0.32 : (DEVICE_DPR > 1.5 ? 0.34 : 0.38));
 const BLOOM_INITIAL_STRENGTH = LOW_POWER_DEFAULTS ? 0 : (IS_TOUCH_DEVICE ? 0.12 : 0.22);
 
 const renderer = new THREE.WebGLRenderer({
@@ -241,6 +255,17 @@ const perfProbe = new PerfProbe([
   // congelarlo si confronterebbero scene diverse (la nebulosa a mezzogiorno
   // non costa nulla, l'acqua a notte fonda costa il doppio).
   freeze(frozen) { _skyFrozen = frozen; },
+  context() {
+    const r = renderer.info.render;
+    const px = Math.round(window.innerWidth * BASE_RENDER_DPR) *
+               Math.round(window.innerHeight * BASE_RENDER_DPR);
+    return [
+      `finestra ${window.innerWidth}×${window.innerHeight} × DPR ${BASE_RENDER_DPR.toFixed(2)}` +
+        ` = ${(px / 1e6).toFixed(1)} Mpixel`,
+      `qualita ${RENDER_QUALITY_LABEL} · ${(r.triangles / 1000).toFixed(0)}k triangoli` +
+        ` · ${r.calls} draw call · ${allPlayerStates.length} giocatori`,
+    ];
+  },
 });
 
 /** True mentre la sonda misura: il cielo non avanza. */
