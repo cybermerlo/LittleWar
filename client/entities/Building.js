@@ -1,7 +1,13 @@
 import * as THREE from 'three';
 import { createGLTFLoader } from '../utils/createGLTFLoader.js';
-import { allowTinyPointLights } from '../utils/performanceProfile.js';
 import { sphericalToCartesian } from '../utils/SphereUtils.js';
+import {
+  sampleGroundSpherical,
+  makeSurfaceHit,
+  fitGroundPlane,
+  createConformingRingGeometry,
+} from '../scene/planetSurface.js';
+import { lightPool } from '../scene/LightPool.js';
 import { PLANET_RADIUS, FLY_ALTITUDE, BUILDING_CONQUEST_RADIUS } from '../../shared/constants.js';
 
 // ── Modelli e dimensioni ──────────────────────────────────────────────────────
@@ -49,10 +55,24 @@ const BEACON_TURRET_PIVOT_LOCAL = new THREE.Vector3(
 // Stesse dimensioni / caduta della luce delle luci alari (Airplane.js: NAVLIGHT_*).
 const BEACON_BLINK_HZ = 0.55;
 const BEACON_SPHERE_R = 0.045;
-const BEACON_LIGHT_DISTANCE = 0.55;
-const BEACON_LIGHT_DECAY = 2.0;
-const BEACON_LIGHT_INTENSITY = 2.4;
-const USE_TINY_POINT_LIGHTS = allowTinyPointLights();
+
+/**
+ * Impronta approssimata della torretta, usata per adattare il piano di
+ * appoggio al terreno sottostante invece di infilare la base a raggio fisso.
+ */
+const TURRET_FOOTPRINT_HALF = 1.15;
+
+/**
+ * Quanto la torretta segue l'inclinazione del terreno. Una torre segue il
+ * filo a piombo, non il pendio: raddrizziamo quasi del tutto la giacitura
+ * conservando solo un accenno di inclinazione, che basta a far leggere
+ * l'appoggio senza farla sembrare pendente.
+ */
+const TURRET_TILT_FOLLOW = 0.25;
+
+/** Scratch riusabili: il puntamento gira per ogni torretta a ogni game-state. */
+const _aimWorld = new THREE.Vector3();
+const _tintColor = new THREE.Color();
 
 function smooth01(x) {
   return THREE.MathUtils.smoothstep(THREE.MathUtils.clamp(x, 0, 1), 0, 1);
@@ -148,17 +168,28 @@ export class BuildingEntity {
     this.conquestProgress = 0;
     this.turretTargetId = null;
 
-    // ── Gruppo orientato sulla sfera ──
+    // ── Gruppo appoggiato sul terreno renderizzato ──
+    // Prima la torretta veniva piantata a raggio PLANET_RADIUS fisso: su una
+    // collina finiva sepolta fino a MOUNTAIN_HEIGHT (5.2 unità), cioè quasi
+    // per intero. Ora la base segue la superficie che si vede davvero.
     this.group = new THREE.Group();
-    const pos = sphericalToCartesian(theta, phi, PLANET_RADIUS);
-    this.group.position.set(pos.x, pos.y, pos.z);
 
-    const up = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
-    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
-    this.group.quaternion.copy(q);
+    const hit = sampleGroundSpherical(theta, phi, makeSurfaceHit());
+    const radial = hit.point.clone().normalize();
+    const fit = fitGroundPlane(radial, TURRET_FOOTPRINT_HALF, TURRET_FOOTPRINT_HALF, 0);
+
+    // Giacitura: quasi verticale, con un accenno dell'inclinazione del suolo.
+    const up = radial.clone().lerp(fit.normal, TURRET_TILT_FOLLOW).normalize();
+    this.group.position.copy(fit.origin);
+    this.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+
+    this.group.userData.isTurretGroup = true;
+
+    /** Direzione radiale del sito: serve agli anelli conformati. */
+    this._siteDir = radial;
 
     /** Posizione world della base (per trovare il bersaglio più vicino). */
-    this._buildingWorldPos = new THREE.Vector3(pos.x, pos.y, pos.z);
+    this._buildingWorldPos = fit.origin.clone();
 
     // ── Wrapper per i due modelli (neutro / conquistato) ──
     this.neutralWrapper = new THREE.Group();
@@ -209,11 +240,11 @@ export class BuildingEntity {
     this._beaconSphere.renderOrder = 5;
     this._beaconSphere.frustumCulled = false;
 
-    this._beaconLight = USE_TINY_POINT_LIGHTS
-      ? new THREE.PointLight(0xffffff, 0, BEACON_LIGHT_DISTANCE, BEACON_LIGHT_DECAY)
-      : null;
+    // Nessuna PointLight qui: aggiungerla alla conquista cambiava il conteggio
+    // luci della scena e costringeva Three.js a ricompilare tutti gli shader
+    // (vedi scene/LightPool.js). Da lontano il beacon si legge comunque grazie
+    // al puntino additivo e al bloom.
     this._beaconGroup.add(this._beaconSphere);
-    if (this._beaconLight) this._beaconGroup.add(this._beaconLight);
     this.conqueredWrapper.add(this._beaconGroup);
 
     // Attach async (dopo beacon: così _attachCesareModel può riparentare subito)
@@ -245,20 +276,32 @@ export class BuildingEntity {
     this.progressGroup.up.copy(up);
     this.group.add(this.progressGroup);
 
-    // ── Cerchio zona conquista ──
+    // ── Cerchio zona conquista, conformato al terreno ──
+    // Un RingGeometry piatto di raggio ~10 su una sfera di raggio 50 sprofonda
+    // di un'unità sul bordo per la sola curvatura, prima ancora di incontrare
+    // una collina. Qui ogni vertice dell'anello viene campionato sul terreno.
     const localRadius = BUILDING_CONQUEST_RADIUS * PLANET_RADIUS / FLY_ALTITUDE;
-    const ringGeo = new THREE.RingGeometry(localRadius - 0.15, localRadius, 32);
     this.ringMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
       opacity: 0.30,
       side: THREE.DoubleSide,
+      depthWrite: false,
     });
+    const ringGeo = createConformingRingGeometry(
+      this._siteDir,
+      localRadius - 0.35,
+      localRadius,
+      72,
+      0.14,
+    );
+    // La geometria è già in coordinate world: la mesh sta fuori dal gruppo
+    // orientato della torretta.
     const ring = new THREE.Mesh(ringGeo, this.ringMat);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.05;
+    ring.renderOrder = 1;
+    ring.matrixAutoUpdate = false;
     this.ring = ring;
-    this.group.add(ring);
+    scene.add(ring);
 
     /** Scene di appartenenza (serve a spawnMuzzleFlash per aggiungere effetti). */
     this._scene = scene;
@@ -327,11 +370,14 @@ export class BuildingEntity {
    */
   _applyOwnerTint(colorInput) {
     if (!colorInput || this._cesareMats.length === 0) return;
-    const color = new THREE.Color(colorInput);
+    // Il game-state arriva a 40 Hz: ritinta solo se il proprietario è cambiato.
+    if (this._tintedWith === colorInput) return;
+    this._tintedWith = colorInput;
+    _tintColor.set(colorInput);
     for (const entry of this._cesareMats) {
       const name = entry.original && entry.original.name;
       if (name !== 'Gesso (5)' && name !== 'Gesso (7)') continue;
-      if (entry.clone.color) entry.clone.color.copy(color);
+      if (entry.clone.color) entry.clone.color.copy(_tintColor);
     }
   }
 
@@ -406,30 +452,28 @@ export class BuildingEntity {
     if (!isConquered || nightVis <= 0.001) {
       this._beaconGroup.visible = false;
       this._beaconCoreMat.opacity = 0;
-      if (this._beaconLight) this._beaconLight.intensity = 0;
       return;
     }
     this._beaconGroup.visible = true;
     const intensity = nightVis * blinkGate(this._beaconTime);
     this._beaconCoreMat.color.copy(this._beaconColor);
     this._beaconCoreMat.opacity = intensity; // come opacity luci alari
-    if (this._beaconLight) {
-      this._beaconLight.color.copy(this._beaconColor);
-      this._beaconLight.intensity = intensity * BEACON_LIGHT_INTENSITY;
-    }
   }
 
   /** Giocatore vivo più vicino (distanza cartesiana a FLY_ALTITUDE). */
   _findNearestAlive(allPlayerStates) {
     let best = null;
     let bestD = Infinity;
+    const base = this._buildingWorldPos;
     for (const p of allPlayerStates) {
       if (!p || !p.alive) continue;
       if (typeof p.theta !== 'number' || typeof p.phi !== 'number') continue;
-      const tp = sphericalToCartesian(p.theta, p.phi, FLY_ALTITUDE);
-      const dx = tp.x - this._buildingWorldPos.x;
-      const dy = tp.y - this._buildingWorldPos.y;
-      const dz = tp.z - this._buildingWorldPos.z;
+      // Inline: sphericalToCartesian restituirebbe un oggetto nuovo per ogni
+      // giocatore di ogni torretta a 40 Hz — spazzatura pura per il GC.
+      const st = Math.sin(p.theta) * FLY_ALTITUDE;
+      const dx = st * Math.cos(p.phi) - base.x;
+      const dy = Math.cos(p.theta) * FLY_ALTITUDE - base.y;
+      const dz = st * Math.sin(p.phi) - base.z;
       const d2 = dx * dx + dy * dy + dz * dz;
       if (d2 < bestD) { bestD = d2; best = p; }
     }
@@ -439,11 +483,11 @@ export class BuildingEntity {
   _aimTurretAt(targetTheta, targetPhi) {
     if (!this.turretPivot || !this.cesareRoot) return;
 
-    const tp = sphericalToCartesian(targetTheta, targetPhi, FLY_ALTITUDE);
-    const targetWorld = new THREE.Vector3(tp.x, tp.y, tp.z);
+    const st = Math.sin(targetTheta) * FLY_ALTITUDE;
+    _aimWorld.set(st * Math.cos(targetPhi), Math.cos(targetTheta) * FLY_ALTITUDE, st * Math.sin(targetPhi));
 
     // Coord del bersaglio nel frame locale del cesareRoot (pre-scale).
-    const targetLocal = this.cesareRoot.worldToLocal(targetWorld.clone());
+    const targetLocal = this.cesareRoot.worldToLocal(_aimWorld);
 
     const dx = targetLocal.x - TURRET_PIVOT_LOCAL.x;
     const dy = targetLocal.y - TURRET_PIVOT_LOCAL.y;
@@ -475,47 +519,16 @@ export class BuildingEntity {
     if (!this.conqueredWrapper.visible) return;
     const tip = this.getCannonTipWorld();
     if (!tip) return;
-
-    const color = new THREE.Color(this.ownerColor || '#ffdd88');
-    const mat = new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0.95,
-      depthWrite: false,
-    });
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 8), mat);
-    mesh.position.copy(tip);
-    mesh.renderOrder = 4;
-    this._scene.add(mesh);
-
-    const light = USE_TINY_POINT_LIGHTS ? new THREE.PointLight(color, 2.6, 6, 2) : null;
-    if (light) {
-      light.position.copy(tip);
-      this._scene.add(light);
-    }
-
-    const start = performance.now();
-    const duration = 140;
-    const tick = () => {
-      const t = (performance.now() - start) / duration;
-      if (t >= 1) {
-        this._scene.remove(mesh);
-        if (light) this._scene.remove(light);
-        mat.dispose();
-        mesh.geometry.dispose();
-        return;
-      }
-      const s = 1 + t * 2.2;
-      mesh.scale.setScalar(s);
-      mat.opacity = 0.95 * (1 - t);
-      if (light) light.intensity = 2.6 * (1 - t);
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
+    muzzleFlashes.spawn(tip, this.ownerColor || '#ffdd88');
   }
 
   dispose(scene) {
     scene.remove(this.group);
+    if (this.ring) {
+      scene.remove(this.ring);
+      this.ring.geometry.dispose();
+    }
+    if (this.ringMat) this.ringMat.dispose();
     if (this._beaconCoreMat) this._beaconCoreMat.dispose();
     if (this._beaconSphere && this._beaconSphere.geometry) this._beaconSphere.geometry.dispose();
     for (const entry of this._cesareMats) {
@@ -524,6 +537,94 @@ export class BuildingEntity {
     this._cesareMats = [];
   }
 }
+
+// ── Muzzle flash: pool fisso, zero allocazioni per sparo ──────────────────────
+//
+// Prima ogni colpo di torretta creava una SphereGeometry, un MeshBasicMaterial,
+// una PointLight e un proprio ciclo requestAnimationFrame. Con più torrette
+// attive significava spazzatura continua per il GC e — soprattutto — un
+// conteggio luci della scena che oscillava a ogni sparo, con conseguente
+// ricompilazione di tutti gli shader. Qui c'è un pool statico: le mesh esistono
+// già, le luci arrivano dal pool a numero fisso e l'animazione gira nel tick
+// unico degli effetti.
+
+const MUZZLE_POOL_SIZE = 4;
+const MUZZLE_DURATION = 0.14;   // secondi
+const MUZZLE_LIGHT_INTENSITY = 2.6;
+const _muzzleGeo = new THREE.SphereGeometry(0.35, 8, 8);
+
+class MuzzleFlashPool {
+  constructor() {
+    this.slots = [];
+    this.next = 0;
+    this._scene = null;
+    this._lights = [];
+  }
+
+  /** Registra le mesh nella scena (prima di renderer.compile) e prende le luci. */
+  init(scene) {
+    if (this._scene) return;
+    this._scene = scene;
+
+    for (let i = 0; i < MUZZLE_POOL_SIZE; i++) {
+      const material = new THREE.MeshBasicMaterial({
+        color: 0xffdd88,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(_muzzleGeo, material);
+      mesh.renderOrder = 4;
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      scene.add(mesh);
+      this.slots.push({ mesh, material, time: MUZZLE_DURATION, light: null });
+    }
+
+    // Due luci condivise a rotazione: bastano, e restano nella scena per sempre.
+    for (let i = 0; i < 2; i++) {
+      const slot = lightPool.acquire(6, 2);
+      if (slot) this._lights.push(slot);
+    }
+  }
+
+  spawn(worldPos, color) {
+    if (!this._scene) return;
+    const slot = this.slots[this.next % MUZZLE_POOL_SIZE];
+    this.next++;
+
+    slot.mesh.position.copy(worldPos);
+    slot.mesh.scale.setScalar(1);
+    slot.mesh.visible = true;
+    slot.material.color.set(color);
+    slot.material.opacity = 0.95;
+    slot.time = 0;
+
+    slot.light = this._lights.length
+      ? this._lights[this.next % this._lights.length]
+      : null;
+    if (slot.light) slot.light.set(worldPos, color, MUZZLE_LIGHT_INTENSITY);
+  }
+
+  tick(delta) {
+    for (const slot of this.slots) {
+      if (slot.time >= MUZZLE_DURATION) continue;
+      slot.time += delta;
+      const t = Math.min(1, slot.time / MUZZLE_DURATION);
+      if (t >= 1) {
+        slot.mesh.visible = false;
+        slot.material.opacity = 0;
+        if (slot.light) { slot.light.off(); slot.light = null; }
+        continue;
+      }
+      slot.mesh.scale.setScalar(1 + t * 2.2);
+      slot.material.opacity = 0.95 * (1 - t);
+      if (slot.light) slot.light.light.intensity = MUZZLE_LIGHT_INTENSITY * (1 - t);
+    }
+  }
+}
+
+export const muzzleFlashes = new MuzzleFlashPool();
 
 // ── Distruzione torretta: geometrie e materiali pre-allocati ──────────────────
 // Dimensioni e colori deterministici precalcolati per evitare new Geometry a runtime.
@@ -565,16 +666,32 @@ const _destrPool = Array.from({ length: DESTR_POOL_SIZE }, () => {
   return group;
 });
 let _destrPoolIdx = 0;
+const DESTR_DURATION = 1.2;   // secondi
+const DESTR_GRAVITY = -8;
 
 /**
- * Effetto particellare di distruzione torre.
+ * Registra nella scena i pool degli effetti torretta.
+ *
+ * Vanno aggiunti *prima* di `renderer.compile()`: se una mesh entra in scena
+ * per la prima volta durante la partita, il suo shader viene compilato in quel
+ * momento e il gioco si inchioda proprio sull'esplosione.
  */
-export function spawnTurretDestruction(scene, theta, phi) {
-  const pos = sphericalToCartesian(theta, phi, PLANET_RADIUS + 1.5);
+export function initTurretEffects(scene) {
+  for (const group of _destrPool) {
+    if (!group.parent) scene.add(group);
+  }
+  muzzleFlashes.init(scene);
+}
+
+/**
+ * Effetto particellare di distruzione torre. L'animazione avanza nel tick unico
+ * degli effetti (`tickTurretEffects`), non in un proprio requestAnimationFrame.
+ */
+export function spawnTurretDestruction(scene, theta, phi, radius = PLANET_RADIUS + 1.5) {
+  const pos = sphericalToCartesian(theta, phi, radius);
 
   const group = _destrPool[_destrPoolIdx % DESTR_POOL_SIZE];
   _destrPoolIdx++;
-  group._cancelled = true; // ferma eventuale animazione precedente su questo slot
 
   group.position.set(pos.x, pos.y, pos.z);
   group.visible = true;
@@ -594,21 +711,22 @@ export function spawnTurretDestruction(scene, theta, phi) {
   }
   flash.scale.setScalar(1);
   flash.material.opacity = 0.9;
+  group._elapsed = 0;
+}
 
-  let elapsed = 0;
-  const duration = 1200;
-  const gravity = -8;
-  group._cancelled = false;
+/** Avanza esplosioni di torretta e vampate di sparo. Chiamato una volta per frame. */
+export function tickTurretEffects(delta) {
+  const dt = Math.min(delta, 0.05); // protegge da scatti dopo un freeze o un tab in background
 
-  const animate = () => {
-    if (group._cancelled) return;
-    const dt = 16 / 1000;
-    elapsed += 16;
-    const t = elapsed / duration;
-    const op = Math.max(0, 1 - t);
+  for (const group of _destrPool) {
+    if (!group.visible) continue;
+    group._elapsed = (group._elapsed ?? 0) + dt;
+    const t = group._elapsed / DESTR_DURATION;
+    if (t >= 1) { group.visible = false; continue; }
 
-    for (const s of shards) {
-      s.vy += gravity * dt;
+    const op = 1 - t;
+    for (const s of group._shards) {
+      s.vy += DESTR_GRAVITY * dt;
       s.mesh.position.x += s.vx * dt;
       s.mesh.position.y += s.vy * dt;
       s.mesh.position.z += s.vz * dt;
@@ -616,15 +734,9 @@ export function spawnTurretDestruction(scene, theta, phi) {
       s.mesh.rotation.z += dt * 3;
       s.mesh.material.opacity = op;
     }
+    group._flash.scale.setScalar(1 + t * 3);
+    group._flash.material.opacity = Math.max(0, 0.9 - t * 1.5);
+  }
 
-    flash.scale.setScalar(1 + t * 3);
-    flash.material.opacity = Math.max(0, 0.9 - t * 1.5);
-
-    if (t < 1) {
-      requestAnimationFrame(animate);
-    } else {
-      group.visible = false;
-    }
-  };
-  requestAnimationFrame(animate);
+  muzzleFlashes.tick(dt);
 }
