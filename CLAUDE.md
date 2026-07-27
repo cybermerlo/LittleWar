@@ -291,6 +291,47 @@ solo un mondo diverso da quello previsto. Ora è in `public/draco/` (750 KB,
 messo in cache dal browser). Aggiornando `three`, ricopiare i file — le
 istruzioni sono in `client/utils/createGLTFLoader.js`.
 
+## Sonda prestazioni (tasto F9)
+
+Il costo per-pixel non si indovina: dipende da GPU, risoluzione e fattore di
+scala del sistema operativo. `client/utils/perfProbe.js` spegne un effetto alla
+volta durante la partita, misura il tempo di frame e stampa una classifica di
+quanto si guadagnerebbe a rinunciarci. Si avvia con **F9** (non P: T, L e P
+sono della chat) e dura una ventina di secondi.
+
+Due accorgimenti che sembrano dettagli e non lo sono — entrambi nati da una
+prima versione che dava risultati assurdi, con effetti che risultavano *più
+lenti da spenti*:
+
+- **Il riferimento viene rimisurato prima di ogni scenario.** Misurandolo una
+  volta sola all'inizio, qualsiasi deriva lenta (throttling termico, altre
+  finestre, il ciclo giorno/notte) finiva attribuita all'ultimo effetto
+  misurato.
+- **Il ciclo giorno/notte viene congelato** durante la sonda: dura 2:45 minuti,
+  meno della sonda stessa. Senza congelarlo si confrontano scene diverse — la
+  nebulosa misurata a mezzogiorno non costa nulla, l'acqua misurata a notte
+  fonda costa il doppio.
+
+Se il riferimento oscilla di oltre il 15% tra una misura e l'altra, la sonda
+lo dichiara nel referto: sotto quella soglia di rumore i risparmi piccoli non
+sono attendibili.
+
+### Cosa NON era il collo di bottiglia
+
+Misurato su un Intel Iris Xe (i5-1135G7), a 1920×1080:
+
+| | prima | dopo la decimazione |
+|---|---|---|
+| triangoli | 489.6k | 170.0k |
+| FPS | 21 | 19 |
+
+Ridurre i triangoli del 65% non ha spostato il tempo di frame di un
+millisecondo. **Su questa scena la geometria non è il collo di bottiglia**: lo
+è il fill rate, cioè quanti pixel si attraversano e con quali shader. La
+decimazione resta utile (serve col multiplayer pieno e sulle macchine deboli)
+ma va cercato altrove il guadagno grosso: risoluzione di rendering, bloom,
+overdraw di acqua e atmosfera, numero di luci per frammento.
+
 ## Bug Log
 
 ### Powerup non raccoglibili in multiplayer (intermittente)

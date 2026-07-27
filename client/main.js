@@ -31,6 +31,7 @@ import { LobbyScreen } from './ui/LobbyScreen.js';
 import { DeathScreen } from './ui/DeathScreen.js';
 import { moveOnSphere } from './utils/SphereUtils.js';
 import { getRenderQualityPreference, isLowPowerQuality } from './utils/performanceProfile.js';
+import { PerfProbe } from './utils/perfProbe.js';
 import {
   BASE_SPEED, SPEED_REDUCTION_PER_LEVEL, MIN_SPEED,
   BOOST_MAX, BOOST_SPEED_MULT, BOOST_DRAIN_PER_SEC, BOOST_REGEN_PER_SEC,
@@ -126,6 +127,7 @@ const sky = createSky(scene, lights, { qualityStage: renderQualityStage });
 const {
   mesh: planetMesh,
   water: waterMesh,
+  atmosphere: atmosphereMesh,
   heightData,
   posAttr,
   update: updatePlanet,
@@ -171,7 +173,93 @@ window.addEventListener('keydown', (e) => {
     _perfVisible = !_perfVisible;
     document.getElementById('perf-overlay').classList.toggle('visible', _perfVisible);
   }
+  // F9 e non P: T, L e P sono già presi dalla chat.
+  if (e.code === 'F9' && !e.repeat) {
+    e.preventDefault();
+    startPerfProbe();
+  }
 });
+
+// ── Sonda prestazioni (F9) ────────────────────────────────────────────────────
+// Il costo per-pixel non si può indovinare da lontano: dipende da GPU,
+// risoluzione e fattore di scala del sistema. La sonda spegne un effetto alla
+// volta e misura, così si interviene su ciò che pesa davvero.
+
+const _setRenderScale = (scale) => {
+  renderer.setPixelRatio(scale);
+  composer.setPixelRatio(scale);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+};
+
+/** Nasconde un Object3D ripristinandone poi la visibilità originale. */
+function hideScenario(label, getObject) {
+  let previous = null;
+  return {
+    label,
+    off() {
+      const o = getObject();
+      previous = o ? o.visible : null;
+      if (o) o.visible = false;
+    },
+    on() {
+      const o = getObject();
+      if (o && previous !== null) o.visible = previous;
+      previous = null;
+    },
+  };
+}
+
+const perfProbe = new PerfProbe([
+  {
+    label: 'bloom (post-processing)',
+    off() { bloomPass.enabled = false; },
+    on()  { bloomPass.enabled = !LOW_POWER_DEFAULTS; },
+  },
+  {
+    label: `risoluzione a 1x (ora ${BASE_RENDER_DPR}x)`,
+    off() { _setRenderScale(1); },
+    on()  { _setRenderScale(BASE_RENDER_DPR); },
+  },
+  hideScenario('acqua', () => waterMesh),
+  hideScenario('atmosfera', () => atmosphereMesh),
+  hideScenario('nebulosa', () => sky.nebula),
+  hideScenario('stelle', () => sky.stars),
+  hideScenario('nuvole', () => sky.cloudRoot),
+  hideScenario('cielo (sfondo)', () => sky.sky),
+  hideScenario('alberi e case', () => terrainGroup),
+  hideScenario('superficie del pianeta', () => planetMesh),
+  {
+    // Cambiare il numero di luci fa ricompilare gli shader: la pausa cade nei
+    // frame di riscaldamento, non nel campione.
+    label: 'luci puntiformi del pool',
+    off() { for (const s of lightPool.slots) s.light.visible = false; },
+    on()  { for (const s of lightPool.slots) s.light.visible = true; },
+  },
+], {
+  // Il ciclo giorno/notte dura ~2:45 e la sonda decine di secondi: senza
+  // congelarlo si confronterebbero scene diverse (la nebulosa a mezzogiorno
+  // non costa nulla, l'acqua a notte fonda costa il doppio).
+  freeze(frozen) { _skyFrozen = frozen; },
+});
+
+/** True mentre la sonda misura: il cielo non avanza. */
+let _skyFrozen = false;
+
+function startPerfProbe() {
+  if (perfProbe.running || !inGame) return;
+  const el = document.getElementById('perf-content');
+  document.getElementById('perf-overlay')?.classList.add('visible');
+  _perfVisible = false; // la sonda scrive nell'overlay al posto delle statistiche
+  if (el) el.textContent = 'Misurazione in corso — non toccare i comandi…';
+  perfProbe.start((report) => {
+    if (el) el.textContent = report;
+    _perfVisible = false;
+  });
+}
+/** Riferimento al terreno statico, usato dalla sonda prestazioni. */
+let terrainGroup = null;
+
 // Pool degli effetti: devono stare nella scena PRIMA della pre-compilazione,
 // altrimenti il loro shader viene compilato alla prima esplosione — cioè
 // esattamente nel momento più concitato della partita.
@@ -186,7 +274,7 @@ const worldReady = Promise.all([
   preloadTurretBuildingModels(),
   preloadAirplaneModels(),
 ]).then(([treeTemplates, buildingTemplates, hospitalTemplates]) => {
-  createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates, buildingTemplates, hospitalTemplates);
+  terrainGroup = createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates, buildingTemplates, hospitalTemplates);
 });
 
 /**
@@ -809,6 +897,7 @@ function animate() {
   // ── Perf overlay ────────────────────────────────────────────────────────────
   _perfFrameCount++;
   _perfFrameMs = delta * 1000;
+  perfProbe.tick(_perfFrameMs);
   if (now - _perfLastFpsTime >= 500) {
     _perfFps = Math.round(_perfFrameCount * 1000 / (now - _perfLastFpsTime));
     _perfGsRate = _perfGsCount * 1000 / (now - _perfLastGsTime);
@@ -817,12 +906,16 @@ function animate() {
     _perfLastFpsTime = now;
     _perfLastGsTime = now;
   }
+  if (perfProbe.running) {
+    const el = document.getElementById('perf-content');
+    if (el && el.textContent !== perfProbe.progress) el.textContent = perfProbe.progress;
+  }
   if (_perfVisible && now - _perfLastPingTime > 2000) {
     _perfLastPingTime = now;
     net.measurePing(ms => { _perfPingMs = ms; });
   }
 
-  sky.update(delta);
+  sky.update(_skyFrozen ? 0 : delta);
   updatePlanet(delta, camera.position);
   if (_dbgVisible) _dbgMat.uniforms.uCam.value.copy(camera.position);
   const nightFactor = typeof sky.getNightFactor === 'function' ? sky.getNightFactor() : 0;

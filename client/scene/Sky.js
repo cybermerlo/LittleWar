@@ -530,6 +530,7 @@ export function createSky(scene, lights, options = {}) {
   return {
     sky,
     stars,
+    nebula,
     cloudRoot,
     update,
     setQualityStage,
