@@ -126,8 +126,8 @@ export class PerfProbe {
     L.push('── Costo di rendering su questa macchina ──');
     L.push(`riferimento ${baseMedian.toFixed(1)} ms/frame (${(1000 / baseMedian).toFixed(0)} FPS)`);
     L.push('');
-    L.push('spegnendo…'.padEnd(30) + 'ms'.padStart(7) + 'risparmio'.padStart(11) + '   FPS');
-    L.push('─'.repeat(56));
+    L.push('spegnendo…'.padEnd(30) + 'ms'.padStart(7) + 'risparmio'.padStart(11) + '%'.padStart(7) + '  FPS');
+    L.push('─'.repeat(57));
     for (const r of rows) {
       const pct = r.base > 0 ? (r.saved / r.base * 100) : 0;
       const savedTxt = `${r.saved >= 0 ? '−' : '+'}${Math.abs(r.saved).toFixed(1)} ms`;
