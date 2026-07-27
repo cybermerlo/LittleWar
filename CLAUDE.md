@@ -67,11 +67,38 @@ In sviluppo aprire **due terminali**: uno per `npm start` (server), uno per `npm
 
 ## Architecture
 
-- `shared/` — codice puro senza dipendenze (constants, movement math) importato sia da client che da server
-- `shared/movement.js` — `moveOnSphere`, `sphericalToCartesian`, `cartesianToSpherical` (senza Three.js)
+- `shared/` — codice puro senza dipendenze da Three.js, importato sia da client che da server
+- `shared/movement.js` — `moveOnSphere`, `sphericalToCartesian`, `cartesianToSpherical`
+- `shared/planetField.js` — **forma del pianeta** (campo di rumore con seed fisso): `heightAt01`,
+  `radiusAt`, `slopeAtSpherical`, `sampleBuildableSite`. Client e server generano lo stesso
+  pianeta senza scambiarsi dati, così il server può scegliere siti validi per torrette e bersagli
+- `client/scene/planetSurface.js` — **superficie renderizzata** (vedi sotto): `sampleGround`,
+  `fitGroundPlane`, `createConformingRingGeometry`
+- `client/scene/LightPool.js` — pool di PointLight a numero fisso (vedi Performance Notes)
 - `client/utils/SphereUtils.js` — re-esporta da shared + funzioni Three.js-dipendenti (`sphereOrientation`)
 - `server/Game.js` — usa `moveOnSphere` da shared per **predizione server-side** (muove ogni player a ogni tick)
 - Coordinate: theta = angolo polare (0..PI), phi = azimutale (0..2PI), heading = direzione di volo (0 = nord)
+
+### Campo ideale vs superficie renderizzata (2026-07-27)
+
+Distinzione da tenere presente ogni volta che si appoggia qualcosa sul pianeta:
+
+- il **campo** (`shared/planetField.js`) è la forma matematica continua;
+- la **superficie** è `IcosahedronGeometry(50, 5)` = **720 triangoli larghi ~10 unità**, i cui
+  vertici stanno sul campo e il resto no (`detail` in `PolyhedronGeometry` suddivide ogni spigolo
+  in `detail + 1` segmenti, non ricorsivamente: non sono 20k triangoli).
+
+Lo scarto misurato tra le due è **0.28 unità in media e fino a 1.74** — più dell'altezza di un
+albero (1.65). Per questo appoggiare gli oggetti alla quota analitica li lasciava sospesi al centro
+delle facce e sepolti vicino alle creste.
+
+`sampleGround(dir)` interseca il raggio uscente dal centro del pianeta con i triangoli reali e
+restituisce punto e normale della faccia. Con `flatShading` quella normale è esattamente il piano
+che l'occhio percepisce, quindi un oggetto orientato su di essa risulta piantato.
+Indice spaziale: griglia su cubemap con risoluzione scelta in base alla dimensione dei triangoli,
+più scansione completa di riserva (~3 µs a query).
+
+**Regola: per piazzare qualcosa sul terreno usare `planetSurface.js`, mai `planetField.js`.**
 
 ## Networking Notes (Railway)
 
@@ -115,6 +142,103 @@ Il gioco è giocabile da browser mobile senza installazione.
 - Keep the game lightweight — it runs in the browser for casual sessions with friends
 - Prefer simple, readable code over premature optimization
 - Game logic decisions are still being finalized — wait for explicit instructions before implementing features
+
+## Rallentamenti improvvisi e appoggio a terra (2026-07-27)
+
+Due problemi storici, entrambi risolti e verificati con `tests/visual-ground-check.mjs`
+(avvia il gioco in Chromium headless, misura e fotografa).
+
+### Causa dei freeze: il conteggio delle luci cambiava di continuo
+
+In Three.js la program cache key di ogni materiale include il **numero** di luci in scena. Quando
+quel numero cambia, `lights.state.version` avanza e al frame successivo **ogni materiale illuminato
+ricompila il proprio shader**: una pausa da decine o centinaia di millisecondi, in mezzo alla
+partita. `projectObject()` scarta gli oggetti invisibili *e le luci sotto di loro*, quindi il
+conteggio cambiava a ogni:
+
+- morte e respawn di un giocatore (2 PointLight alari per aereo sparivano con `mesh.visible = false`);
+- conquista di una torretta (PointLight del beacon);
+- **singolo colpo di torretta** (muzzle flash creava e distruggeva una PointLight).
+
+In un deathmatch il conteggio non si stabilizzava mai → le pause tornavano per tutta la sessione.
+
+**Soluzione:** `client/scene/LightPool.js`. Quattro PointLight create una volta sola, mai nascoste
+né rimosse: chi ne ha bisogno prende uno slot e ne imposta posizione/colore/intensità. Intensità 0 =
+spenta ma ancora contata, quindi il conteggio non cambia mai. Il pool è volutamente minuscolo:
+ogni PointLight presente costa un ciclo nel fragment shader di *ogni* pixel illuminato. Gli slot
+vanno a chi si vede davvero (2 aereo locale + 2 muzzle flash a rotazione); per beacon e aerei
+remoti resta il puntino additivo con bloom, che è ciò che si nota da lontano.
+
+> Se in futuro serve una luce dinamica, **prenderla dal pool**. Non aggiungere né rimuovere luci
+> dalla scena a runtime, e non nasconderle con `visible = false`.
+
+### Altre cause di pause
+
+- **Compilazione shader al primo utilizzo.** `warmupShaders()` in `main.js` chiama
+  `renderer.compileAsync(scene, camera)` all'ingresso in partita. I pool di effetti (esplosioni,
+  distruzione torrette, muzzle flash) vengono registrati nella scena *prima*, con
+  `initExplosionPool` / `initTurretEffects`: se una mesh entrasse in scena solo alla prima
+  esplosione, il suo shader verrebbe compilato proprio in quell'istante.
+- **Spazzatura per il GC.** `onGameState` arriva a 40 Hz e allocava quattro `Set` più gli array di
+  `.map()` a ogni messaggio → ora usa set riusati. Eliminate anche le allocazioni per-frame in
+  `Airplane` (clone di Vector3, doppio `updateMatrixWorld` ricorsivo, colori delle scie riscritti a
+  ogni frame benché costanti) e in `BuildingEntity` (`_findNearestAlive`, `_aimTurretAt`, ritinta
+  dei materiali a ogni game-state).
+- **Un `requestAnimationFrame` per effetto**, con dt fisso a 16 ms: sostituiti da `tickExplosions`
+  e `tickTurretEffects`, chiamati una volta per frame col delta reale.
+- **Materiali del terreno duplicati.** I nove GLB portano ~194 istanze di materiale, ma moltissime
+  sono lo stesso marrone corteccia o lo stesso verde foglia: raggruppando per *aspetto* invece che
+  per uuid le draw call del terreno passano da **194 a 24**.
+
+Provato e **scartato**: spezzare il terreno in chunk spaziali per il frustum culling. Misurato,
+faceva salire le draw call del 26% per risparmiare la metà di appena 48k triangoli.
+
+### Causa del "gli oggetti non poggiano": tre difetti sovrapposti
+
+1. **Quota sbagliata.** Il piazzamento usava il campo analitico, mentre la superficie visibile è
+   fatta di 720 facce piatte che se ne discostano fino a 1.74 unità (vedi Architecture). Ora tutto
+   passa da `sampleGround`.
+2. **Pivot buttato via.** `prepareTemplate` normalizzava la base del modello scrivendo l'offset
+   nella `position` del root — ma il piazzamento *sovrascrive* quella stessa `position`, quindi la
+   normalizzazione spariva e i modelli venivano appoggiati per la loro origine arbitraria. Ora
+   l'offset vive in un figlio e `root.position` significa solo "dove poggia l'oggetto". Stesso
+   problema in `makeProceduralBuilding`, che restituiva una Mesh con `position.y = h / 2`: risolto
+   con `withGroundOrigin`, che riguardava la **qualità bassa**, cioè le macchine più deboli.
+3. **Torrette a raggio fisso.** `BuildingEntity` piantava la torretta a `PLANET_RADIUS` esatto: su
+   una collina finiva sepolta fino a `MOUNTAIN_HEIGHT` (5.2 unità). Ora la base segue un piano
+   adattato al terreno sotto l'impronta.
+
+Inoltre: gli anelli (zona di conquista, bersaglio bombardamento) sono **conformati al terreno** con
+`createConformingRingGeometry` — un `RingGeometry` piatto di raggio 10 su una sfera di raggio 50
+sprofonda di un'unità sul bordo per la sola curvatura, prima ancora di incontrare una collina. Le
+esplosioni di bombe e la distruzione delle torrette usano la quota del terreno invece di 50 fisso.
+
+Lato server, `generateBuildings` e `Target` usano `sampleBuildableSite`: prima la posizione era
+puramente casuale e **il 64% del pianeta è oceano**, quindi in media 4 torrette su 7 nascevano in
+acqua.
+
+**Misure finali** (`node tests/visual-ground-check.mjs`, distanza dal terreno del vertice più basso
+di ogni oggetto, negativo = sotto la superficie):
+
+| | prima | dopo |
+|---|---|---|
+| basi alberi | fino a ±1.7 | −0.059 … −0.037 (voluto −0.05) |
+| basi edifici | fino a −2.9 | −0.049 … +0.046 (voluto −0.04) |
+| basi torrette | fino a −5.2 | 0.000 … 0.077 |
+| draw call terreno | 194 | 24 |
+| luci in scena | variabile | 8, costante |
+
+### Verifica automatica
+
+```bash
+npm start & npx vite &          # servono entrambi
+node tests/visual-ground-check.mjs tests/out
+```
+
+Stampa le statistiche di appoggio e salva screenshot ravvicinati in `tests/out/`. `quota locale
+base` deve restare ~0: se non lo è, il problema non è il terreno ma il modello (pivot) o la
+rotazione applicata — attenzione che una terna **mancina** passata a `Matrix4.makeBasis` è una
+riflessione, e `Quaternion.setFromRotationMatrix` ne ricava un quaternione privo di senso.
 
 ## Bug Log
 

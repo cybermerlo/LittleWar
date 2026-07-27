@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createGLTFLoader } from '../utils/createGLTFLoader.js';
-import { allowTinyPointLights } from '../utils/performanceProfile.js';
+import { lightPool } from '../scene/LightPool.js';
 import { sphericalToCartesian, cartesianToSpherical, sphereOrientation } from '../utils/SphereUtils.js';
 import {
   FLY_ALTITUDE,
@@ -48,8 +48,12 @@ const NAVLIGHT_POINT_DISTANCE = 0.55;
 const NAVLIGHT_POINT_DECAY = 2.0;
 const NAVLIGHT_POINT_INTENSITY = 2.4;
 const NAVLIGHT_BLINK_HZ = 0.55; // lampeggio lento
-const USE_TINY_POINT_LIGHTS = allowTinyPointLights();
 const SPIN_DURATION = 0.48;
+
+/** Scratch condivisi: `update()` gira per ogni aereo a ogni frame. */
+const _rightW = new THREE.Vector3();
+const _upW = new THREE.Vector3();
+const _navWorld = new THREE.Vector3();
 
 function smooth01(x) {
   return THREE.MathUtils.smoothstep(THREE.MathUtils.clamp(x, 0, 1), 0, 1);
@@ -70,6 +74,17 @@ function createWingtipTrail() {
   const N = WINGTIP_TRAIL_LENGTH;
   const positions = new Float32Array(N * 3);
   const colors = new Float32Array(N * 3);
+
+  // Sfumatura quadratica: bianca vicino all'ala, invisibile in coda. È fissa,
+  // quindi si scrive una volta sola invece che a ogni frame per ogni aereo.
+  for (let i = 0; i < N; i++) {
+    const t = 1 - i / (N - 1);
+    const b = t * t * 0.55;
+    colors[i * 3] = b;
+    colors[i * 3 + 1] = b;
+    colors[i * 3 + 2] = b;
+  }
+
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -172,6 +187,15 @@ function fitModelToSize(instance, modelName) {
   instance.scale.setScalar(scale);
   instance.position.sub(center.multiplyScalar(scale));
   instance.rotation.y = config.yaw;
+}
+
+/**
+ * Scarica e mette in cache i modelli degli aerei prima dell'ingresso in
+ * partita. Altrimenti il primo `new Airplane(...)` — che avviene mentre si
+ * entra, insieme a tutto il resto — deve fare fetch e parsing del glTF.
+ */
+export function preloadAirplaneModels() {
+  return Promise.all(Object.keys(MODEL_PATHS).map(getModelTemplate));
 }
 
 function buildAirplaneMesh(color, modelName) {
@@ -356,16 +380,14 @@ export class Airplane {
     this._navLeftMesh.frustumCulled = false;
     this._navRightMesh.frustumCulled = false;
 
-    this._navLeftLight = USE_TINY_POINT_LIGHTS
-      ? new THREE.PointLight(0xff3344, 0, NAVLIGHT_POINT_DISTANCE, NAVLIGHT_POINT_DECAY)
-      : null;
-    this._navRightLight = USE_TINY_POINT_LIGHTS
-      ? new THREE.PointLight(0x33ff66, 0, NAVLIGHT_POINT_DISTANCE, NAVLIGHT_POINT_DECAY)
-      : null;
+    // Le PointLight alari arrivano dal pool a numero fisso e solo per l'aereo
+    // locale: aggiungerle e toglierle dalla scena a ogni morte/respawn faceva
+    // cambiare il conteggio luci e ricompilare tutti gli shader (vedi
+    // scene/LightPool.js). Sugli aerei remoti resta il puntino additivo, che è
+    // ciò che si vede davvero a distanza.
+    this._navLeftLight = isLocal ? lightPool.acquire(NAVLIGHT_POINT_DISTANCE, NAVLIGHT_POINT_DECAY) : null;
+    this._navRightLight = isLocal ? lightPool.acquire(NAVLIGHT_POINT_DISTANCE, NAVLIGHT_POINT_DECAY) : null;
     this._navGroup.add(this._navLeftMesh, this._navRightMesh);
-    if (this._navLeftLight && this._navRightLight) {
-      this._navGroup.add(this._navLeftLight, this._navRightLight);
-    }
     this.mesh.add(this._navGroup);
 
     // Coda particellare turbo (world space): locale e remoti.
@@ -554,6 +576,11 @@ export class Airplane {
       }
     }
 
+    // Una sola volta per frame: le particelle turbo, le scie alari e le luci
+    // del pool lavorano tutte in coordinate world e prima ognuna forzava il
+    // proprio updateMatrixWorld ricorsivo sull'intera gerarchia del modello.
+    this.mesh.updateMatrixWorld(true);
+
     this._updateBoostParticles(delta, boostAmount);
     this._updateWingtipTrails();
     this._updateNavLights(delta);
@@ -570,8 +597,10 @@ export class Airplane {
       this._navGroup.visible = false;
       this._navLeftMat.opacity = 0;
       this._navRightMat.opacity = 0;
-      if (this._navLeftLight) this._navLeftLight.intensity = 0;
-      if (this._navRightLight) this._navRightLight.intensity = 0;
+      // Le luci del pool si spengono, non si nascondono: nasconderle
+      // cambierebbe il conteggio luci e ricompilerebbe gli shader.
+      this._navLeftLight?.off();
+      this._navRightLight?.off();
       return;
     }
     this._navGroup.visible = true;
@@ -581,16 +610,27 @@ export class Airplane {
     const right = this.mesh.userData.rightTipLocal ?? _rightTipLocal;
     this._navLeftMesh.position.set(left.x, left.y + NAVLIGHT_Y_OFFSET, left.z);
     this._navRightMesh.position.set(right.x, right.y + NAVLIGHT_Y_OFFSET, right.z);
-    if (this._navLeftLight) this._navLeftLight.position.copy(this._navLeftMesh.position);
-    if (this._navRightLight) this._navRightLight.position.copy(this._navRightMesh.position);
 
     const blink = blinkGate(this._navTime);
     const intensity = nightVis * blink;
 
     this._navLeftMat.opacity = intensity;
     this._navRightMat.opacity = intensity;
-    if (this._navLeftLight) this._navLeftLight.intensity = intensity * NAVLIGHT_POINT_INTENSITY;
-    if (this._navRightLight) this._navRightLight.intensity = intensity * NAVLIGHT_POINT_INTENSITY;
+
+    if (this._navLeftLight || this._navRightLight) {
+      // Le luci del pool vivono nella scena: servono coordinate world.
+      const lit = this.mesh.visible ? intensity * NAVLIGHT_POINT_INTENSITY : 0;
+      if (this._navLeftLight) {
+        _navWorld.copy(this._navLeftMesh.position);
+        this.mesh.localToWorld(_navWorld);
+        this._navLeftLight.set(_navWorld, 0xff3344, lit);
+      }
+      if (this._navRightLight) {
+        _navWorld.copy(this._navRightMesh.position);
+        this.mesh.localToWorld(_navWorld);
+        this._navRightLight.set(_navWorld, 0x33ff66, lit);
+      }
+    }
   }
 
   _updateBoostParticles(delta, boostAmount) {
@@ -618,11 +658,10 @@ export class Airplane {
     const toSpawn = Math.floor(this._boostSpawnAcc);
     this._boostSpawnAcc -= toSpawn;
 
-    this.mesh.updateMatrixWorld(true);
     _tailWorld.copy(_tailLocal).applyMatrix4(this.mesh.matrixWorld);
     _backward.copy(_forward).applyQuaternion(this.mesh.quaternion).multiplyScalar(-1);
-    const rightW = _right.clone().applyQuaternion(this.mesh.quaternion);
-    const upW = _up.clone().applyQuaternion(this.mesh.quaternion);
+    const rightW = _rightW.copy(_right).applyQuaternion(this.mesh.quaternion);
+    const upW = _upW.copy(_up).applyQuaternion(this.mesh.quaternion);
 
     for (let s = 0; s < toSpawn; s++) {
       const i = this._boostHead;
@@ -647,14 +686,13 @@ export class Airplane {
   }
 
   _updateWingtipTrails() {
-    this.mesh.updateMatrixWorld(true);
     this._updateSingleTrail(this._leftTrail, this.mesh.userData.leftTipLocal);
     this._updateSingleTrail(this._rightTrail, this.mesh.userData.rightTipLocal);
   }
 
   _updateSingleTrail(trail, localPos) {
     const N = WINGTIP_TRAIL_LENGTH;
-    const { positions, colors, geo } = trail;
+    const { positions, geo } = trail;
 
     _tipTemp.copy(localPos).applyMatrix4(this.mesh.matrixWorld);
 
@@ -666,27 +704,15 @@ export class Airplane {
       }
       trail.initialized = true;
     } else {
-      for (let i = N - 1; i > 0; i--) {
-        positions[i * 3] = positions[(i - 1) * 3];
-        positions[i * 3 + 1] = positions[(i - 1) * 3 + 1];
-        positions[i * 3 + 2] = positions[(i - 1) * 3 + 2];
-      }
+      // copyWithin sposta l'intera scia in un colpo solo (memmove nativo)
+      // invece di 96 assegnazioni una per una.
+      positions.copyWithin(3, 0, (N - 1) * 3);
       positions[0] = _tipTemp.x;
       positions[1] = _tipTemp.y;
       positions[2] = _tipTemp.z;
     }
 
-    // Quadratic fade: bianco vicino all'ala, invisibile in coda
-    for (let i = 0; i < N; i++) {
-      const t = 1 - i / (N - 1);
-      const b = t * t * 0.55;
-      colors[i * 3] = b;
-      colors[i * 3 + 1] = b;
-      colors[i * 3 + 2] = b;
-    }
-
     geo.getAttribute('position').needsUpdate = true;
-    geo.getAttribute('color').needsUpdate = true;
   }
 
   dispose(scene) {
@@ -697,6 +723,10 @@ export class Airplane {
     if (this._boostMaterial) this._boostMaterial.dispose();
     if (this._leftTrail) { this._scene.remove(this._leftTrail.line); this._leftTrail.geo.dispose(); this._leftTrail.mat.dispose(); }
     if (this._rightTrail) { this._scene.remove(this._rightTrail.line); this._rightTrail.geo.dispose(); this._rightTrail.mat.dispose(); }
+    // Restituisce gli slot luce al pool: le PointLight restano nella scena
+    // (spente), quindi il conteggio luci non cambia mai.
+    this._navLeftLight = lightPool.release(this._navLeftLight);
+    this._navRightLight = lightPool.release(this._navRightLight);
     if (this._navGroup) {
       this.mesh.remove(this._navGroup);
       this._navGroup = null;

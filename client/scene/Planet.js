@@ -4,7 +4,8 @@ import {
   MOUNTAIN_HEIGHT,
   WATER_LEVEL,
   heightAt01,
-} from './planetHeight.js';
+} from '../../shared/planetField.js';
+import { buildPlanetSurfaceIndex } from './planetSurface.js';
 
 export { PLANET_RADIUS, MOUNTAIN_HEIGHT, WATER_LEVEL };
 const DETAIL = 5; // più vertici → silhouette e costa più morbide
@@ -290,6 +291,10 @@ export function createPlanet(scene, options = {}) {
   geo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
   geo.setAttribute('aHeight01', new THREE.BufferAttribute(heightAttr, 1));
   geo.computeVertexNormals();
+
+  // Indice dei triangoli renderizzati: da qui in poi chiunque debba appoggiare
+  // qualcosa sul terreno interroga la superficie vera, non il campo analitico.
+  buildPlanetSurfaceIndex(geo);
 
   const mat = createTerrainMaterial();
   const mesh = new THREE.Mesh(geo, mat);

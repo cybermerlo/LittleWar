@@ -6,12 +6,20 @@ import { createPlanet } from './scene/Planet.js';
 import { createTerrain, loadTreeTemplates, loadBuildingTemplates, loadHospitalTemplates } from './scene/Terrain.js';
 import { createSky } from './scene/Sky.js';
 import { setupLighting } from './scene/Lighting.js';
-import { Airplane } from './entities/Airplane.js';
+import { Airplane, preloadAirplaneModels } from './entities/Airplane.js';
 import { ProjectileEntity } from './entities/Projectile.js';
-import { BombEntity, spawnExplosion } from './entities/Bomb.js';
+import { BombEntity, spawnExplosion, initExplosionPool, tickExplosions } from './entities/Bomb.js';
 import { PowerUpEntity } from './entities/PowerUp.js';
 import { TargetEntity } from './entities/Target.js';
-import { BuildingEntity, spawnTurretDestruction, preloadTurretBuildingModels } from './entities/Building.js';
+import {
+  BuildingEntity,
+  spawnTurretDestruction,
+  preloadTurretBuildingModels,
+  initTurretEffects,
+  tickTurretEffects,
+} from './entities/Building.js';
+import { lightPool } from './scene/LightPool.js';
+import { groundRadiusSpherical, sampleGround, makeSurfaceHit } from './scene/planetSurface.js';
 import { InputManager } from './systems/InputManager.js';
 import { MobileControls, isTouchDevice } from './systems/MobileControls.js';
 import { CameraController } from './systems/CameraController.js';
@@ -108,6 +116,12 @@ window.addEventListener('keydown', (e) => chat.handleKey(e));
 // ── Costruzione mondo ─────────────────────────────────────────────────────────
 
 const lights = setupLighting(scene);
+// Prima di qualunque altra cosa: le PointLight del pool entrano ora nella scena
+// e non se ne vanno più. Il numero di luci resta costante per tutta la sessione,
+// quindi Three.js non deve mai ricompilare gli shader in mezzo alla partita
+// (vedi scene/LightPool.js — era la causa dei rallentamenti improvvisi).
+lightPool.init(scene);
+
 const sky = createSky(scene, lights, { qualityStage: renderQualityStage });
 const {
   mesh: planetMesh,
@@ -158,14 +172,52 @@ window.addEventListener('keydown', (e) => {
     document.getElementById('perf-overlay').classList.toggle('visible', _perfVisible);
   }
 });
-Promise.all([
+// Pool degli effetti: devono stare nella scena PRIMA della pre-compilazione,
+// altrimenti il loro shader viene compilato alla prima esplosione — cioè
+// esattamente nel momento più concitato della partita.
+initExplosionPool(scene);
+initTurretEffects(scene);
+
+/** Risolve quando mondo e modelli sono pronti: gate per la pre-compilazione. */
+const worldReady = Promise.all([
   loadTreeTemplates(),
   loadBuildingTemplates(),
   loadHospitalTemplates(),
   preloadTurretBuildingModels(),
+  preloadAirplaneModels(),
 ]).then(([treeTemplates, buildingTemplates, hospitalTemplates]) => {
   createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates, buildingTemplates, hospitalTemplates);
 });
+
+/**
+ * Compila in anticipo i programmi GLSL di tutto ciò che è in scena.
+ *
+ * Senza questo passaggio Three.js compila il programma di un materiale la
+ * prima volta che lo incontra durante il render: il primo albero, la prima
+ * esplosione, la prima torretta conquistata producevano ognuno una pausa. La
+ * compilazione qui avviene mentre si è ancora in lobby.
+ */
+let _shadersWarmed = false;
+function warmupShaders() {
+  if (_shadersWarmed) return Promise.resolve();
+  _shadersWarmed = true;
+  return worldReady
+    .then(() => {
+      if (typeof renderer.compileAsync === 'function') {
+        return renderer.compileAsync(scene, camera);
+      }
+      renderer.compile(scene, camera);
+      return undefined;
+    })
+    .catch(() => { /* la compilazione anticipata è un'ottimizzazione, non un requisito */ });
+}
+
+// Hook di ispezione per i test automatici (tests/visual-ground-check.mjs).
+// `import.meta.env.DEV` è sostituito staticamente da Vite, quindi in build di
+// produzione questo blocco viene eliminato.
+if (import.meta.env?.DEV) {
+  window.__lwDebug = { THREE, scene, camera, renderer, sampleGround, makeSurfaceHit };
+}
 
 // ── Stato gioco ───────────────────────────────────────────────────────────────
 
@@ -250,6 +302,28 @@ const powerupPositions   = new Map(); // powerupId → {theta, phi}
 const powerupLastTryAt   = new Map(); // powerupId → ms dell'ultimo try-collect inviato
 const TRY_COLLECT_RETRY_MS = 300;     // ~3 retry/s finché in range e powerup presente
 
+/**
+ * Set riusati per il diff del game-state.
+ *
+ * `onGameState` arriva fino a 40 volte al secondo: allocare qui quattro Set
+ * (più gli array intermedi di `.map()`) significava decine di migliaia di
+ * oggetti al minuto da far raccogliere al GC, cioè micro-pause periodiche.
+ * Svuotarli e riempirli costa zero allocazioni.
+ */
+const _seenPlayerIds = new Set();
+const _seenProjIds   = new Set();
+const _seenBombIds   = new Set();
+const _seenPuIds     = new Set();
+const _shootSoundOwners = new Set();
+
+/** Rimuove dalla mappa le entità che il server non elenca più. */
+function pruneMissing(map, seen, onRemove) {
+  for (const [id, entity] of map) {
+    if (seen.has(id)) continue;
+    onRemove(id, entity);
+  }
+}
+
 // Throttle invio input (allineato al tick server)
 let lastInputSend = 0;
 
@@ -282,6 +356,7 @@ function _enterGame(nickname, color, model, solo = false) {
     else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
   }
   AudioManager.warmupSfx();
+  warmupShaders();
   AudioManager.startMusic();
   AudioManager.startEngine();
   if (solo) {
@@ -425,14 +500,13 @@ const net = new NetworkManager({
     allPlayerStates = state.players;
 
     // Rimuovi aerei remoti non più presenti nel game-state
-    const serverPlayerIds = new Set(state.players.map(p => p.id));
-    for (const [id, plane] of remoteAirplanes) {
-      if (!serverPlayerIds.has(id)) {
-        plane.dispose(scene);
-        remoteAirplanes.delete(id);
-        remoteWasDead.delete(id);
-      }
-    }
+    _seenPlayerIds.clear();
+    for (const p of state.players) _seenPlayerIds.add(p.id);
+    pruneMissing(remoteAirplanes, _seenPlayerIds, (id, plane) => {
+      plane.dispose(scene);
+      remoteAirplanes.delete(id);
+      remoteWasDead.delete(id);
+    });
 
     // Aggiorna aerei remoti
     state.players.forEach(p => {
@@ -496,20 +570,22 @@ const net = new NetworkManager({
     });
 
     // Proiettili
-    const serverProjIds = new Set(state.projectiles.map(p => p.id));
-    for (const [id, e] of projectileEntities) {
-      if (!serverProjIds.has(id)) { e.dispose(scene); projectileEntities.delete(id); }
-    }
+    _seenProjIds.clear();
+    for (const p of state.projectiles) _seenProjIds.add(p.id);
+    pruneMissing(projectileEntities, _seenProjIds, (id, e) => {
+      e.dispose(scene);
+      projectileEntities.delete(id);
+    });
     /** Un solo “bang” per salvo (stesso ownerId), così le armi multi-colpo non saturano l’audio. */
-    const remoteShootSoundPlayed = new Set();
+    _shootSoundOwners.clear();
     state.projectiles.forEach(p => {
       if (!projectileEntities.has(p.id)) {
         if (
           localState
           && p.ownerId !== localPlayerId
-          && !remoteShootSoundPlayed.has(p.ownerId)
+          && !_shootSoundOwners.has(p.ownerId)
         ) {
-          remoteShootSoundPlayed.add(p.ownerId);
+          _shootSoundOwners.add(p.ownerId);
           const dist = sphereDist(
             p.theta, p.phi,
             localState.theta, localState.phi,
@@ -538,10 +614,12 @@ const net = new NetworkManager({
     });
 
     // Bombe
-    const serverBombIds = new Set(state.bombs.map(b => b.id));
-    for (const [id, e] of bombEntities) {
-      if (!serverBombIds.has(id)) { e.dispose(scene); bombEntities.delete(id); }
-    }
+    _seenBombIds.clear();
+    for (const b of state.bombs) _seenBombIds.add(b.id);
+    pruneMissing(bombEntities, _seenBombIds, (id, e) => {
+      e.dispose(scene);
+      bombEntities.delete(id);
+    });
     state.bombs.forEach(b => {
       if (!bombEntities.has(b.id)) {
         if (
@@ -563,15 +641,14 @@ const net = new NetworkManager({
     });
 
     // Powerup (stato server = fonte di verità: spariscono se non sono più nella lista)
-    const serverPuIds = new Set(state.powerups.map(p => powerupKey(p.id)));
-    for (const [id, e] of powerupEntities) {
-      if (!serverPuIds.has(id)) {
-        e.dispose(scene);
-        powerupEntities.delete(id);
-        powerupPositions.delete(id);
-        powerupLastTryAt.delete(id);
-      }
-    }
+    _seenPuIds.clear();
+    for (const p of state.powerups) _seenPuIds.add(powerupKey(p.id));
+    pruneMissing(powerupEntities, _seenPuIds, (id, e) => {
+      e.dispose(scene);
+      powerupEntities.delete(id);
+      powerupPositions.delete(id);
+      powerupLastTryAt.delete(id);
+    });
     state.powerups.forEach(p => {
       const id = powerupKey(p.id);
       if (!powerupEntities.has(id)) {
@@ -640,7 +717,9 @@ const net = new NetworkManager({
   },
 
   onBombExploded({ theta: t, phi: p, hit, ownerId }) {
-    spawnExplosion(scene, t, p, 50, hit ? 0xffcc00 : 0x884400);
+    // Quota del terreno vero: a raggio 50 fisso l'esplosione finiva sottoterra
+    // su ogni collina (la superficie sale fino a 5.2 unità più in alto).
+    spawnExplosion(scene, t, p, groundRadiusSpherical(t, p) + 0.4, hit ? 0xffcc00 : 0x884400);
     // Suono all’impatto: es. `AudioManager.playExplosion()` — disattivato per ora.
     if (hit && ownerId === localPlayerId) {
       hud.showBombHitNotice();
@@ -662,7 +741,7 @@ const net = new NetworkManager({
     turretOwnerId,
     awardedKill = true,
   }) {
-    spawnTurretDestruction(scene, theta, phi);
+    spawnTurretDestruction(scene, theta, phi, groundRadiusSpherical(theta, phi) + 1.5);
     if (destroyerId === localPlayerId) {
       if (awardedKill) hud.showTowerDestroyedNotice();
       else hud.showOwnTowerDestroyedNotice();
@@ -899,6 +978,12 @@ function animate() {
 
   // Anima target
   targetEntity?.tick();
+
+  // Effetti (esplosioni, distruzione torrette, vampate di sparo): un solo tick
+  // agganciato al delta reale, invece di un requestAnimationFrame per effetto
+  // con dt fisso a 16 ms.
+  tickExplosions(delta);
+  tickTurretEffects(delta);
 
   // Aggiorna edifici: billboard barra progresso + beacon notturno lampeggiante.
   // Il lookAt sulla progressGroup è costoso; la saltiamo quando la camera non si

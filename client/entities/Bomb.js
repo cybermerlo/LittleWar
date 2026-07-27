@@ -45,6 +45,19 @@ const _explPool = Array.from({ length: EXPL_POOL_SIZE }, () => {
   return g;
 });
 let _explPoolIdx = 0;
+const EXPL_DURATION = 0.6; // secondi
+
+/**
+ * Registra il pool nella scena. Da chiamare all'avvio, prima della
+ * pre-compilazione degli shader: se il gruppo entra in scena solo alla prima
+ * esplosione, il suo programma GLSL viene compilato proprio in quell'istante e
+ * il gioco si blocca per qualche decina di millisecondi.
+ */
+export function initExplosionPool(scene) {
+  for (const group of _explPool) {
+    if (!group.parent) scene.add(group);
+  }
+}
 
 export function spawnExplosion(scene, theta, phi, radius, color = 0xff6600) {
   const pos = sphericalToCartesian(theta, phi, radius);
@@ -52,9 +65,6 @@ export function spawnExplosion(scene, theta, phi, radius, color = 0xff6600) {
   // Prendi il prossimo slot dal pool (round-robin: sovrascrive se troppo frequenti)
   const group = _explPool[_explPoolIdx % EXPL_POOL_SIZE];
   _explPoolIdx++;
-
-  // Interrompi eventuale animazione precedente su questo slot
-  group._cancelled = true;
 
   group.position.set(pos.x, pos.y, pos.z);
   group.scale.setScalar(1);
@@ -68,18 +78,24 @@ export function spawnExplosion(scene, theta, phi, radius, color = 0xff6600) {
     mesh.material.color.setHex(color);
     mesh.material.opacity = 1;
   }
+  group._elapsed = 0;
+}
 
-  let elapsed = 0;
-  group._cancelled = false;
-  const animate = () => {
-    if (group._cancelled) return;
-    elapsed += 16;
-    const t = elapsed / 600;
+/**
+ * Avanza tutte le esplosioni attive. Chiamato una volta per frame dal game
+ * loop: prima ogni esplosione apriva un proprio ciclo requestAnimationFrame
+ * con dt fisso a 16 ms, che dopo un rallentamento o un cambio di scheda
+ * proseguiva scollegato dal tempo reale.
+ */
+export function tickExplosions(delta) {
+  const dt = Math.min(delta, 0.05);
+  for (const group of _explPool) {
+    if (!group.visible) continue;
+    group._elapsed = (group._elapsed ?? 0) + dt;
+    const t = group._elapsed / EXPL_DURATION;
+    if (t >= 1) { group.visible = false; continue; }
     group.scale.setScalar(1 + t * 4);
-    const op = Math.max(0, 1 - t);
+    const op = 1 - t;
     for (const c of group.children) c.material.opacity = op;
-    if (t < 1) requestAnimationFrame(animate);
-    else group.visible = false;
-  };
-  requestAnimationFrame(animate);
+  }
 }

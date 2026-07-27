@@ -10,6 +10,7 @@ import {
   TICK_INTERVAL,
 } from '../shared/constants.js';
 import { moveOnSphere } from '../shared/movement.js';
+import { sampleBuildableSite, WATER_LEVEL } from '../shared/planetField.js';
 import { Projectile } from './Projectile.js';
 
 const TICK_DT = TICK_INTERVAL / 1000;
@@ -241,22 +242,33 @@ function buildingDist(t1, p1, t2, p2) {
   return Math.sqrt((ax - bx) ** 2 + (ay - by) ** 2 + (az - bz) ** 2);
 }
 
-/** Genera N edifici garantendo che i cerchi di conquista non si intersechino. */
+/**
+ * Genera N edifici garantendo che i cerchi di conquista non si intersechino e
+ * che ogni torretta stia su terra ferma e ragionevolmente pianeggiante.
+ *
+ * Il vincolo sul terreno è nuovo: prima la posizione era puramente casuale,
+ * quindi una torretta poteva nascere in mezzo all'oceano o aggrappata a una
+ * parete di montagna. Il campo di altezza sta in `shared/`, con lo stesso seed
+ * del client, quindi qui il server "vede" esattamente lo stesso pianeta.
+ */
 export function generateBuildings(count) {
   const buildings = new Map();
   const MIN_DIST = BUILDING_CONQUEST_RADIUS * 2; // cerchi tangenti = distanza minima
   const placed = [];
 
   for (let i = 0; i < count; i++) {
-    let theta, phi, attempts = 0;
-    do {
-      theta = Math.acos(2 * Math.random() - 1);
-      phi = Math.random() * Math.PI * 2;
-      attempts++;
-    } while (attempts < 500 && placed.some(p => buildingDist(theta, phi, p.theta, p.phi) < MIN_DIST));
+    const site = sampleBuildableSite({
+      // Torrette in pianura o bassa collina: la zona di conquista ha raggio
+      // ~11 unità, su un fianco ripido sarebbe metà dentro la roccia.
+      minHeight: WATER_LEVEL + 0.04,
+      maxHeight: 0.42,
+      maxSlope: 0.18,
+      accept: (theta, phi) =>
+        placed.every(p => buildingDist(theta, phi, p.theta, p.phi) >= MIN_DIST),
+    });
 
-    placed.push({ theta, phi });
-    const b = new Building(theta, phi);
+    placed.push({ theta: site.theta, phi: site.phi });
+    const b = new Building(site.theta, site.phi);
     buildings.set(b.id, b);
   }
   return buildings;
