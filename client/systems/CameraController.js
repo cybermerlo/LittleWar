@@ -3,8 +3,14 @@ import { CAMERA_BANK_FOLLOW } from '../../shared/constants.js';
 
 const CAMERA_BACK = 14.0;  // unità dietro il naso (+X locale = avanti)
 const CAMERA_UP   =  4.5;  // unità sopra l'asse del corpo
-const POS_LERP    = 0.07;  // smoothing posizione
-const ROT_LERP    = 0.10;  // smoothing rotazione (leggermente più veloce)
+/**
+ * Smorzamento esponenziale (1/s). Prima erano frazioni fisse per frame (0.07 e
+ * 0.10): a 144 Hz la camera stava attaccata all'aereo, a 30 Hz lo inseguiva
+ * con un ritardo più che doppio. Questi valori riproducono il comportamento
+ * originale a 60 Hz, ma uguale a qualunque frame rate.
+ */
+const POS_RATE    = 4.35;
+const ROT_RATE    = 6.3;
 const ZOOM_MIN    = 7.0;
 const ZOOM_MAX    = 28.0;
 const ZOOM_STEP   = 1.2;
@@ -42,8 +48,10 @@ export class CameraController {
    * @param {THREE.Object3D} airplaneMesh
    * @param {THREE.Quaternion} [sphereQuaternion] orientamento senza banking (per mescolare il roll sulla camera)
    * @param {THREE.Quaternion} [flightQuaternion] orientamento con banking ma senza spin
+   * @param {number} [delta] secondi dall'ultimo frame
    */
-  update(airplaneMesh, sphereQuaternion, flightQuaternion) {
+  update(airplaneMesh, sphereQuaternion, flightQuaternion, delta = 1 / 60) {
+    const dt = Math.min(Math.max(delta, 0), 0.1);
     if (!airplaneMesh) return;
     const followQuat = flightQuaternion ?? sphereQuaternion ?? airplaneMesh.quaternion;
 
@@ -62,7 +70,7 @@ export class CameraController {
       this.camera.position.copy(_targetPos);
       this._ready = true;
     } else {
-      this.camera.position.lerp(_targetPos, POS_LERP);
+      this.camera.position.lerp(_targetPos, 1 - Math.exp(-POS_RATE * dt));
     }
 
     // ── 2. Orientamento camera ───────────────────────────────────────────────
@@ -81,7 +89,7 @@ export class CameraController {
     _targetQuat.setFromRotationMatrix(_lookMat);
 
     // Slerp del quaternione → rotazione fluida senza gimbal lock
-    this.camera.quaternion.slerp(_targetQuat, ROT_LERP);
+    this.camera.quaternion.slerp(_targetQuat, 1 - Math.exp(-ROT_RATE * dt));
   }
 
   destroy() {

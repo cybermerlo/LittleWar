@@ -49,33 +49,18 @@ export const BANK_MAX_DH_FRAME = 0.14;   // limite |Δheading| per frame (evita 
 // Telecamera: quanto il rollio dell'aereo influenza l'orientamento della camera (0 = nessuno, 1 = come l'aereo)
 export const CAMERA_BANK_FOLLOW = 0.55;
 
-// Armi — tab fino a Lv.4; oltre si extrapola in getWeaponFireConfig
+// Armi. Oltre l'ultimo gradino la raffica resta quella di Lv.4: il livello
+// continua a salire (e a rallentare l'aereo) fino a MAX_WEAPON_LEVEL.
 export const MAX_WEAPON_LEVEL = 24;
 /** Barra HUD arma: piena a questo livello (e oltre). */
 export const WEAPON_HUD_BAR_FULL_LEVEL = 4;
 export const WEAPON_CONFIGS = [
-  { bullets: 1, spread: 0,    speedMult: 1.00 },
-  { bullets: 2, spread: 0.09, speedMult: 0.90 },
-  { bullets: 3, spread: 0.17, speedMult: 0.80 },
-  { bullets: 5, spread: 0.26, speedMult: 0.65 },
-  { bullets: 7, spread: 0.44, speedMult: 0.50 },
+  { bullets: 1, spread: 0    },
+  { bullets: 2, spread: 0.09 },
+  { bullets: 3, spread: 0.17 },
+  { bullets: 5, spread: 0.26 },
+  { bullets: 7, spread: 0.44 },
 ];
-
-/**
- * Pattern di fuoco per qualsiasi livello arma (server sparo + HUD).
- * Per livelli oltre WEAPON_CONFIGS continua a crescere colpi/spread come da ultimo gradino.
- */
-export function getWeaponFireConfig(level) {
-  const wl = Math.max(0, Math.floor(Number(level) || 0));
-  if (wl < WEAPON_CONFIGS.length) return WEAPON_CONFIGS[wl];
-  const last = WEAPON_CONFIGS[WEAPON_CONFIGS.length - 1];
-  const over = wl - (WEAPON_CONFIGS.length - 1);
-  return {
-    bullets: last.bullets + over * 2,
-    spread: Math.min(0.82, last.spread + over * 0.055),
-    speedMult: Math.max(0.12, last.speedMult - over * 0.06),
-  };
-}
 
 /** % velocità di crociera rispetto al livello 0 — stessa formula di client/main.js e server Game.tick */
 export function getWeaponMoveSpeedPercent(level) {
@@ -88,8 +73,23 @@ export function getWeaponMoveSpeedPercent(level) {
 export const BULLET_SPEED = 0.95;
 export const BULLET_LIFETIME = 1600;  // ms
 export const BULLET_HIT_RADIUS = 0.9;
-export const SHOOT_COOLDOWN_MS = 200; // cooldown autoritativo server/client
-export const MAX_ACTIVE_PROJECTILES = 160; // sotto il pool client da 200 istanze
+export const SHOOT_COOLDOWN_MS = 200; // cooldown sparo (client); il server tollera il jitter di rete
+export const MAX_ACTIVE_PROJECTILES = 400; // tetto di sicurezza lato server (pool client: 512)
+
+/**
+ * Colpi decisi da chi spara: il client del tiratore vede il proiettile toccare
+ * l'aereo nemico e lo comunica con l'età del proiettile all'impatto; il server
+ * rivede dove era il bersaglio in quell'istante e controlla che sia
+ * plausibile. Tolleranza = margine fisso (errore di stima della posizione
+ * disegnata) + quanto il bersaglio si sposta in una piccola finestra di
+ * tempo (orologi non allineati al millisecondo), in unità mondo.
+ */
+export const HIT_CLAIM_BASE_TOLERANCE = 2.0;
+export const HIT_CLAIM_TIME_WINDOW = 0.15;  // secondi
+/** Per quanto il server tiene un proiettile scaduto, per accettare claim in ritardo. */
+export const HIT_CLAIM_GRACE_MS = 450;
+/** Latenza massima (ms, sola andata) che il server accetta di compensare. */
+export const MAX_LAG_COMPENSATION_MS = 250;
 
 // Bombe (unità al SECONDO)
 export const BOMB_FALL_SPEED = 4.0;

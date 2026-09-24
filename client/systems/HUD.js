@@ -193,15 +193,22 @@ export class HUD {
       if (sb !== sa) return sb - sa;
       return (a.nickname || '').localeCompare(b.nickname || '', undefined, { sensitivity: 'base' });
     });
-    const html = byScore
-      .map((p) => {
-        const pts = (p.kills || 0) + (p.bombPoints || 0);
-        return `<div class="player-entry" style="color:${p.color}">${p.nickname} — ${pts}</div>`;
-      })
-      .join('');
-    if (html === this._scoreboardHtml) return;
-    this._scoreboardHtml = html;
-    this.el.playerList.innerHTML = html;
+    // Chiave di confronto invece di HTML: il nickname arriva dagli altri
+    // giocatori e non deve mai essere interpretato come markup.
+    const key = byScore
+      .map((p) => `${p.id}|${p.color}|${p.nickname}|${(p.kills || 0) + (p.bombPoints || 0)}`)
+      .join('\n');
+    if (key === this._scoreboardHtml) return;
+    this._scoreboardHtml = key;
+    const frag = document.createDocumentFragment();
+    for (const p of byScore) {
+      const row = document.createElement('div');
+      row.className = 'player-entry';
+      row.style.color = p.color ?? '';
+      row.textContent = `${p.nickname ?? '?'} — ${(p.kills || 0) + (p.bombPoints || 0)}`;
+      frag.appendChild(row);
+    }
+    this.el.playerList.replaceChildren(frag);
   }
 
   _updateArrow(localPlayer, target, camera) {

@@ -35,7 +35,6 @@ export class InputManager {
     };
 
     this._onMouseDown = this._onMouseDown.bind(this);
-    this._onMouseUp   = this._onMouseUp.bind(this);
     this._onKeyDown   = this._onKeyDown.bind(this);
     this._onKeyUp     = this._onKeyUp.bind(this);
     this._onContext   = (e) => e.preventDefault();
@@ -44,7 +43,6 @@ export class InputManager {
     window.addEventListener('keydown',      this._onKeyDown);
     window.addEventListener('keyup',        this._onKeyUp);
     window.addEventListener('mousedown',    this._onMouseDown);
-    window.addEventListener('mouseup',      this._onMouseUp);
     window.addEventListener('contextmenu',  this._onContext);
   }
 
@@ -69,13 +67,15 @@ export class InputManager {
     this.keys[e.code] = true;
   }
   _onKeyUp(e)   { this.keys[e.code] = false; }
+  // Il click resta "in coda" finché consumeShoot/consumeBomb non lo legge: il
+  // rilascio non lo cancella. Prima un click rapido (pressione e rilascio
+  // dentro lo stesso frame, frequente sotto i 30 fps) andava perso.
+  // I click su bottoni e campi dell'interfaccia non sparano: altrimenti il
+  // click su GIOCA resterebbe in coda e partirebbe un colpo all'ingresso.
   _onMouseDown(e) {
+    if (e.target?.closest?.('button, input, select, textarea, a, label')) return;
     if (e.button === 0) this.mouseLeft  = true;
     if (e.button === 2) this.mouseRight = true;
-  }
-  _onMouseUp(e) {
-    if (e.button === 0) this.mouseLeft  = false;
-    if (e.button === 2) this.mouseRight = false;
   }
 
   _keyboardTurnAxis() {
@@ -98,6 +98,12 @@ export class InputManager {
   isForward()  { return this.keys['KeyW'] || this.keys['ArrowUp']   || this.touch.forward; }
   isBackward() { return this.keys['KeyS'] || this.keys['ArrowDown'] || this.touch.backward; }
   isBoost()    { return !!this.keys['Space'] || this.touch.boost; }
+
+  /** Scarta click rimasti in coda (es. quelli fatti in lobby o da morti). */
+  clearQueuedClicks() {
+    this.mouseLeft = false;
+    this.mouseRight = false;
+  }
 
   consumeShoot() {
     if (this.mouseLeft || this.touch.shoot) {
@@ -242,7 +248,6 @@ export class InputManager {
     window.removeEventListener('keydown',     this._onKeyDown);
     window.removeEventListener('keyup',       this._onKeyUp);
     window.removeEventListener('mousedown',   this._onMouseDown);
-    window.removeEventListener('mouseup',     this._onMouseUp);
     window.removeEventListener('contextmenu', this._onContext);
     this.disableGyro();
   }

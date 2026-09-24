@@ -633,9 +633,10 @@
       -webkit-appearance: none;
       border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 18%, transparent);
       border-radius: 9999px;
-      background: color-mix(in srgb, var(--lw-surface-container-low) 78%, transparent);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
+      /* Niente backdrop-filter sull'HUD in partita: sopra un canvas WebGL il
+         browser rifà la sfocatura a ogni frame, e con sfondi già all'80% non
+         si vedeva. */
+      background: color-mix(in srgb, var(--lw-surface-container-low) 86%, transparent);
       color: var(--lw-on-surface);
       font-size: 0.95rem;
       font-weight: 700;
@@ -656,9 +657,7 @@
     }
 
     .hud-pill {
-      background: color-mix(in srgb, var(--lw-surface-container-low) 75%, transparent);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
+      background: color-mix(in srgb, var(--lw-surface-container-low) 86%, transparent);
       color: var(--lw-on-surface);
       padding: 0.45rem 1rem;
       border-radius: 9999px;
@@ -834,9 +833,7 @@
       top: 50%;
       transform: translateY(-50%);
       max-width: 11rem;
-      background: color-mix(in srgb, var(--lw-surface-container-low) 78%, transparent);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
+      background: color-mix(in srgb, var(--lw-surface-container-low) 86%, transparent);
       border-radius: 1rem;
       padding: 0.65rem 0.9rem;
       color: var(--lw-on-surface);
@@ -1062,9 +1059,7 @@
       max-width: 100%;
       padding: 0.35rem 0.75rem;
       border-radius: 0.6rem;
-      background: color-mix(in srgb, var(--lw-surface-container-low) 82%, transparent);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      background: color-mix(in srgb, var(--lw-surface-container-low) 88%, transparent);
       border: 1px solid color-mix(in srgb, var(--lw-outline-variant) 14%, transparent);
       font-family: 'Be Vietnam Pro', sans-serif;
       font-size: 0.82rem;

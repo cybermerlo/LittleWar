@@ -6,7 +6,8 @@
     "dev": "concurrently -k -n server,vite -c blue,green \"node --watch server/index.js\" \"vite\"",
     "dev:client": "vite",
     "build": "vite build",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "test": "node --test server/*.test.js tests/*.test.mjs"
   },
   "dependencies": {
     "express": "^4.18.2",

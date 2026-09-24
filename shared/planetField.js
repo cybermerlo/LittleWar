@@ -11,42 +11,133 @@ import { createNoise3D } from 'simplex-noise';
  * Il seed è fisso, quindi client e server generano esattamente lo stesso
  * pianeta senza scambiarsi dati.
  *
+ * Forma: continenti da rumore frattale con un leggero "domain warp" (coste
+ * frastagliate invece di macchie tonde), pianure costiere basse e piatte dove
+ * stanno città e torrette, colline nell'entroterra e catene montuose a creste
+ * (rumore "ridged") solo in alcune regioni. Il mare ha un fondale vero, con
+ * piattaforme poco profonde vicino alla costa: è ciò che dà all'acqua il
+ * turchese sotto riva e il blu scuro al largo.
+ *
+ * Quote: `elevationAt` restituisce unità mondo rispetto al livello del mare
+ * (negativo sott'acqua), `heightAt01` la stessa quota normalizzata su
+ * MOUNTAIN_HEIGHT. Le vette non superano MOUNTAIN_HEIGHT: gli aerei volano a
+ * FLY_ALTITUDE = 56, cioè appena sopra.
+ *
  * ATTENZIONE: la mesh renderizzata è l'approssimazione *lineare a tratti* di
  * questo campo (triangoli piatti tra i vertici). Per appoggiare oggetti sul
  * terreno NON usare questo modulo ma `client/scene/planetSurface.js`, che
- * campiona i triangoli effettivamente disegnati. Qui la quota è quella
- * "ideale", che tra un vertice e l'altro sta sopra o sotto quella visibile.
+ * campiona i triangoli effettivamente disegnati.
  */
 
 export const PLANET_RADIUS = 50;
+/** Quota massima delle vette sopra il livello del mare (unità mondo). */
 export const MOUNTAIN_HEIGHT = 5.2;
-export const WATER_LEVEL = 0.05;
+/** Profondità massima del fondale (unità mondo). */
+export const SEA_DEPTH = 2.6;
+/** Livello del mare in quota normalizzata: sotto è acqua. */
+export const WATER_LEVEL = 0;
 
-const NOISE_SCALE = 0.7;
-const noise3D = createNoise3D(() => 0.42);
+/** Spostamento del rumore dei continenti: più alto = più terra (~50%). */
+const LAND_BIAS = 0.035;
+
+/** PRNG deterministico (mulberry32): permutazioni di rumore ben mescolate. */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function rand() {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const continentNoise = createNoise3D(mulberry32(4201));
+const warpNoise      = createNoise3D(mulberry32(1337));
+const ridgeNoise     = createNoise3D(mulberry32(9091));
+const reliefNoise    = createNoise3D(mulberry32(2718));
+const detailNoise    = createNoise3D(mulberry32(5150));
 
 function clamp01(v) {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
-function smoothstep(x, edge0, edge1) {
+function smoothstep(edge0, edge1, x) {
   const t = clamp01((x - edge0) / (edge1 - edge0));
   return t * t * (3 - 2 * t);
 }
 
-/** Altezza normalizzata 0..1 lungo una direzione unitaria (nx, ny, nz). */
+function fbm(noise, x, y, z, octaves, gain = 0.5) {
+  let sum = 0, amp = 1, freq = 1, norm = 0;
+  for (let i = 0; i < octaves; i++) {
+    sum += noise(x * freq, y * freq, z * freq) * amp;
+    norm += amp;
+    amp *= gain;
+    freq *= 2.03;
+  }
+  return sum / norm;
+}
+
+/** "Continentalità" grezza: > 0 terra, < 0 mare. */
+function continentAt(nx, ny, nz) {
+  // Domain warp: sposta il punto di campionamento con un altro rumore, così
+  // le coste diventano golfi e penisole invece di contorni morbidi.
+  const wx = warpNoise(nx * 1.7, ny * 1.7, nz * 1.7) * 0.28;
+  const wy = warpNoise(nx * 1.7 + 11.3, ny * 1.7 + 4.1, nz * 1.7 - 7.7) * 0.28;
+  const wz = warpNoise(nx * 1.7 - 5.2, ny * 1.7 + 9.6, nz * 1.7 + 2.9) * 0.28;
+  // Poche ottave e persistenza bassa: con 5 ottave piene le coste diventavano
+  // frattali e subito dietro la spiaggia c'era una scogliera sottomarina, così
+  // le pianure erano strisce troppo strette per paesi e torrette.
+  return fbm(continentNoise, (nx + wx) * 1.05, (ny + wy) * 1.05, (nz + wz) * 1.05, 4, 0.38) + LAND_BIAS;
+}
+
+/**
+ * Quota del terreno lungo una direzione unitaria, in unità mondo rispetto al
+ * livello del mare: da −SEA_DEPTH (fosse oceaniche) a MOUNTAIN_HEIGHT.
+ */
+export function elevationAt(nx, ny, nz) {
+  const c = continentAt(nx, ny, nz);
+
+  if (c < 0) {
+    // Mare: piattaforma poco profonda lungo la costa, poi il largo.
+    const d = smoothstep(0, 0.3, -c);
+    return -(0.24 + (SEA_DEPTH - 0.24) * Math.pow(d, 1.25));
+  }
+
+  // Terra. La costa sale con una spiaggia corta; dietro, il rilievo NON
+  // dipende dalla distanza dal mare ma da un rumore indipendente: così
+  // esistono pianure ampie anche nell'entroterra (paesi e torrette ci
+  // stanno comodi), colline dove il rilievo sale e catene montuose dove sale
+  // ancora. Legato alla costa, il rilievo faceva della pianura una striscia.
+  const shore = smoothstep(0, 0.03, c);
+  const awayFromCoast = smoothstep(0.03, 0.14, c);
+  const relief = fbm(reliefNoise, nx * 1.35 + 3.7, ny * 1.35 - 1.2, nz * 1.35 + 0.4, 3, 0.45); // −1..1
+  const detail = fbm(detailNoise, nx * 5.5, ny * 5.5, nz * 5.5, 3); // −1..1
+
+  let h = 0.05 + 0.1 * shore;
+  // Colline dolci.
+  h += awayFromCoast * smoothstep(0.02, 0.4, relief) * (0.1 + 0.08 * (0.5 + 0.5 * detail));
+
+  // Catene montuose: creste di rumore "ridged" dove il rilievo è più alto.
+  const rangeMask = smoothstep(0.24, 0.5, relief) * awayFromCoast;
+  if (rangeMask > 0) {
+    const r1 = 1 - Math.abs(ridgeNoise(nx * 2.6, ny * 2.6, nz * 2.6));
+    const r2 = 1 - Math.abs(ridgeNoise(nx * 5.3 + 3.1, ny * 5.3 - 1.7, nz * 5.3 + 8.2));
+    const ridged = Math.pow(r1, 2.4) * 0.8 + Math.pow(r2, 2.0) * 0.2;
+    h += rangeMask * (0.12 + ridged * 0.7);
+  }
+
+  return MOUNTAIN_HEIGHT * Math.min(0.97, h);
+}
+
+/** Quota normalizzata (su MOUNTAIN_HEIGHT) lungo una direzione unitaria; negativa in mare. */
 export function heightAt01(nx, ny, nz) {
-  const base   = noise3D(nx * NOISE_SCALE, ny * NOISE_SCALE, nz * NOISE_SCALE);
-  const broad  = noise3D(nx * 1.8,         ny * 1.8,         nz * 1.8);
-  const detail = noise3D(nx * 3.0,         ny * 3.0,         nz * 3.0);
-  const n = (base * 1.0 + broad * 0.25 + detail * 0.06) / 1.31;
-  const n01 = clamp01((n + 1) * 0.5);
-  return Math.pow(smoothstep(n01, 0.46, 0.92), 1.85);
+  return elevationAt(nx, ny, nz) / MOUNTAIN_HEIGHT;
 }
 
 /** Raggio della superficie ideale lungo una direzione unitaria. */
 export function radiusAt(nx, ny, nz) {
-  return PLANET_RADIUS + heightAt01(nx, ny, nz) * MOUNTAIN_HEIGHT;
+  return PLANET_RADIUS + elevationAt(nx, ny, nz);
 }
 
 /** Direzione unitaria da coordinate sferiche (stessa convenzione del gioco). */

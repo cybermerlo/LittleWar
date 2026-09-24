@@ -1,219 +1,241 @@
 import * as THREE from 'three';
-import {
-  PLANET_RADIUS,
-  MOUNTAIN_HEIGHT,
-  WATER_LEVEL,
-  heightAt01,
-} from '../../shared/planetField.js';
-import { buildPlanetSurfaceIndex } from './planetSurface.js';
+import { PLANET_RADIUS, elevationAt } from '../../shared/planetField.js';
+import { buildPlanetSurfaceIndex, SEA_SURFACE_RADIUS } from './planetSurface.js';
+import { faceColor, hash01 } from './planetBiomes.js';
 
-export { PLANET_RADIUS, MOUNTAIN_HEIGHT, WATER_LEVEL };
-const DETAIL = 5; // più vertici → silhouette e costa più morbide
+/**
+ * Pianeta low-poly: terreno, mare e atmosfera.
+ *
+ * Terreno
+ * -------
+ * IcosahedronGeometry con DETAIL = 36: ~27k facce larghe ~1.4 unità (prima
+ * erano 720 facce da 10 unità, con coste a zig-zag e montagne a piramide).
+ * La geometria non è indicizzata, quindi ogni faccia ha i suoi tre vertici:
+ * li coloriamo tutti e tre con il colore del bioma della faccia, ed è questo
+ * che dà il look "a sfaccettature" pulito, senza sfumature tra una faccia e
+ * l'altra. Con `computeVertexNormals` su una geometria non indicizzata le
+ * normali sono già quelle di faccia.
+ *
+ * Mare
+ * ----
+ * Stessa suddivisione del terreno, così ogni vertice dell'acqua sta sulla
+ * stessa direzione di un vertice del terreno e ne conosce la profondità
+ * esatta (attributo `aDepth`): turchese sopra le piattaforme, blu al largo,
+ * schiuma dove la profondità tende a zero (cioè esattamente sulla costa
+ * disegnata) e ghiaccio vicino ai poli. Le facce interamente sopra la costa
+ * non vengono create. L'illuminazione segue il ciclo giorno/notte.
+ */
 
-// Palette pastello per altitudine (normalizzata 0..1).
-const COLORS = [
-  { h: -0.02, color: new THREE.Color(0x3f88c6) }, // acqua profonda
-  { h:  0.00, color: new THREE.Color(0x5ea8d9) }, // acqua
-  { h:  0.04, color: new THREE.Color(0xf5df9f) }, // spiaggia
-  { h:  0.11, color: new THREE.Color(0x8ecf73) }, // pianura
-  { h:  0.30, color: new THREE.Color(0x6eb25c) }, // colline
-  { h:  0.58, color: new THREE.Color(0xb09c86) }, // roccia
-  { h:  0.86, color: new THREE.Color(0xfff9f1) }, // neve
-  { h:  1.00, color: new THREE.Color(0xffffff) },
-];
+const DETAIL = 36;
 
-function altitudeColor(normalizedH) {
-  for (let i = 0; i < COLORS.length - 1; i++) {
-    const a = COLORS[i], b = COLORS[i + 1];
-    if (normalizedH <= b.h) {
-      const t = THREE.MathUtils.clamp((normalizedH - a.h) / (b.h - a.h), 0, 1);
-      const smoothT = t * t * (3 - 2 * t);
-      return new THREE.Color().lerpColors(a.color, b.color, smoothT);
+// ── Terreno ───────────────────────────────────────────────────────────────────
+
+function buildTerrainGeometry() {
+  const geo = new THREE.IcosahedronGeometry(1, DETAIL);
+  const pos = geo.getAttribute('position');
+  const count = pos.count;
+  const elevation = new Float32Array(count);
+
+  // I vertici condivisi compaiono in più facce: la quota si calcola una sola
+  // volta per direzione.
+  const cache = new Map();
+  for (let i = 0; i < count; i++) {
+    let x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const l = Math.hypot(x, y, z);
+    x /= l; y /= l; z /= l;
+    const key = `${Math.round(x * 1e5)},${Math.round(y * 1e5)},${Math.round(z * 1e5)}`;
+    let e = cache.get(key);
+    if (e === undefined) {
+      e = elevationAt(x, y, z);
+      cache.set(key, e);
+    }
+    elevation[i] = e;
+    const r = PLANET_RADIUS + e;
+    pos.setXYZ(i, x * r, y * r, z * r);
+  }
+
+  const colors = new Float32Array(count * 3);
+  const col = new THREE.Color();
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const n = new THREE.Vector3(), centroid = new THREE.Vector3();
+  const e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
+
+  for (let f = 0; f < count / 3; f++) {
+    const i0 = f * 3;
+    a.fromBufferAttribute(pos, i0);
+    b.fromBufferAttribute(pos, i0 + 1);
+    c.fromBufferAttribute(pos, i0 + 2);
+    centroid.copy(a).add(b).add(c).normalize();
+    n.crossVectors(e1.subVectors(b, a), e2.subVectors(c, a)).normalize();
+    if (n.dot(centroid) < 0) n.negate();
+    const slope = 1 - Math.max(0, Math.min(1, n.dot(centroid)));
+    const eAvg = (elevation[i0] + elevation[i0 + 1] + elevation[i0 + 2]) / 3;
+
+    faceColor(col, centroid.x, centroid.y, centroid.z, eAvg, slope, hash01(f));
+    for (let k = 0; k < 3; k++) {
+      colors[(i0 + k) * 3] = col.r;
+      colors[(i0 + k) * 3 + 1] = col.g;
+      colors[(i0 + k) * 3 + 2] = col.b;
     }
   }
-  return COLORS[COLORS.length - 1].color.clone();
+
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  return { geo, elevation };
 }
 
-function createToonGradientMap() {
-  const data = new Uint8Array([42, 110, 182, 255]);
-  const gradientMap = new THREE.DataTexture(data, 4, 1, THREE.RedFormat);
-  gradientMap.minFilter = THREE.NearestFilter;
-  gradientMap.magFilter = THREE.NearestFilter;
-  gradientMap.generateMipmaps = false;
-  gradientMap.needsUpdate = true;
-  return gradientMap;
-}
+// ── Mare ─────────────────────────────────────────────────────────────────────
 
-// Direzione del sole coerente con Lighting.js (DirectionalLight sun a 130,95,70).
-const SUN_DIR = new THREE.Vector3(130, 95, 70).normalize();
-
-// ── Terrain material: MeshToonMaterial con snow caps shader-driven ────────────
-// Usiamo onBeforeCompile per restare compatibili con le 3 direzionali + ambient
-// + fog definite in Lighting.js, senza reinventare il modello d'illuminazione.
-function createTerrainMaterial() {
-  const mat = new THREE.MeshToonMaterial({
-    vertexColors: true,
-    flatShading: true,
-    gradientMap: createToonGradientMap(),
-  });
-
-  mat.userData.uniforms = {
-    uSnowStart:  { value: 0.55 },
-    uSnowEnd:    { value: 0.82 },
-    uSnowUpness: { value: 0.45 }, // quanto "piatto" serve essere per prendere neve
-    uSnowColor:  { value: new THREE.Color(0xfdfdfd) },
-    uRockColor:  { value: new THREE.Color(0x9a8c78) },
-    uRockSlope:  { value: 0.42 }, // sopra questa pendenza la roccia si scopre
-  };
-
-  mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, mat.userData.uniforms);
-
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        '#include <common>',
-        `#include <common>
-         attribute float aHeight01;
-         varying float vHeight01;
-         varying float vUpness;`,
-      )
-      .replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-         vHeight01 = aHeight01;
-         vec3 _worldN = normalize(mat3(modelMatrix) * normal);
-         vec3 _worldR = normalize((modelMatrix * vec4(position, 1.0)).xyz);
-         vUpness = clamp(dot(_worldN, _worldR), 0.0, 1.0);`,
-      );
-
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        '#include <common>',
-        `#include <common>
-         uniform float uSnowStart;
-         uniform float uSnowEnd;
-         uniform float uSnowUpness;
-         uniform float uRockSlope;
-         uniform vec3  uSnowColor;
-         uniform vec3  uRockColor;
-         varying float vHeight01;
-         varying float vUpness;`,
-      )
-      .replace(
-        '#include <color_fragment>',
-        `#include <color_fragment>
-         // Roccia: sui versanti ripidi esce il sottoroccia, più saturo del vertex color.
-         float rockMask = smoothstep(1.0 - uRockSlope, 1.0 - uRockSlope - 0.18, vUpness);
-         diffuseColor.rgb = mix(diffuseColor.rgb, uRockColor, rockMask * 0.55);
-         // Neve: su alta quota e su superfici abbastanza piatte.
-         float snowByH = smoothstep(uSnowStart, uSnowEnd, vHeight01);
-         float snowByN = smoothstep(uSnowUpness, uSnowUpness + 0.35, vUpness);
-         float snowMask = snowByH * snowByN;
-         diffuseColor.rgb = mix(diffuseColor.rgb, uSnowColor, snowMask);`,
-      );
-  };
-
-  return mat;
-}
-
-// ── Water shader: onde Gerstner-like + fresnel + specular solare ─────────────
 const WATER_VERT = /* glsl */`
+  attribute float aDepth;
+  attribute float aIce;
   uniform float uTime;
   varying vec3  vWorldPos;
-  varying vec3  vSphereN;   // normale della sfera base (radiale)
-  varying float vWaveH;
-
-  float waveH(vec3 dir, float t) {
-    float theta = acos(clamp(dir.y, -1.0, 1.0));
-    float phi   = atan(dir.z, dir.x);
-    float h = 0.0;
-    h += sin(phi  * 6.0 + t * 0.95)               * 0.065;
-    h += sin(theta * 7.5 - t * 0.70 + phi * 2.7)  * 0.050;
-    h += sin((phi + theta) * 11.0 + t * 1.40)     * 0.028;
-    return h;
-  }
+  varying vec3  vDir;
+  varying float vDepth;
+  varying float vIce;
+  #include <fog_pars_vertex>
 
   void main() {
-    vec3 nrm = normalize(position);
-    float h = waveH(nrm, uTime);
-    vec3 p = position + nrm * h;
+    vec3 dir = normalize(position);
+    // Onde: somme di seni su direzioni 3D (niente coordinate sferiche, quindi
+    // niente pizzicature ai poli). Nulle vicino alla costa, così l'acqua non
+    // "entra" nella spiaggia.
+    float w = sin(dot(dir, vec3(21.0, 17.0, 11.0)) + uTime * 1.3)
+            + sin(dot(dir, vec3(-13.0, 27.0, 8.0)) - uTime * 1.1) * 0.7
+            + sin(dot(dir, vec3(9.0, -15.0, 31.0)) + uTime * 1.7) * 0.4;
+    float amp = 0.028 * smoothstep(0.1, 0.9, aDepth);
+    vec3 p = position + dir * w * amp;
 
     vec4 wp = modelMatrix * vec4(p, 1.0);
     vWorldPos = wp.xyz;
-    vSphereN  = normalize(mat3(modelMatrix) * nrm);
-    vWaveH    = h;
-
-    gl_Position = projectionMatrix * viewMatrix * wp;
+    vDir = dir;
+    vDepth = aDepth;
+    vIce = aIce;
+    vec4 mvPosition = viewMatrix * wp;
+    gl_Position = projectionMatrix * mvPosition;
+    #include <fog_vertex>
   }
 `;
 
 const WATER_FRAG = /* glsl */`
-  uniform vec3  uCameraPos;
+  uniform float uTime;
   uniform vec3  uSunDir;
+  uniform vec3  uSunColor;
+  uniform vec3  uAmbient;
   uniform vec3  uShallow;
   uniform vec3  uDeep;
   uniform vec3  uFoam;
-  uniform float uOpacity;
-  uniform vec3  fogColor;
-  uniform float fogNear;
-  uniform float fogFar;
+  uniform vec3  uIce;
   varying vec3  vWorldPos;
-  varying vec3  vSphereN;
-  varying float vWaveH;
+  varying vec3  vDir;
+  varying float vDepth;
+  varying float vIce;
+  #include <fog_pars_fragment>
 
   void main() {
-    vec3 V = normalize(uCameraPos - vWorldPos);
-    vec3 N = normalize(vSphereN);
+    // Normale di faccia dalle derivate: acqua sfaccettata come il terreno,
+    // e le onde fanno scintillare le facce una per una.
+    vec3 N = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
+    if (dot(N, vDir) < 0.0) N = -N;
+    vec3 V = normalize(cameraPosition - vWorldPos);
+    float ndl = max(dot(N, uSunDir), 0.0);
+    vec3 light = uAmbient + uSunColor * ndl;
 
-    float fres = pow(1.0 - max(dot(N, V), 0.0), 3.0);
-    vec3  base = mix(uDeep, uShallow, smoothstep(-0.05, 0.08, vWaveH));
+    float depthT = smoothstep(0.05, 1.9, vDepth);
+    vec3 col = mix(uShallow, uDeep, depthT) * light;
 
-    // Specular cartoon: soglia secca per un riflesso "a macchia" sul sole.
-    vec3  R = reflect(-uSunDir, N);
-    float spec = pow(max(dot(R, V), 0.0), 56.0);
-    spec = smoothstep(0.25, 0.6, spec);
+    // Riflesso del sole: scintille sulle singole facce, non una macchia unica.
+    vec3 R = reflect(-uSunDir, N);
+    float spec = pow(max(dot(R, V), 0.0), 90.0);
+    col += uSunColor * smoothstep(0.25, 0.8, spec) * 0.35;
 
-    float foam = smoothstep(0.072, 0.098, vWaveH);
+    // Fresnel: ai bordi del pianeta l'acqua riflette il cielo.
+    float fres = pow(1.0 - max(dot(N, V), 0.0), 4.0);
+    col = mix(col, uShallow * light * 1.25, fres * 0.35);
 
-    vec3 col = base;
-    col += fres * 0.35 * uShallow;
-    col = mix(col, uFoam, foam * 0.65);
-    col += vec3(1.0, 0.96, 0.88) * spec * 0.9;
+    // Schiuma sulla costa: una fascia che respira col tempo.
+    float breathe = 0.5 + 0.5 * sin(uTime * 1.6 + dot(vDir, vec3(40.0, 23.0, 31.0)));
+    float foam = 1.0 - smoothstep(0.015, 0.08 + 0.04 * breathe, vDepth);
+    col = mix(col, uFoam * light, foam * 0.85);
 
-    // Fog (sincronizzato con scene.fog)
-    float depth = length(uCameraPos - vWorldPos);
-    float fogF  = smoothstep(fogNear, fogFar, depth);
-    col = mix(col, fogColor, fogF);
+    // Banchisa polare.
+    col = mix(col, uIce * light, vIce);
 
-    // Alpha varia con fresnel: trasparente guardando dritto, opaco ai bordi.
-    float alpha = mix(0.28, 0.72, fres);
+    float alpha = mix(0.62, 0.93, depthT);
+    alpha = max(alpha, max(foam * 0.9, vIce));
+    alpha = min(1.0, alpha + fres * 0.1);
     gl_FragColor = vec4(col, alpha);
+    #include <fog_fragment>
   }
 `;
 
+function buildWaterGeometry(elevation) {
+  const src = new THREE.IcosahedronGeometry(SEA_SURFACE_RADIUS, DETAIL);
+  const pos = src.getAttribute('position');
+  const faces = pos.count / 3;
+
+  const keep = [];
+  for (let f = 0; f < faces; f++) {
+    const i = f * 3;
+    const minE = Math.min(elevation[i], elevation[i + 1], elevation[i + 2]);
+    if (minE < 0.35) keep.push(f); // facce almeno in parte sotto (o a filo) del mare
+  }
+
+  const positions = new Float32Array(keep.length * 9);
+  const depth = new Float32Array(keep.length * 3);
+  const ice = new Float32Array(keep.length * 3);
+  let o = 0;
+  for (const f of keep) {
+    for (let k = 0; k < 3; k++) {
+      const i = f * 3 + k;
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      positions[o * 3] = x; positions[o * 3 + 1] = y; positions[o * 3 + 2] = z;
+      depth[o] = -elevation[i];
+      // Ghiaccio oltre ~62° di latitudine, con un bordo frastagliato.
+      const lat = Math.abs(y) / SEA_SURFACE_RADIUS;
+      const edge = 0.88 + 0.035 * Math.sin(x * 0.9) * Math.cos(z * 0.7);
+      ice[o] = THREE.MathUtils.smoothstep(lat, edge - 0.015, edge + 0.015);
+      o++;
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('aDepth', new THREE.BufferAttribute(depth, 1));
+  geo.setAttribute('aIce', new THREE.BufferAttribute(ice, 1));
+  geo.computeBoundingSphere();
+  src.dispose();
+  return geo;
+}
+
 function createWaterMaterial() {
   return new THREE.ShaderMaterial({
-    uniforms: {
-      uTime:      { value: 0 },
-      uCameraPos: { value: new THREE.Vector3() },
-      uSunDir:    { value: SUN_DIR.clone() },
-      uShallow:   { value: new THREE.Color(0x83c7ea) },
-      uDeep:      { value: new THREE.Color(0x1f5a87) },
-      uFoam:      { value: new THREE.Color(0xeaf6ff) },
-      uOpacity:   { value: 0.62 },
-      fogColor:   { value: new THREE.Color(0xcfeaf7) },
-      fogNear:    { value: 160 },
-      fogFar:     { value: 430 },
-    },
-    vertexShader:   WATER_VERT,
+    uniforms: THREE.UniformsUtils.merge([
+      THREE.UniformsLib.fog,
+      {
+        uTime:     { value: 0 },
+        uSunDir:   { value: new THREE.Vector3(1, 1, 1).normalize() },
+        uSunColor: { value: new THREE.Color(1, 1, 1) },
+        uAmbient:  { value: new THREE.Color(0.5, 0.5, 0.5) },
+        uShallow:  { value: new THREE.Color(0x46d3d8) },
+        uDeep:     { value: new THREE.Color(0x2272c4) },
+        uFoam:     { value: new THREE.Color(0xf4fbff) },
+        uIce:      { value: new THREE.Color(0xe6f2fb) },
+      },
+    ]),
+    vertexShader: WATER_VERT,
     fragmentShader: WATER_FRAG,
     transparent: true,
     depthWrite: false,
-    fog: false, // gestita in shader
+    fog: true,
+    extensions: { derivatives: true },
   });
 }
 
-// ── Atmosfera: fresnel additivo (BackSide) ───────────────────────────────────
+// ── Atmosfera ────────────────────────────────────────────────────────────────
+
 const ATM_VERT = /* glsl */`
   varying vec3 vNormal;
   varying vec3 vWorldPos;
@@ -226,25 +248,28 @@ const ATM_VERT = /* glsl */`
 `;
 
 const ATM_FRAG = /* glsl */`
-  uniform vec3  uCameraPos;
   uniform vec3  uColor;
+  uniform vec3  uSunDir;
   uniform float uIntensity;
   varying vec3  vNormal;
   varying vec3  vWorldPos;
   void main() {
-    vec3 V = normalize(uCameraPos - vWorldPos);
-    // BackSide: la normale punta all'interno → uso abs per un limb-glow simmetrico
-    float f = pow(1.0 - abs(dot(vNormal, V)), 2.4);
-    gl_FragColor = vec4(uColor * f * uIntensity, f * uIntensity);
+    vec3 V = normalize(cameraPosition - vWorldPos);
+    // BackSide: la normale punta all'interno → abs per un bagliore simmetrico
+    float f = pow(1.0 - abs(dot(vNormal, V)), 2.6);
+    // Più luminosa dal lato del sole, un filo di luce anche sul lato notte.
+    float sun = 0.3 + 0.7 * smoothstep(-0.35, 0.6, dot(normalize(vWorldPos), uSunDir));
+    float a = f * uIntensity * sun;
+    gl_FragColor = vec4(uColor * a, a);
   }
 `;
 
 function createAtmosphereMaterial() {
   return new THREE.ShaderMaterial({
     uniforms: {
-      uCameraPos: { value: new THREE.Vector3() },
-      uColor:     { value: new THREE.Color(0xbdeaff) },
-      uIntensity: { value: 0.28 },
+      uColor:     { value: new THREE.Color(0x9fdcff) },
+      uSunDir:    { value: new THREE.Vector3(1, 1, 1).normalize() },
+      uIntensity: { value: 0.55 },
     },
     vertexShader:   ATM_VERT,
     fragmentShader: ATM_FRAG,
@@ -257,82 +282,61 @@ function createAtmosphereMaterial() {
 }
 
 // ── Factory ───────────────────────────────────────────────────────────────────
+
+/**
+ * @param {THREE.Scene} scene
+ * @param {object} [options]
+ * @param {boolean} [options.lowQuality]  niente atmosfera, acqua ferma
+ */
 export function createPlanet(scene, options = {}) {
-  let qualityStage = Math.max(0, options.qualityStage ?? 0);
-  const geo = new THREE.IcosahedronGeometry(PLANET_RADIUS, DETAIL);
-  const posAttr = geo.attributes.position;
-  const count = posAttr.count;
+  const lowQuality = !!options.lowQuality;
 
-  const colors = new Float32Array(count * 3);
-  const heightData = new Float32Array(count);
-  const heightAttr = new Float32Array(count);
-
-  for (let i = 0; i < count; i++) {
-    const x = posAttr.getX(i);
-    const y = posAttr.getY(i);
-    const z = posAttr.getZ(i);
-
-    const len = Math.sqrt(x * x + y * y + z * z);
-    const nx = x / len, ny = y / len, nz = z / len;
-
-    const h01 = heightAt01(nx, ny, nz);
-    const r = PLANET_RADIUS + h01 * MOUNTAIN_HEIGHT;
-
-    posAttr.setXYZ(i, nx * r, ny * r, nz * r);
-    heightData[i] = h01;
-    heightAttr[i] = h01;
-
-    const col = altitudeColor(h01 < WATER_LEVEL ? h01 - 0.04 : h01);
-    colors[i * 3]     = col.r;
-    colors[i * 3 + 1] = col.g;
-    colors[i * 3 + 2] = col.b;
-  }
-
-  geo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
-  geo.setAttribute('aHeight01', new THREE.BufferAttribute(heightAttr, 1));
-  geo.computeVertexNormals();
-
+  const { geo, elevation } = buildTerrainGeometry();
   // Indice dei triangoli renderizzati: da qui in poi chiunque debba appoggiare
   // qualcosa sul terreno interroga la superficie vera, non il campo analitico.
   buildPlanetSurfaceIndex(geo);
 
-  const mat = createTerrainMaterial();
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
   const mesh = new THREE.Mesh(geo, mat);
+  mesh.matrixAutoUpdate = false;
   scene.add(mesh);
 
-  // Acqua: ora un guscio leggermente più in basso per non coprire le spiagge,
-  // con onde generate in vertex shader.
-  const waterSegX = qualityStage >= 2 ? 48 : 64;
-  const waterSegY = qualityStage >= 2 ? 24 : 40;
-  const waterGeo = new THREE.SphereGeometry(PLANET_RADIUS + 0.02, waterSegX, waterSegY);
   const waterMat = createWaterMaterial();
-  const water = new THREE.Mesh(waterGeo, waterMat);
+  const water = new THREE.Mesh(buildWaterGeometry(elevation), waterMat);
   water.renderOrder = 1;
+  water.matrixAutoUpdate = false;
   scene.add(water);
 
-  const atmosphereGeo = new THREE.SphereGeometry(
-    PLANET_RADIUS + 1.1,
-    qualityStage >= 2 ? 32 : 48,
-    qualityStage >= 2 ? 20 : 32,
-  );
   const atmosphereMat = createAtmosphereMaterial();
-  const atmosphere = new THREE.Mesh(atmosphereGeo, atmosphereMat);
+  const atmosphere = new THREE.Mesh(new THREE.SphereGeometry(PLANET_RADIUS + 2.8, 64, 40), atmosphereMat);
   atmosphere.renderOrder = 2;
-  atmosphere.visible = qualityStage < 2;
+  atmosphere.visible = !lowQuality;
+  atmosphere.matrixAutoUpdate = false;
   scene.add(atmosphere);
 
-  function setQualityStage(stage) {
-    qualityStage = Math.max(qualityStage, stage ?? 0);
-    atmosphere.visible = qualityStage < 2;
-  }
+  const _tmp = new THREE.Color();
 
-  function update(delta, cameraWorldPos) {
-    if (qualityStage < 2) waterMat.uniforms.uTime.value += delta;
-    if (cameraWorldPos) {
-      waterMat.uniforms.uCameraPos.value.copy(cameraWorldPos);
-      atmosphereMat.uniforms.uCameraPos.value.copy(cameraWorldPos);
+  /**
+   * @param {number} delta
+   * @param {{sun:THREE.DirectionalLight, ambient:THREE.AmbientLight, fill?:THREE.DirectionalLight}} [lights]
+   * @param {THREE.Color} [skyTint] colore del cielo all'orizzonte (tinge l'atmosfera)
+   */
+  function update(delta, lights, skyTint) {
+    const u = waterMat.uniforms;
+    if (!lowQuality) u.uTime.value += delta;
+    if (lights?.sun) {
+      u.uSunDir.value.copy(lights.sun.position).normalize();
+      u.uSunColor.value.copy(lights.sun.color).multiplyScalar(lights.sun.intensity);
+      atmosphereMat.uniforms.uSunDir.value.copy(u.uSunDir.value);
+    }
+    if (lights?.ambient) {
+      u.uAmbient.value.copy(lights.ambient.color).multiplyScalar(lights.ambient.intensity);
+      if (lights.fill) u.uAmbient.value.add(_tmp.copy(lights.fill.color).multiplyScalar(lights.fill.intensity * 0.5));
+    }
+    if (skyTint) {
+      atmosphereMat.uniforms.uColor.value.set(0x9fdcff).lerp(skyTint, 0.35);
     }
   }
 
-  return { mesh, water, atmosphere, heightData, posAttr, update, setQualityStage };
+  return { mesh, water, atmosphere, update };
 }

@@ -41,6 +41,7 @@ export class Building {
     // Stato torretta
     this.turretTargetId = null;
     this.turretCooldown = 0;   // secondi rimanenti prima del prossimo sparo
+    this._shotSeq = 0;
   }
 
   /** Resetta l'edificio a stato neutrale (bombardamento) */
@@ -162,17 +163,19 @@ export class Building {
     // appare dall'estremità del cannone invece che dal centro della torretta.
     const spawn = moveOnSphere(this.theta, this.phi, heading, TURRET_MUZZLE_OFFSET);
 
-    const proj = new Projectile(
-      `turret-${this.id}`,  // ownerId speciale per le torrette
-      spawn.theta,
-      spawn.phi,
+    return new Projectile({
+      id: `T${this.id}.${this._shotSeq++}:0`,
+      ownerId: `turret-${this.id}`,  // ownerId speciale per le torrette
+      theta: spawn.theta,
+      phi: spawn.phi,
       heading,
-      TURRET_BULLET_SPEED,
-      TURRET_BULLET_LIFETIME,
-    );
-    // Aggiungiamo il buildingOwnerId per identificare chi possiede la torre
-    proj.buildingOwnerId = this.ownerId;
-    return proj;
+      speed: TURRET_BULLET_SPEED,
+      lifetime: TURRET_BULLET_LIFETIME,
+      // Nessun client "possiede" la torretta: gli impatti li decide il server.
+      serverHits: true,
+      // Chi possiede la torre non viene colpito dai suoi proiettili.
+      buildingOwnerId: this.ownerId,
+    });
   }
 
   /** Calcola l'heading (direzione di volo) dal building verso un punto sferico */
@@ -224,7 +227,9 @@ export class Building {
       phi: this.phi,
       ownerId: this.ownerId,
       ownerColor: this.ownerColor,
-      conquestProgress: this.conquestProgress,
+      // Arrotondato: basta per la barra e fa sì che lo stato cambi (e venga
+      // ritrasmesso) una decina di volte al secondo invece che a ogni tick.
+      conquestProgress: Math.round(this.conquestProgress * 100) / 100,
       conqueringPlayerId: this.conqueringPlayerId,
       turretTargetId: this.turretTargetId,
     };

@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { PLANET_RADIUS, MOUNTAIN_HEIGHT, radiusAt } from '../../shared/planetField.js';
 
+/** Raggio della superficie del mare: sotto c'è il fondale, sopra la terra emersa. */
+export const SEA_SURFACE_RADIUS = PLANET_RADIUS;
+
 /**
  * Campionatore della superficie EFFETTIVAMENTE RENDERIZZATA del pianeta.
  *
@@ -23,9 +26,9 @@ import { PLANET_RADIUS, MOUNTAIN_HEIGHT, radiusAt } from '../../shared/planetFie
  * Accelerazione
  * -------------
  * Griglia su cubemap: 6 facce × GRID×GRID celle, con GRID scelto in base alla
- * dimensione reale dei triangoli (con `detail = 5` sono larghi ~10 unità, non
- * pochi decimi: `PolyhedronGeometry` suddivide ogni spigolo in `detail + 1`
- * segmenti, non ricorsivamente). Ogni triangolo viene registrato nelle celle
+ * dimensione reale dei triangoli (`PolyhedronGeometry` suddivide ogni spigolo
+ * in `detail + 1` segmenti, non ricorsivamente: con `detail = 36` le facce
+ * sono larghe ~1.4 unità). Ogni triangolo viene registrato nelle celle
  * dei suoi vertici; la query esamina il 3×3 attorno alla propria cella e, se
  * non trova nulla, ricade su una scansione completa — così il risultato è
  * corretto per costruzione qualunque sia la risoluzione della mesh.
@@ -130,9 +133,13 @@ function chooseGridResolution(pos, index, triCount) {
   }
 
   if (!(maxSpan > 0)) return 8;
-  // Una faccia del cubo copre ~π/2 rad: quante celle ci stanno larghe `maxSpan`?
-  const g = Math.floor((Math.PI / 2) / maxSpan);
-  return Math.max(2, Math.min(48, g));
+  // Una cella larga du = 2/GRID sul piano del cubo copre du radianti al
+  // centro della faccia ma solo ~0.47·du agli angoli (proiezione gnomonica).
+  // Per stare sicuri ovunque: 0.47 · 2/GRID ≥ maxSpan. Con la formula
+  // precedente, (π/2)/maxSpan, le celle agli angoli erano più piccole dei
+  // triangoli e le query ricadevano sulla scansione completa (27k triangoli).
+  const g = Math.floor(0.94 / maxSpan);
+  return Math.max(2, Math.min(64, g));
 }
 
 /**
@@ -323,9 +330,14 @@ export function sampleGroundSpherical(theta, phi, out = makeSurfaceHit()) {
   return sampleGround(_sphDir, out);
 }
 
-/** Raggio del terreno visibile a (theta, phi). */
+/** Raggio del terreno visibile a (theta, phi) — sul mare è il fondale. */
 export function groundRadiusSpherical(theta, phi) {
   return sampleGroundSpherical(theta, phi, _fallbackHit).radius;
+}
+
+/** Raggio della superficie visibile (terra emersa o pelo dell'acqua). */
+export function surfaceRadiusSpherical(theta, phi) {
+  return Math.max(SEA_SURFACE_RADIUS, groundRadiusSpherical(theta, phi));
 }
 
 // ── Appoggio di una base rigida su terreno irregolare ─────────────────────────
@@ -442,6 +454,11 @@ export function createConformingRingGeometry(centerDir, innerRadius, outerRadius
         .addScaledVector(tv, sa * radius)
         .normalize();
       sampleGround(probe, hit);
+      // Dove il terreno scende sotto il mare l'anello resta sul pelo dell'acqua.
+      if (hit.radius < SEA_SURFACE_RADIUS) {
+        hit.point.copy(probe).multiplyScalar(SEA_SURFACE_RADIUS);
+        hit.normal.copy(probe);
+      }
       const idx = (s * 2 + ring) * 3;
       positions[idx]     = hit.point.x + hit.normal.x * offset;
       positions[idx + 1] = hit.point.y + hit.normal.y * offset;

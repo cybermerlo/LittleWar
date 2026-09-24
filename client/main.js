@@ -7,8 +7,9 @@ import { createTerrain, loadTreeTemplates, loadBuildingTemplates, loadHospitalTe
 import { createSky } from './scene/Sky.js';
 import { setupLighting } from './scene/Lighting.js';
 import { Airplane, preloadAirplaneModels } from './entities/Airplane.js';
-import { ProjectileEntity } from './entities/Projectile.js';
-import { BombEntity, spawnExplosion, initExplosionPool, tickExplosions } from './entities/Bomb.js';
+import { ProjectileSystem } from './entities/Projectile.js';
+import { BombEntity, spawnExplosionAt, initExplosionPool, tickExplosions } from './entities/Bomb.js';
+import { PlaneShadows } from './entities/PlaneShadows.js';
 import { PowerUpEntity } from './entities/PowerUp.js';
 import { TargetEntity } from './entities/Target.js';
 import {
@@ -19,7 +20,7 @@ import {
   tickTurretEffects,
 } from './entities/Building.js';
 import { lightPool } from './scene/LightPool.js';
-import { groundRadiusSpherical, sampleGround, makeSurfaceHit } from './scene/planetSurface.js';
+import { surfaceRadiusSpherical, sampleGround, makeSurfaceHit, fitGroundPlane } from './scene/planetSurface.js';
 import { InputManager } from './systems/InputManager.js';
 import { MobileControls, isTouchDevice } from './systems/MobileControls.js';
 import { CameraController } from './systems/CameraController.js';
@@ -29,7 +30,7 @@ import { AudioManager } from './systems/AudioManager.js';
 import { ChatManager } from './systems/ChatManager.js';
 import { LobbyScreen } from './ui/LobbyScreen.js';
 import { DeathScreen } from './ui/DeathScreen.js';
-import { moveOnSphere } from './utils/SphereUtils.js';
+import { moveOnSphere, sphericalToCartesian } from './utils/SphereUtils.js';
 import { getRenderQualityPreference, isLowPowerQuality } from './utils/performanceProfile.js';
 import { PerfProbe } from './utils/perfProbe.js';
 import { AdaptiveResolution } from './utils/adaptiveResolution.js';
@@ -41,7 +42,9 @@ import {
   FLY_ALTITUDE, MAX_PLAYERS, CLIENT_INPUT_SEND_MS,
   POWERUP_COLLECT_RADIUS,
   RESPAWN_INVINCIBILITY, SHOOT_COOLDOWN_MS,
+  BULLET_SPEED, BULLET_LIFETIME,
 } from '../shared/constants.js';
+import { shotHeadingOffsets } from '../shared/projectile.js';
 
 /** Distanza 3D tra due punti sferici allo stesso raggio — stessa formula del server. */
 function sphereDist(t1, p1, t2, p2, r) {
@@ -131,7 +134,6 @@ bloomPass.setSize = (width, height) => _bloomSetSize(
 );
 composer.addPass(bloomPass);
 
-let renderQualityStage = LOW_POWER_DEFAULTS ? 2 : 0;
 
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -153,52 +155,15 @@ const lights = setupLighting(scene);
 // (vedi scene/LightPool.js — era la causa dei rallentamenti improvvisi).
 lightPool.init(scene);
 
-const sky = createSky(scene, lights, { qualityStage: renderQualityStage });
+const sky = createSky(scene, lights, { lowQuality: LOW_POWER_DEFAULTS });
 const {
   mesh: planetMesh,
   water: waterMesh,
   atmosphere: atmosphereMesh,
-  heightData,
-  posAttr,
   update: updatePlanet,
-  setQualityStage: setPlanetQualityStage,
-} = createPlanet(scene, { qualityStage: renderQualityStage });
+} = createPlanet(scene, { lowQuality: LOW_POWER_DEFAULTS });
 
-// ── DEBUG: rete di superficie locale (tasto G per toggle) ─────────────────────
-// Shader che scarta i segmenti oltre DBG_RADIUS unità dalla camera, con fade.
-// Così si vede solo la rete vicina senza il caos dell'intero pianeta.
-const DBG_RADIUS = 30;
-const _dbgMat = new THREE.ShaderMaterial({
-  uniforms: { uCam: { value: new THREE.Vector3() }, uR: { value: DBG_RADIUS } },
-  vertexShader: `
-    uniform vec3  uCam;
-    varying float vDist;
-    void main() {
-      vec4 wp = modelMatrix * vec4(position, 1.0);
-      vDist = length(wp.xyz - uCam);
-      gl_Position = projectionMatrix * viewMatrix * wp;
-    }`,
-  fragmentShader: `
-    uniform float uR;
-    varying float vDist;
-    void main() {
-      if (vDist > uR) discard;
-      float fade = 1.0 - smoothstep(uR * 0.55, uR, vDist);
-      gl_FragColor = vec4(1.0, 0.1, 0.1, fade);
-    }`,
-  transparent: true,
-  depthWrite: false,
-  depthTest: false,
-});
-const _dbgPlanet = new THREE.LineSegments(new THREE.WireframeGeometry(planetMesh.geometry), _dbgMat);
-const _dbgWater  = new THREE.LineSegments(new THREE.WireframeGeometry(waterMesh.geometry),  _dbgMat);
-_dbgPlanet.renderOrder = _dbgWater.renderOrder = 999;
-let _dbgVisible = false;
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'KeyG' && !e.repeat) {
-    _dbgVisible = !_dbgVisible;
-    _dbgVisible ? scene.add(_dbgPlanet, _dbgWater) : scene.remove(_dbgPlanet, _dbgWater);
-  }
   if (e.code === 'KeyH' && !e.repeat) {
     _perfVisible = !_perfVisible;
     document.getElementById('perf-overlay').classList.toggle('visible', _perfVisible);
@@ -322,6 +287,7 @@ let terrainGroup = null;
 // esattamente nel momento più concitato della partita.
 initExplosionPool(scene);
 initTurretEffects(scene);
+const planeShadows = new PlaneShadows(scene);
 
 /** Risolve quando mondo e modelli sono pronti: gate per la pre-compilazione. */
 const worldReady = Promise.all([
@@ -331,7 +297,7 @@ const worldReady = Promise.all([
   preloadTurretBuildingModels(),
   preloadAirplaneModels(),
 ]).then(([treeTemplates, buildingTemplates, hospitalTemplates]) => {
-  terrainGroup = createTerrain(scene, heightData, posAttr, planetMesh, treeTemplates, buildingTemplates, hospitalTemplates);
+  terrainGroup = createTerrain(scene, treeTemplates, buildingTemplates, hospitalTemplates);
 });
 
 /**
@@ -361,7 +327,16 @@ function warmupShaders() {
 // `import.meta.env.DEV` è sostituito staticamente da Vite, quindi in build di
 // produzione questo blocco viene eliminato.
 if (import.meta.env?.DEV) {
-  window.__lwDebug = { THREE, scene, camera, renderer, sampleGround, makeSurfaceHit };
+  window.__lwDebug = {
+    THREE, scene, camera, renderer, composer, sampleGround, makeSurfaceHit, fitGroundPlane,
+    spawnExplosionAt: (pos, opts) => spawnExplosionAt(scene, pos, opts),
+    get projectiles() { return projectiles; },
+    get net() { return net; },
+    get remoteAirplanes() { return remoteAirplanes; },
+    get localId() { return localPlayerId; },
+    get localPos() { return localAirplane?.mesh.position.clone(); },
+    teleport(t, p, h) { theta = t; phi = p; heading = h; },
+  };
 }
 
 // ── Stato gioco ───────────────────────────────────────────────────────────────
@@ -415,8 +390,23 @@ let heading = 0;
 // Mappe entità remote
 const remoteAirplanes  = new Map(); // playerId → Airplane
 const remoteWasDead    = new Map(); // playerId → boolean
-const projectileEntities = new Map();
+const projectiles      = new ProjectileSystem(scene);
 const bombEntities       = new Map();
+/**
+ * Dati statici dei giocatori (nickname, colore, modello). Non viaggiano più
+ * nel game-state a ogni tick: arrivano una volta con `joined` /
+ * `player-joined` e vengono riattaccati qui agli stati ricevuti.
+ */
+const playerInfo = new Map(); // playerId → { nickname, color, model }
+function withInfo(p) {
+  const info = playerInfo.get(p.id);
+  if (info) {
+    p.nickname = info.nickname;
+    p.color = info.color;
+    p.model = info.model;
+  }
+  return p;
+}
 const powerupEntities    = new Map();
 /** Chiavi Map allineate a stringa (evita mismatch con eventi socket). */
 function powerupKey(id) {
@@ -430,6 +420,8 @@ function removePowerupEntity(scene, rawId) {
   powerupEntities.delete(id);
 }
 const buildingEntities   = new Map(); // buildingId → BuildingEntity
+/** Ultimo stato degli edifici (per l'HUD: torrette possedute). */
+let   buildingStates     = [];
 let   targetEntity       = null;
 let   currentTarget      = null;
 let   allPlayerStates    = [];
@@ -456,10 +448,8 @@ const TRY_COLLECT_RETRY_MS = 300;     // ~3 retry/s finché in range e powerup p
  * Svuotarli e riempirli costa zero allocazioni.
  */
 const _seenPlayerIds = new Set();
-const _seenProjIds   = new Set();
 const _seenBombIds   = new Set();
 const _seenPuIds     = new Set();
-const _shootSoundOwners = new Set();
 
 /** Rimuove dalla mappa le entità che il server non elenca più. */
 function pruneMissing(map, seen, onRemove) {
@@ -475,6 +465,8 @@ let lastInputSend = 0;
 // Shoot cooldown
 let lastShootTime = 0;
 const SHOOT_COOLDOWN = SHOOT_COOLDOWN_MS; // ms
+/** Numero progressivo degli spari: id deterministici `${playerId}.${seq}:${i}`. */
+let shotSeq = 0;
 
 // Bomb cooldown
 let lastBombTime = 0;
@@ -575,8 +567,9 @@ const net = new NetworkManager({
     for (const [, plane] of remoteAirplanes) plane.dispose(scene);
     remoteAirplanes.clear();
     remoteWasDead.clear();
-    for (const [, e] of projectileEntities) e.dispose(scene);
-    projectileEntities.clear();
+    projectiles.clear();
+    playerInfo.clear();
+    for (const p of players) playerInfo.set(p.id, { nickname: p.nickname, color: p.color, model: p.model });
     for (const [, e] of powerupEntities) e.dispose(scene);
     powerupEntities.clear();
     powerupPositions.clear();
@@ -586,8 +579,10 @@ const net = new NetworkManager({
     players.forEach(p => {
       if (p.id !== localPlayerId) {
         const plane = new Airplane(scene, THREE, p.color, p.model, false);
-        plane.update(p.theta, p.phi, p.heading, p.weaponLevel, p.hasShield, 0, remoteBoostAmount(p));
+        plane.setNetworkState(p, performance.now(), net.oneWayMs, remoteBoostAmount(p));
         remoteAirplanes.set(p.id, plane);
+        remoteWasDead.set(p.id, !p.alive);
+        plane.mesh.visible = !!p.alive;
       }
     });
 
@@ -608,14 +603,16 @@ const net = new NetworkManager({
 
     // Edifici conquistabili
     if (buildings) {
-      for (const [id, e] of buildingEntities) { e.dispose(scene); }
+      for (const [, e] of buildingEntities) { e.dispose(scene); }
       buildingEntities.clear();
       buildings.forEach(b => {
         buildingEntities.set(b.id, new BuildingEntity(scene, b.id, b.theta, b.phi));
       });
+      applyBuildingStates(buildings);
     }
 
     allPlayerStates = players;
+    input.clearQueuedClicks();
     lobby.hide();
     hud.show();
     mobile?.show();
@@ -625,7 +622,9 @@ const net = new NetworkManager({
   },
 
   onPlayerJoined(info) {
+    playerInfo.set(info.id, { nickname: info.nickname, color: info.color, model: info.model });
     if (info.id === localPlayerId) return;
+    remoteAirplanes.get(info.id)?.dispose(scene);
     const plane = new Airplane(scene, THREE, info.color, info.model, false);
     remoteAirplanes.set(info.id, plane);
     allPlayerStates.push({ ...info, kills: 0, bombPoints: 0, weaponLevel: 0 });
@@ -633,6 +632,7 @@ const net = new NetworkManager({
   },
 
   onPlayerLeft({ id }) {
+    playerInfo.delete(id);
     remoteAirplanes.get(id)?.dispose(scene);
     remoteAirplanes.delete(id);
     remoteWasDead.delete(id);
@@ -642,6 +642,8 @@ const net = new NetworkManager({
 
   onGameState(state) {
     _perfGsCount++;
+    const recvAt = performance.now();
+    for (const p of state.players) withInfo(p);
     allPlayerStates = state.players;
 
     // Rimuovi aerei remoti non più presenti nel game-state
@@ -698,63 +700,16 @@ const net = new NetworkManager({
       if (p.alive) {
         const wasDead = remoteWasDead.get(p.id) ?? true;
         if (wasDead) {
-          plane.resetRemote(p.theta, p.phi, p.heading);
+          plane.resetRemote(p.theta, p.phi, p.heading, recvAt);
         }
         plane.mesh.visible = true;
         plane.setBoostParticlesVisible(true);
-        plane.setNetworkTarget(
-          p.theta, p.phi, p.heading, p.weaponLevel, p.hasShield,
-          remoteBoostAmount(p),
-        );
+        plane.setNetworkState(p, recvAt, net.oneWayMs, remoteBoostAmount(p));
         remoteWasDead.set(p.id, false);
       } else {
         plane.mesh.visible = false;
         plane.setBoostParticlesVisible(false);
         remoteWasDead.set(p.id, true);
-      }
-    });
-
-    // Proiettili
-    _seenProjIds.clear();
-    for (const p of state.projectiles) _seenProjIds.add(p.id);
-    pruneMissing(projectileEntities, _seenProjIds, (id, e) => {
-      e.dispose(scene);
-      projectileEntities.delete(id);
-    });
-    /** Un solo “bang” per salvo (stesso ownerId), così le armi multi-colpo non saturano l’audio. */
-    _shootSoundOwners.clear();
-    state.projectiles.forEach(p => {
-      if (!projectileEntities.has(p.id)) {
-        if (
-          localState
-          && p.ownerId !== localPlayerId
-          && !_shootSoundOwners.has(p.ownerId)
-        ) {
-          _shootSoundOwners.add(p.ownerId);
-          const dist = sphereDist(
-            p.theta, p.phi,
-            localState.theta, localState.phi,
-            FLY_ALTITUDE,
-          );
-          AudioManager.playShootAtDistance(dist);
-        }
-        // Se è un proiettile da torretta, lo renderizziamo alla quota del tip
-        // del cannone (~53.2 dal centro del pianeta) anziché FLY_ALTITUDE (56):
-        // altrimenti il proiettile appare 2-3 unità sopra la bocca del cannone.
-        // Il server continua a tracciare la collisione a FLY_ALTITUDE.
-        let altitude; // undefined → default del ProjectileEntity
-        if (typeof p.ownerId === 'string' && p.ownerId.startsWith('turret-')) {
-          const buildingId = p.ownerId.slice('turret-'.length);
-          const be = buildingEntities.get(buildingId);
-          if (be) {
-            const tip = be.getCannonTipWorld();
-            if (tip) altitude = tip.length();
-            be.spawnMuzzleFlash();
-          }
-        }
-        projectileEntities.set(p.id, new ProjectileEntity(scene, p.id, p.theta, p.phi, altitude));
-      } else {
-        projectileEntities.get(p.id).update(p.theta, p.phi);
       }
     });
 
@@ -803,24 +758,100 @@ const net = new NetworkManager({
       }
       powerupPositions.set(id, { theta: p.theta, phi: p.phi });
     });
+  },
 
-    // Edifici conquistabili
-    if (state.buildings) {
-      state.buildings.forEach(b => {
-        if (!buildingEntities.has(b.id)) {
-          const entity = new BuildingEntity(scene, b.id, b.theta, b.phi);
-          buildingEntities.set(b.id, entity);
-        }
-        buildingEntities.get(b.id).update(b, allPlayerStates, camera, currentNightFactor);
-      });
+  /** Edifici: arrivano solo quando cambiano. */
+  onBuildings(list) {
+    applyBuildingStates(list);
+  },
+
+  /**
+   * Una salva appena sparata (da chiunque, noi compresi). È l'unico messaggio
+   * che un proiettile genera: il volo lo calcola il ProjectileSystem.
+   */
+  onShots(shot) {
+    const now = performance.now();
+    // L'età all'invio più il viaggio fino a qui: il proiettile compare dove è
+    // davvero, non dove era quando il server ha spedito il messaggio.
+    const spawnAt = now - (shot.ag ?? 0) - net.oneWayMs;
+    const isTurret = typeof shot.o === 'string' && shot.o.startsWith('turret-');
+
+    if (shot.o === localPlayerId) {
+      // Nostra salva, già mostrata al momento dello sparo. Il server può aver
+      // deciso un numero di colpi diverso (livello arma appena cambiato):
+      // si aggiungono i mancanti e si tolgono quelli in più.
+      const have = projectiles.salvoIndices(shot.id);
+      const missing = [];
+      for (let i = 0; i < shot.hd.length; i++) {
+        if (!have.includes(i) && !projectiles.wasRemoved(`${shot.id}:${i}`)) missing.push(i);
+      }
+      for (const i of have) if (i >= shot.hd.length) projectiles.remove(`${shot.id}:${i}`);
+      if (missing.length) {
+        projectiles.spawnSalvo({
+          shotId: shot.id, ownerId: shot.o, theta: shot.th, phi: shot.ph, headings: shot.hd,
+          speed: shot.sp, lifetime: shot.lt, spawnAt, color: localState?.color, local: true,
+          only: missing,
+        });
+      }
+      return;
+    }
+
+    let altitude; // undefined → quota di volo
+    let color = playerInfo.get(shot.o)?.color;
+    if (isTurret) {
+      // I colpi di torretta partono dalla bocca del cannone (~53 dal centro),
+      // non a quota di volo. Il server continua a usare FLY_ALTITUDE per gli impatti.
+      const be = buildingEntities.get(shot.o.slice('turret-'.length));
+      if (be) {
+        const tip = be.getCannonTipWorld();
+        if (tip) altitude = tip.length();
+        be.spawnMuzzleFlash();
+        color = be.ownerColor ?? color;
+      }
+    }
+
+    projectiles.spawnSalvo({
+      shotId: shot.id, ownerId: shot.o, theta: shot.th, phi: shot.ph, headings: shot.hd,
+      speed: shot.sp, lifetime: shot.lt, spawnAt, altitude, color, local: false,
+    });
+
+    // Un solo "bang" per salva, attenuato con la distanza.
+    if (localState) {
+      AudioManager.playShootAtDistance(sphereDist(shot.th, shot.ph, theta, phi, FLY_ALTITUDE));
     }
   },
 
+  /** Il server non ha accettato un nostro sparo: via i colpi mostrati in anticipo. */
+  onShotRejected({ seq }) {
+    if (localPlayerId == null) return;
+    projectiles.removeSalvo(`${localPlayerId}.${seq}`);
+  },
+
+  /** Un proiettile ha colpito qualcuno (deciso dal server o da chi ha sparato). */
+  onProjectileHit({ id }) {
+    if (projectiles.remove(id, _hitPos)) spawnImpact(_hitPos);
+  },
+
   onPlayerKilled({ killerId, victimId, theta: t, phi: p, byTurret }) {
+    // L'esplosione va dove l'aereo è *disegnato*, non dove lo aveva il server:
+    // con il dead reckoning i due punti differiscono di qualche unità.
+    const remote = remoteAirplanes.get(victimId);
+    if (victimId === localPlayerId && localAirplane) _deathPos.copy(localAirplane.mesh.position);
+    else if (remote?.mesh.visible) _deathPos.copy(remote.mesh.position);
+    else {
+      const c = sphericalToCartesian(t, p, FLY_ALTITUDE);
+      _deathPos.set(c.x, c.y, c.z);
+    }
+    if (remote) {
+      remote.mesh.visible = false;
+      remote.setBoostParticlesVisible(false);
+      remoteWasDead.set(victimId, true);
+    }
+
     const fxNow = performance.now();
     if (fxNow - lastDeathFxAt > 90) {
       lastDeathFxAt = fxNow;
-      spawnExplosion(scene, t, p, FLY_ALTITUDE);
+      spawnExplosionAt(scene, _deathPos);
       AudioManager.playExplosion();
     }
 
@@ -839,10 +870,6 @@ const net = new NetworkManager({
       hud.showKillNotice(victim?.nickname ?? null, byTurret ?? false);
       AudioManager.playPopup();
     }
-  },
-
-  onShieldBroken({ playerId }) {
-    // L'effetto visivo è gestito dall'aggiornamento dello stato nel game-state
   },
 
   onPowerupSpawned(pu) {
@@ -864,7 +891,11 @@ const net = new NetworkManager({
   onBombExploded({ theta: t, phi: p, hit, ownerId }) {
     // Quota del terreno vero: a raggio 50 fisso l'esplosione finiva sottoterra
     // su ogni collina (la superficie sale fino a 5.2 unità più in alto).
-    spawnExplosion(scene, t, p, groundRadiusSpherical(t, p) + 0.4, hit ? 0xffcc00 : 0x884400);
+    const c = sphericalToCartesian(t, p, surfaceRadiusSpherical(t, p) + 0.3);
+    spawnExplosionAt(scene, _deathPos.set(c.x, c.y, c.z), {
+      scale: 1.35,
+      color: hit ? 0xffffff : 0x9a7a60,
+    });
     // Suono all’impatto: es. `AudioManager.playExplosion()` — disattivato per ora.
     if (hit && ownerId === localPlayerId) {
       hud.showBombHitNotice();
@@ -886,7 +917,7 @@ const net = new NetworkManager({
     turretOwnerId,
     awardedKill = true,
   }) {
-    spawnTurretDestruction(scene, theta, phi, groundRadiusSpherical(theta, phi) + 1.5);
+    spawnTurretDestruction(scene, theta, phi, surfaceRadiusSpherical(theta, phi) + 1.5);
     if (destroyerId === localPlayerId) {
       if (awardedKill) hud.showTowerDestroyedNotice();
       else hud.showOwnTowerDestroyedNotice();
@@ -897,6 +928,7 @@ const net = new NetworkManager({
 
   onRespawned(state) {
     isAlive = true;
+    input.clearQueuedClicks();
     theta   = state.theta;
     phi     = state.phi;
     heading = state.heading;
@@ -923,6 +955,33 @@ function ensureLocalAirplane(color, model) {
   }
 }
 
+/** Virata corrente del nostro aereo (rad/s), inviata al server. */
+let _turnRate = 0;
+/** Bersagli per i proiettili locali (aerei remoti come sono disegnati), riusati. */
+const _hitTargets = [];
+const _hitTargetPool = [];
+const _hitPos = new THREE.Vector3();
+const _deathPos = new THREE.Vector3();
+const _shadowPos = new THREE.Vector3();
+const _prevDrawPos = new THREE.Vector3();
+
+/** Scintilla d'impatto di un proiettile. */
+function spawnImpact(pos) {
+  spawnExplosionAt(scene, pos, { scale: 0.32, sparks: 6, smoke: false });
+}
+
+function applyBuildingStates(list) {
+  buildingStates = list;
+  for (const b of list) {
+    let e = buildingEntities.get(b.id);
+    if (!e) {
+      e = new BuildingEntity(scene, b.id, b.theta, b.phi);
+      buildingEntities.set(b.id, e);
+    }
+    e.update(b, currentNightFactor);
+  }
+}
+
 // ── Performance Overlay ───────────────────────────────────────────────────────
 
 let _perfVisible = false;
@@ -931,7 +990,6 @@ let _perfLastFpsTime = performance.now();
 let _perfFps = 0;
 let _perfFrameMs = 0;
 let _perfPingMs = -1;
-let _perfLastPingTime = 0;
 let _perfGsCount = 0;
 let _perfLastGsTime = performance.now();
 let _perfGsRate = 0;
@@ -968,14 +1026,11 @@ function animate() {
     const el = document.getElementById('perf-content');
     if (el && el.textContent !== perfProbe.progress) el.textContent = perfProbe.progress;
   }
-  if (_perfVisible && now - _perfLastPingTime > 2000) {
-    _perfLastPingTime = now;
-    net.measurePing(ms => { _perfPingMs = ms; });
-  }
+  if (_perfVisible) _perfPingMs = net.lastPingMs;
 
   sky.update(_skyFrozen ? 0 : delta);
-  updatePlanet(delta, camera.position);
-  if (_dbgVisible) _dbgMat.uniforms.uCam.value.copy(camera.position);
+  lights.follow(camera.position, delta);
+  updatePlanet(_skyFrozen ? 0 : delta, lights, sky.horizonColor);
   const nightFactor = typeof sky.getNightFactor === 'function' ? sky.getNightFactor() : 0;
   currentNightFactor = nightFactor;
 
@@ -1039,10 +1094,15 @@ function animate() {
     const brakeT = input.touch.speedAxis; // 0 = nessun freno, 1 = freno massimo
     const forwardAccel = FORWARD_ACCEL - (FORWARD_ACCEL - BACKWARD_ACCEL) * brakeT;
     const accel = movingForward ? forwardAccel : movingBackward ? BACKWARD_ACCEL : 1;
-    const moved = moveOnSphere(theta, phi, heading, speed * accel * delta);
+    const effectiveSpeed = speed * accel;
+    const moved = moveOnSphere(theta, phi, heading, effectiveSpeed * delta);
     theta = moved.theta;
     phi   = moved.phi;
     heading = moved.heading;
+    // Virata effettiva (rad/s), media morbida: la usano il server e gli altri
+    // client per estrapolare il nostro volo tra un pacchetto e l'altro.
+    const instTurn = delta > 1e-4 ? turnDelta / delta : 0;
+    _turnRate += (instTurn - _turnRate) * Math.min(1, delta * 12);
 
     localAirplane.setNightFactor(nightFactor);
     localAirplane.update(
@@ -1061,11 +1121,11 @@ function animate() {
       localAirplane.mesh.visible = true;
     }
 
-    camCtrl.update(localAirplane.mesh, localAirplane.sphereQuaternion, localAirplane.flightQuaternion);
+    camCtrl.update(localAirplane.mesh, localAirplane.sphereQuaternion, localAirplane.flightQuaternion, delta);
 
     // Invia input al server (throttled)
     if (now - lastInputSend >= CLIENT_INPUT_SEND_MS) {
-      net.sendInput(theta, phi, heading, boostActive, movingForward, movingBackward);
+      net.sendInput(theta, phi, heading, boostActive, movingForward, movingBackward, effectiveSpeed, _turnRate);
       lastInputSend = now;
     }
 
@@ -1075,9 +1135,23 @@ function animate() {
       hud.showRadioToast(stationName);
     }
 
-    // Sparo
+    // Sparo: i colpi compaiono subito, senza aspettare il giro dal server.
+    // Gli id sono deterministici, così la conferma del server (evento `shots`)
+    // si aggancia a questi stessi proiettili invece di crearne altri.
     if (input.consumeShoot() && now - lastShootTime > SHOOT_COOLDOWN) {
-      net.sendShoot(theta, phi, heading);
+      const seq = shotSeq++;
+      projectiles.spawnSalvo({
+        shotId: `${localPlayerId}.${seq}`,
+        ownerId: localPlayerId,
+        theta, phi,
+        headings: shotHeadingOffsets(wl).map((o) => heading + o),
+        speed: BULLET_SPEED,
+        lifetime: BULLET_LIFETIME,
+        spawnAt: now,
+        color: localState.color,
+        local: true,
+      });
+      net.sendShoot(seq, theta, phi, heading);
       AudioManager.playShoot();
       lastShootTime = now;
     }
@@ -1108,21 +1182,47 @@ function animate() {
     }
   }
 
-  // Aerei remoti: interpolazione ogni frame verso lo stato rete
+  // Aerei remoti: dead reckoning fino ad "adesso" (più la latenza stimata).
+  _hitTargets.length = 0;
   if (inGame) {
-    for (const p of allPlayerStates) {
-      if (p.id === localPlayerId) continue;
-      const plane = remoteAirplanes.get(p.id);
-      if (!plane) continue;
-      if (p.alive) {
-        plane.mesh.visible = true;
-        plane.setNightFactor(nightFactor);
-        plane.tickRemote(delta);
-      } else {
-        plane.mesh.visible = false;
-      }
+    const lead = net.oneWayMs;
+    let n = 0;
+    for (const [id, plane] of remoteAirplanes) {
+      if (remoteWasDead.get(id) ?? true) continue;
+      plane.setNightFactor(nightFactor);
+      _prevDrawPos.copy(plane.mesh.position);
+      const fresh = plane._drawnOnce !== true;
+      plane.tickRemote(delta, now, lead);
+      plane._drawnOnce = true;
+      if (!plane.mesh.visible) continue;
+      // Bersagli per i nostri proiettili: la posizione *disegnata*, con
+      // quella del frame precedente per il test sul moto relativo.
+      const slot = _hitTargetPool[n] ?? (_hitTargetPool[n] = { id: '', x: 0, y: 0, z: 0, px: 0, py: 0, pz: 0 });
+      slot.id = id;
+      slot.x = plane.mesh.position.x;
+      slot.y = plane.mesh.position.y;
+      slot.z = plane.mesh.position.z;
+      const from = fresh || _prevDrawPos.distanceToSquared(plane.mesh.position) > 100 ? plane.mesh.position : _prevDrawPos;
+      slot.px = from.x;
+      slot.py = from.y;
+      slot.pz = from.z;
+      _hitTargets.push(slot);
+      n++;
     }
   }
+
+  // Proiettili: volo calcolato qui a ogni frame. I nostri decidono i colpi:
+  // se sul nostro schermo toccano un aereo, il colpo è a segno.
+  projectiles.update(now, _hitTargets, (rec, target, ageMs, point) => {
+    net.sendHit(rec.id, target.id, ageMs);
+    spawnImpact(point);
+  });
+
+  // Ombre degli aerei sul terreno
+  planeShadows.begin(nightFactor);
+  if (inGame && isAlive && localAirplane?.mesh.visible) planeShadows.add(localAirplane.mesh.position);
+  for (const t of _hitTargets) planeShadows.add(_shadowPos.set(t.x, t.y, t.z));
+  planeShadows.end();
 
   // Anima powerup
   for (const pu of powerupEntities.values()) pu.tick(delta);
@@ -1147,6 +1247,14 @@ function animate() {
       be.progressGroup.lookAt(camera.position);
       be._progressOriented = true;
     }
+    // Il cannone segue il bersaglio scelto dal server, nella posizione in cui
+    // è disegnato (ogni frame: prima scattava a 40 Hz sul dato di rete).
+    if (be.turretTargetId) {
+      const tgt = be.turretTargetId === localPlayerId
+        ? (isAlive ? localAirplane?.mesh : null)
+        : remoteAirplanes.get(be.turretTargetId)?.mesh;
+      if (tgt?.visible) be.aimAt(tgt.position);
+    }
     be.tick(delta, nightFactor);
   }
 
@@ -1155,7 +1263,7 @@ function animate() {
     hud.update(
       localState, allPlayerStates, currentTarget, camera,
       boostEnergy / BOOST_MAX, input.isBoost(),
-      undefined, // buildings (già passato altrove)
+      buildingStates,
       localHasExtremeBoost,
       extremeBoostTimer,
     );
@@ -1188,7 +1296,7 @@ function animate() {
       ``,
       `── Entità ────────────────`,
       `Giocatori  ${String(allPlayerStates.length).padStart(6)}`,
-      `Proiettili ${String(projectileEntities.size).padStart(6)}`,
+      `Proiettili ${String(projectiles.count).padStart(6)}`,
       `Powerup    ${String(powerupEntities.size).padStart(6)}`,
       `Bombe      ${String(bombEntities.size).padStart(6)}`,
       `Edifici    ${String(buildingEntities.size).padStart(6)}`,

@@ -73,11 +73,15 @@ io.on('connection', (socket) => {
   // Invia subito i colori occupati al nuovo client (per aggiornare la lobby)
   defaultGame.broadcastLobbyInfo(socket);
 
-  socket.on('join', ({ nickname, color, model }) => {
+  // Destrutturare direttamente il payload farebbe cadere il server con un
+  // messaggio senza argomenti: si legge sempre da un oggetto di ripiego.
+  socket.on('join', (data) => {
+    const { nickname, color, model } = data ?? {};
     defaultGame.addPlayer(socket, nickname, color, model);
   });
 
-  socket.on('join-solo', ({ nickname, color, model }) => {
+  socket.on('join-solo', (data) => {
+    const { nickname, color, model } = data ?? {};
     const roomId = `solo-${socket.id}`;
     socket.join(roomId);
     const soloGame = new Game(io, roomId);
@@ -94,16 +98,20 @@ io.on('connection', (socket) => {
     getGameForSocket(socket.id)?.playerShoot(socket.id, data);
   });
 
+  socket.on('hit', (data) => {
+    getGameForSocket(socket.id)?.claimHit(socket.id, data);
+  });
+
   socket.on('drop-bomb', (data) => {
     getGameForSocket(socket.id)?.playerDropBomb(socket.id, data);
   });
 
-  socket.on('chat', ({ text }) => {
-    getGameForSocket(socket.id)?.broadcastChat(socket.id, text);
+  socket.on('chat', (data) => {
+    getGameForSocket(socket.id)?.broadcastChat(socket.id, data?.text);
   });
 
-  socket.on('try-collect', ({ powerupId }) => {
-    getGameForSocket(socket.id)?.tryCollectPowerup(socket.id, powerupId);
+  socket.on('try-collect', (data) => {
+    getGameForSocket(socket.id)?.tryCollectPowerup(socket.id, data?.powerupId);
   });
 
   socket.on('activate-extreme-boost', () => {

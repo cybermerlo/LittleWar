@@ -10,8 +10,10 @@
  * meglio di una decimazione ingenua. `weld` è obbligatorio prima di `simplify`:
  * senza vertici saldati il semplificatore non trova spigoli da collassare.
  *
- * Gli originali restano in `public/models/original/` — la decimazione è a
- * perdere, e senza copia non si può ritarare un rapporto sbagliato.
+ * Gli originali restano in `tools/models-original/` — la decimazione è a
+ * perdere, e senza copia non si può ritarare un rapporto sbagliato. Stanno
+ * fuori da `public/` apposta: altrimenti finirebbero nel deploy (quasi 1 MB
+ * servito pubblicamente e mai usato dal gioco).
  *
  *   node tools/decimate-models.mjs [--dry]
  */
@@ -52,7 +54,7 @@ const TARGETS = [
  */
 
 const SRC_DIR = 'public/models';
-const BACKUP_DIR = 'public/models/original';
+const BACKUP_DIR = 'tools/models-original';
 const DRY = process.argv.includes('--dry');
 
 const io = new NodeIO()

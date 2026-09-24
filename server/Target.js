@@ -1,4 +1,3 @@
-import { PLANET_RADIUS } from '../shared/constants.js';
 import { sampleBuildableSite, WATER_LEVEL } from '../shared/planetField.js';
 
 let nextTargetId = 1;
@@ -20,7 +19,6 @@ export class Target {
     });
     this.theta = site.theta;
     this.phi = site.phi;
-    this.radius = PLANET_RADIUS;
   }
 
   toState() {

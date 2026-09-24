@@ -1,123 +1,67 @@
 import {
   BULLET_SPEED,
   BULLET_LIFETIME,
-  BULLET_HIT_RADIUS,
-  FLY_ALTITUDE,
-  TICK_INTERVAL,
 } from '../shared/constants.js';
+import { makeTrajectory, trajectoryPoint } from '../shared/projectile.js';
 
-const TICK_DT = TICK_INTERVAL / 1000; // secondi per tick
-
-let nextProjectileId = 1;
-
-function sphericalToUnit(theta, phi) {
-  const sinTheta = Math.sin(theta);
-  return {
-    x: sinTheta * Math.cos(phi),
-    y: Math.cos(theta),
-    z: sinTheta * Math.sin(phi),
-  };
-}
-
-function cross(a, b) {
-  return {
-    x: a.y * b.z - a.z * b.y,
-    y: a.z * b.x - a.x * b.z,
-    z: a.x * b.y - a.y * b.x,
-  };
-}
-
-function dot(a, b) {
-  return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
-function normalize(v) {
-  const len = Math.hypot(v.x, v.y, v.z);
-  if (len < 1e-9) return null;
-  return { x: v.x / len, y: v.y / len, z: v.z / len };
-}
-
-function rotateAroundAxis(v, axis, angle) {
-  const cosA = Math.cos(angle);
-  const sinA = Math.sin(angle);
-  const kCrossV = cross(axis, v);
-  const kDotV = dot(axis, v);
-  return {
-    x: v.x * cosA + kCrossV.x * sinA + axis.x * kDotV * (1 - cosA),
-    y: v.y * cosA + kCrossV.y * sinA + axis.y * kDotV * (1 - cosA),
-    z: v.z * cosA + kCrossV.z * sinA + axis.z * kDotV * (1 - cosA),
-  };
-}
-
+/**
+ * Proiettile lato server.
+ *
+ * La posizione non viene integrata tick dopo tick ma ricavata dall'età, con la
+ * stessa formula del client (`shared/projectile.js`): così server e client
+ * vedono lo stesso proiettile nello stesso punto senza doversi scambiare le
+ * coordinate a ogni tick.
+ *
+ * `serverHits` distingue chi decide i colpi:
+ *  - true  → proiettili di bot e torrette: nessun client li "possiede", quindi
+ *            è il server a controllare gli impatti a ogni tick;
+ *  - false → proiettili dei giocatori: decide il client di chi spara (vedi
+ *            `Game.claimHit`), il server verifica solo che sia plausibile.
+ */
 export class Projectile {
-  constructor(ownerId, theta, phi, heading, speed = BULLET_SPEED, lifetime = BULLET_LIFETIME) {
-    this.id = String(nextProjectileId++);
+  constructor({
+    id,
+    ownerId,
+    theta,
+    phi,
+    heading,
+    speed = BULLET_SPEED,
+    lifetime = BULLET_LIFETIME,
+    spawnAt = Date.now(),
+    serverHits = false,
+    buildingOwnerId = null,
+  }) {
+    this.id = id;
     this.ownerId = ownerId;
     this.theta = theta;
     this.phi = phi;
     this.heading = heading;
     this.speed = speed;
     this.lifetime = lifetime;
-    this.createdAt = Date.now();
-    this._unitPos = sphericalToUnit(theta, phi);
-    this._axis = this._buildTrajectoryAxis(theta, phi, heading);
+    this.spawnAt = spawnAt;
+    this.serverHits = serverHits;
+    this.buildingOwnerId = buildingOwnerId;
+    this.traj = makeTrajectory(theta, phi, heading);
+
+    // Estremi del tratto percorso nell'ultimo tick (unitari), per il test a segmento.
+    this.prev = trajectoryPoint(this.traj, 0, { x: 0, y: 0, z: 0 });
+    this.cur = { x: this.prev.x, y: this.prev.y, z: this.prev.z };
   }
 
-  _buildTrajectoryAxis(theta, phi, heading) {
-    const unitPos = this._unitPos;
-    const east = normalize({
-      x: -Math.sin(phi),
-      y: 0,
-      z: Math.cos(phi),
-    });
-    if (!east) return { x: 0, y: 1, z: 0 };
-
-    const north = normalize(cross(unitPos, east));
-    if (!north) return { x: 0, y: 1, z: 0 };
-
-    const tangent = normalize({
-      x: Math.cos(heading) * north.x + Math.sin(heading) * east.x,
-      y: Math.cos(heading) * north.y + Math.sin(heading) * east.y,
-      z: Math.cos(heading) * north.z + Math.sin(heading) * east.z,
-    });
-    if (!tangent) return { x: 0, y: 1, z: 0 };
-
-    const axis = normalize(cross(unitPos, tangent));
-    if (axis) return axis;
-    // Fallback numerico vicino a casi degeneri.
-    return { x: 0, y: 1, z: 0 };
+  ageMs(now) {
+    return now - this.spawnAt;
   }
 
-  update() {
-    const angularStep = this.speed * TICK_DT;
-    this._unitPos = normalize(rotateAroundAxis(this._unitPos, this._axis, angularStep)) ?? this._unitPos;
-
-    this.theta = Math.acos(Math.max(-1, Math.min(1, this._unitPos.y)));
-    this.phi = Math.atan2(this._unitPos.z, this._unitPos.x);
+  /** Punto unitario a una data età (ms); l'età viene limitata a [0, durata]. */
+  pointAt(ageMs, out) {
+    const a = Math.max(0, Math.min(this.lifetime, ageMs));
+    return trajectoryPoint(this.traj, this.speed * a / 1000, out);
   }
 
-  isExpired() {
-    return Date.now() - this.createdAt > this.lifetime;
-  }
-
-  // Distanza cartesiana da un giocatore (theta2, phi2)
-  distanceTo(theta2, phi2) {
-    const r = FLY_ALTITUDE;
-    const x1 = r * Math.sin(this.theta) * Math.cos(this.phi);
-    const y1 = r * Math.cos(this.theta);
-    const z1 = r * Math.sin(this.theta) * Math.sin(this.phi);
-    const x2 = r * Math.sin(theta2) * Math.cos(phi2);
-    const y2 = r * Math.cos(theta2);
-    const z2 = r * Math.sin(theta2) * Math.sin(phi2);
-    return Math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2 + (z1 - z2) ** 2);
-  }
-
-  toState() {
-    return {
-      id: this.id,
-      ownerId: this.ownerId,
-      theta: this.theta,
-      phi: this.phi,
-    };
+  /** Avanza al tempo `now`: il tratto prev → cur è quello appena percorso. */
+  advance(now) {
+    const p = this.prev;
+    p.x = this.cur.x; p.y = this.cur.y; p.z = this.cur.z;
+    this.pointAt(this.ageMs(now), this.cur);
   }
 }

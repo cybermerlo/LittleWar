@@ -188,8 +188,6 @@ export class BuildingEntity {
     /** Direzione radiale del sito: serve agli anelli conformati. */
     this._siteDir = radial;
 
-    /** Posizione world della base (per trovare il bersaglio più vicino). */
-    this._buildingWorldPos = fit.origin.clone();
 
     // ── Wrapper per i due modelli (neutro / conquistato) ──
     this.neutralWrapper = new THREE.Group();
@@ -382,12 +380,11 @@ export class BuildingEntity {
   }
 
   /**
-   * Aggiorna lo stato visivo dell'edificio dal game-state server.
-   * `nightFactor` è opzionale per retro-compatibilità.
-   * L'orientamento della barra di progresso verso la camera è gestito
-   * dal loop animate() in main.js (per-frame, con threshold su movimento).
+   * Aggiorna lo stato visivo dell'edificio (evento `buildings`, solo quando
+   * cambia). L'orientamento della barra verso la camera e la mira del cannone
+   * sono gestiti per frame dal loop animate() in main.js.
    */
-  update(state, allPlayerStates, _camera, nightFactor = 0) {
+  update(state, nightFactor = 0) {
     this.ownerId = state.ownerId;
     this.ownerColor = state.ownerColor;
     this.conquestProgress = state.conquestProgress;
@@ -432,11 +429,6 @@ export class BuildingEntity {
       this._progressOriented = false;
     }
 
-    // Puntamento continuo (solo quando la torretta conquistata è visibile)
-    if (isConquered && this.turretPivot && allPlayerStates && allPlayerStates.length > 0) {
-      const target = this._findNearestAlive(allPlayerStates);
-      if (target) this._aimTurretAt(target.theta, target.phi);
-    }
   }
 
   /** Chiamato ogni frame dall'animate loop per animare il beacon. */
@@ -460,34 +452,12 @@ export class BuildingEntity {
     this._beaconCoreMat.opacity = intensity; // come opacity luci alari
   }
 
-  /** Giocatore vivo più vicino (distanza cartesiana a FLY_ALTITUDE). */
-  _findNearestAlive(allPlayerStates) {
-    let best = null;
-    let bestD = Infinity;
-    const base = this._buildingWorldPos;
-    for (const p of allPlayerStates) {
-      if (!p || !p.alive) continue;
-      if (typeof p.theta !== 'number' || typeof p.phi !== 'number') continue;
-      // Inline: sphericalToCartesian restituirebbe un oggetto nuovo per ogni
-      // giocatore di ogni torretta a 40 Hz — spazzatura pura per il GC.
-      const st = Math.sin(p.theta) * FLY_ALTITUDE;
-      const dx = st * Math.cos(p.phi) - base.x;
-      const dy = Math.cos(p.theta) * FLY_ALTITUDE - base.y;
-      const dz = st * Math.sin(p.phi) - base.z;
-      const d2 = dx * dx + dy * dy + dz * dz;
-      if (d2 < bestD) { bestD = d2; best = p; }
-    }
-    return best;
-  }
-
-  _aimTurretAt(targetTheta, targetPhi) {
-    if (!this.turretPivot || !this.cesareRoot) return;
-
-    const st = Math.sin(targetTheta) * FLY_ALTITUDE;
-    _aimWorld.set(st * Math.cos(targetPhi), Math.cos(targetTheta) * FLY_ALTITUDE, st * Math.sin(targetPhi));
+  /** Punta il cannone verso un punto world (l'aereo bersaglio come è disegnato). */
+  aimAt(worldPos) {
+    if (!this.turretPivot || !this.cesareRoot || !this.conqueredWrapper.visible) return;
 
     // Coord del bersaglio nel frame locale del cesareRoot (pre-scale).
-    const targetLocal = this.cesareRoot.worldToLocal(_aimWorld);
+    const targetLocal = this.cesareRoot.worldToLocal(_aimWorld.copy(worldPos));
 
     const dx = targetLocal.x - TURRET_PIVOT_LOCAL.x;
     const dy = targetLocal.y - TURRET_PIVOT_LOCAL.y;

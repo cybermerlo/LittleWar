@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createGLTFLoader } from '../utils/createGLTFLoader.js';
 import { lightPool } from '../scene/LightPool.js';
 import { sphericalToCartesian, cartesianToSpherical, sphereOrientation } from '../utils/SphereUtils.js';
+import { advanceOnSphere } from '../../shared/movement.js';
 import {
   FLY_ALTITUDE,
   MAX_BANK_ANGLE,
@@ -11,10 +12,24 @@ import {
 } from '../../shared/constants.js';
 
 const _rollQuat = new THREE.Quaternion();
+const _orientQuat = new THREE.Quaternion();
 const _bankOnlyQuat = new THREE.Quaternion();
 const _axisX = new THREE.Vector3(1, 0, 0);
-/** Smussatura posizione aerei remoti (1/s, verso lo stato rete). */
-const REMOTE_NET_SMOOTH = 14;
+/**
+ * Aerei remoti: dead reckoning.
+ *
+ * Il game-state dice dove era un aereo quando il server l'ha spedito. Invece di
+ * inseguire quel punto (e mostrare l'aereo sempre un po' indietro), si
+ * estrapola il volo fino ad *adesso* con velocità e virata ricevute. Quando
+ * arriva uno stato nuovo, lo scarto tra la vecchia e la nuova stima viene
+ * assorbito in modo morbido invece che con uno scatto.
+ */
+const REMOTE_ERROR_TAU = 0.12;        // s: tempo di assorbimento degli scarti
+const REMOTE_SNAP_DISTANCE = 7;       // unità: oltre, teletrasporto (respawn, lag enorme)
+const REMOTE_MAX_EXTRAPOLATION = 0.6; // s: oltre non si inventa più nulla
+const REMOTE_MAX_TURN_EXTRAPOLATION = 0.35; // s: la virata dichiarata non dura per sempre
+const _predA = new THREE.Vector3();
+const _predB = new THREE.Vector3();
 const _modelLoader = createGLTFLoader();
 const _modelTemplateCache = new Map();
 
@@ -350,10 +365,10 @@ export class Airplane {
     this.sphereQuaternion = new THREE.Quaternion();
     this.flightQuaternion = new THREE.Quaternion();
 
-    this._targetPos = new THREE.Vector3(0, 1, 0);
-    this._displayPos = new THREE.Vector3(0, 1, 0);
-    this._targetHeading = 0;
-    this._displayHeading = 0;
+    /** Ultimo stato di rete (aerei remoti) e scarto ancora da assorbire. */
+    this._net = null;
+    this._errPos = new THREE.Vector3();
+    this._errHeading = 0;
     this._netWeaponLevel = 0;
     this._netHasShield = false;
     /** Boost visivo remoto 0..1 (da game-state server). */
@@ -421,55 +436,79 @@ export class Airplane {
   /**
    * Forza teletrasporto immediato alla posizione indicata (usato al respawn).
    */
-  resetRemote(theta, phi, heading) {
-    const c = sphericalToCartesian(theta, phi, 1);
-    this._targetPos.set(c.x, c.y, c.z).normalize();
-    this._displayPos.copy(this._targetPos);
-    this._targetHeading = heading;
-    this._displayHeading = heading;
+  resetRemote(theta, phi, heading, now = performance.now()) {
+    this._net = { theta, phi, heading, speed: 0, turnRate: 0, at: now };
+    this._errPos.set(0, 0, 0);
+    this._errHeading = 0;
     this._remoteNetReady = true;
     this._lastHeading = undefined;
-    const sph = cartesianToSpherical(this._displayPos.x, this._displayPos.y, this._displayPos.z);
-    this.update(sph.theta, sph.phi, heading, this._netWeaponLevel, this._netHasShield, 1 / 60, this._netBoostAmount);
+    this.update(theta, phi, heading, this._netWeaponLevel, this._netHasShield, 1 / 60, this._netBoostAmount);
   }
 
-  setNetworkTarget(theta, phi, heading, weaponLevel, hasShield, boostAmount = 0) {
+  /** Posizione (unitaria) e heading stimati all'istante `now` + `leadMs`. */
+  _predict(net, now, leadMs, outPos) {
+    const dt = Math.min(REMOTE_MAX_EXTRAPOLATION, Math.max(0, (now - net.at + leadMs) / 1000));
+    const turnDt = Math.min(dt, REMOTE_MAX_TURN_EXTRAPOLATION);
+    let m = advanceOnSphere(net.theta, net.phi, net.heading, net.speed, net.turnRate, turnDt);
+    if (dt > turnDt) m = advanceOnSphere(m.theta, m.phi, m.heading, net.speed, 0, dt - turnDt);
+    const c = sphericalToCartesian(m.theta, m.phi, 1);
+    outPos.set(c.x, c.y, c.z);
+    return m.heading;
+  }
+
+  /**
+   * Nuovo stato dal server.
+   * @param {object} p       stato del giocatore (theta, phi, heading, speed, turnRate, …)
+   * @param {number} now     performance.now() alla ricezione
+   * @param {number} leadMs  latenza di sola andata stimata
+   */
+  setNetworkState(p, now, leadMs, boostAmount = 0) {
     if (this.isLocal) return;
-    const c = sphericalToCartesian(theta, phi, 1);
-    this._targetPos.set(c.x, c.y, c.z).normalize();
-    this._targetHeading = heading;
-    this._netWeaponLevel = weaponLevel ?? 0;
-    this._netHasShield = !!hasShield;
+    this._netWeaponLevel = p.weaponLevel ?? 0;
+    this._netHasShield = !!p.hasShield;
     this._netBoostAmount = THREE.MathUtils.clamp(boostAmount, 0, 1);
-    if (!this._remoteNetReady || this._displayPos.distanceTo(this._targetPos) > 0.35) {
-      this._displayPos.copy(this._targetPos);
-      this._displayHeading = heading;
-      this._remoteNetReady = true;
+
+    const next = {
+      theta: p.theta,
+      phi: p.phi,
+      heading: p.heading,
+      speed: Number.isFinite(p.speed) ? p.speed : 0,
+      turnRate: Number.isFinite(p.turnRate) ? p.turnRate : 0,
+      at: now,
+    };
+
+    if (!this._remoteNetReady || !this._net) {
+      this.resetRemote(p.theta, p.phi, p.heading, now);
+      this._net = next;
+      return;
+    }
+
+    // Dove lo stavamo mostrando e dove dice ora il server, allo stesso istante.
+    const oldH = this._predict(this._net, now, leadMs, _predA);
+    const newH = this._predict(next, now, leadMs, _predB);
+    this._net = next;
+    this._errPos.add(_predA.sub(_predB));
+    this._errHeading = wrapAngle(this._errHeading + wrapAngle(oldH - newH));
+    if (this._errPos.length() * FLY_ALTITUDE > REMOTE_SNAP_DISTANCE) {
+      this._errPos.set(0, 0, 0);
+      this._errHeading = 0;
       this._lastHeading = undefined;
-      const sph = cartesianToSpherical(this._displayPos.x, this._displayPos.y, this._displayPos.z);
-      this.update(
-        sph.theta,
-        sph.phi,
-        this._displayHeading,
-        this._netWeaponLevel,
-        this._netHasShield,
-        1 / 60,
-        this._netBoostAmount,
-      );
     }
   }
 
-  tickRemote(delta) {
-    if (this.isLocal || !this._remoteNetReady) return;
-    const k = 1 - Math.exp(-REMOTE_NET_SMOOTH * delta);
-    this._displayPos.lerp(this._targetPos, k).normalize();
-    const sph = cartesianToSpherical(this._displayPos.x, this._displayPos.y, this._displayPos.z);
-    let dh = wrapAngle(this._targetHeading - this._displayHeading);
-    this._displayHeading += dh * k;
+  tickRemote(delta, now, leadMs) {
+    if (this.isLocal || !this._remoteNetReady || !this._net) return;
+    const decay = Math.exp(-delta / REMOTE_ERROR_TAU);
+    this._errPos.multiplyScalar(decay);
+    this._errHeading *= decay;
+
+    const h = this._predict(this._net, now, leadMs, _predA);
+    _predA.add(this._errPos).normalize();
+    const sph = cartesianToSpherical(_predA.x, _predA.y, _predA.z);
     this.update(
       sph.theta,
       sph.phi,
-      this._displayHeading,
+      h + this._errHeading,
       this._netWeaponLevel,
       this._netHasShield,
       delta,
@@ -537,7 +576,7 @@ export class Airplane {
     const pos = sphericalToCartesian(theta, phi, FLY_ALTITUDE);
     this.mesh.position.set(pos.x, pos.y, pos.z);
 
-    const q = sphereOrientation(this.THREE, theta, phi, heading);
+    const q = sphereOrientation(THREE, theta, phi, heading, _orientQuat);
 
     let dh = 0;
     if (this._lastHeading !== undefined) {

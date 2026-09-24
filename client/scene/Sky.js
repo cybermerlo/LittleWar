@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { FLY_ALTITUDE } from '../../shared/constants.js';
 
 // Temporaries for shooting star animation — no per-frame allocation
@@ -165,16 +166,18 @@ const starsFragmentShader = /* glsl */ `
 
 // top = bordi schermo, mid = orizzonte, bottom = epicentro luminoso dietro al pianeta
 const skyStates = [
-  // 1. Giorno Alieno (viola cosmico in alto → ciano elettrico mid → menta neon al centro)
-  { top: new THREE.Color(0x200050), mid: new THREE.Color(0x00bbff), bottom: new THREE.Color(0x00ffcc), lightInt: 1.2, ambInt: 0.6, starOpacity: 0.2 },
+  // 1. Giorno (indaco in alto → azzurro cielo all'orizzonte → alone chiaro dietro al pianeta).
+  //    Prima l'alone era menta neon (0x00ffcc): tingeva di verde atmosfera e
+  //    oceani e toglieva contrasto proprio al pianeta.
+  { top: new THREE.Color(0x1c2463), mid: new THREE.Color(0x2f9cf0), bottom: new THREE.Color(0xa4ecff), lightInt: 1.2, ambInt: 0.6, starOpacity: 0.2 },
   // 2. Tramonto Synthwave (cremisi scuro in alto → arancio fuoco orizzonte → oro al centro)
   { top: new THREE.Color(0x6d0021), mid: new THREE.Color(0xff5500), bottom: new THREE.Color(0xffcc00), lightInt: 1.0, ambInt: 0.5, starOpacity: 0.4 },
   // 3. Crepuscolo Scarlatto (nero bruciato in alto → rosso scarlatto mid → arancio brace al centro)
   { top: new THREE.Color(0x0d0005), mid: new THREE.Color(0xaa1100), bottom: new THREE.Color(0xff4400), lightInt: 0.6, ambInt: 0.3, starOpacity: 0.8 },
   // 4. Notte Abissale (blu cosm. → blu notte → smeraldo oscuro al centro)
   { top: new THREE.Color(0x050514), mid: new THREE.Color(0x090920), bottom: new THREE.Color(0x00332a), lightInt: 0.1, ambInt: 0.2, starOpacity: 1.0 },
-  // 5. Alba Eterea (indaco → lavanda rosata orizzonte → menta tenue al centro)
-  { top: new THREE.Color(0x1a237e), mid: new THREE.Color(0xff8fa3), bottom: new THREE.Color(0x64ffda), lightInt: 0.8, ambInt: 0.4, starOpacity: 0.5 },
+  // 5. Alba Eterea (indaco → lavanda rosata orizzonte → pesca tenue al centro)
+  { top: new THREE.Color(0x1a237e), mid: new THREE.Color(0xff8fa3), bottom: new THREE.Color(0xffd6b0), lightInt: 0.8, ambInt: 0.4, starOpacity: 0.5 },
 ];
 
 /**
@@ -185,10 +188,11 @@ const skyStates = [
  * @param {THREE.Scene} scene
  * @param {{ambient:THREE.Light, sun:THREE.Light, fill?:THREE.Light, rim?:THREE.Light}} lights
  *        Restituite da `setupLighting(scene)` — necessarie per il ciclo giorno/notte.
+ * @param {{lowQuality?:boolean}} [options]  qualità bassa: niente nebulosa, stelle né nuvole
  * @returns {{sky:THREE.Mesh, stars:THREE.Points, cloudRoot:THREE.Group, update:(delta:number)=>void}}
  */
 export function createSky(scene, lights, options = {}) {
-  let qualityStage = Math.max(0, options.qualityStage ?? 0);
+  const qualityStage = options.lowQuality ? 2 : 0;
   // Il cielo shader copre tutta la vista: niente scene.background.
   scene.background = null;
 
@@ -293,13 +297,17 @@ export function createSky(scene, lights, options = {}) {
   stars.renderOrder = -1;
   scene.add(stars);
 
-  // ── Nuvole low-poly (poco sopra il raggio di volo, così restano “basse”) ───
-  const CLOUD_SHELL_R = FLY_ALTITUDE + 12;
-  const puffGeo = new THREE.SphereGeometry(1, 7, 5);
-  const cloudMat = new THREE.MeshBasicMaterial({
-    color: 0xeef2fb,
+  // ── Nuvole low-poly ─────────────────────────────────────────────────────────
+  // Poco sopra la quota di volo: passano sopra la testa e danno profondità
+  // all'orizzonte. Ogni nuvola è un grappolo di icosaedri schiacciati, con
+  // flatShading e illuminazione vera (pancia in ombra, cima al sole). Tutte le
+  // nuvole sono fuse in un'unica geometria: una sola draw call.
+  const cloudMat = new THREE.MeshLambertMaterial({
+    color: 0xffffff,
+    emissive: 0x8a96b4,
+    flatShading: true,
     transparent: true,
-    opacity: 0.48,
+    opacity: 0.94,
     depthWrite: false,
     fog: true,
   });
@@ -308,46 +316,48 @@ export function createSky(scene, lights, options = {}) {
   cloudRoot.frustumCulled = false;
   cloudRoot.renderOrder = 0;
 
-  const _cloudNormal = new THREE.Vector3();
-  const _qAlignCloud = new THREE.Quaternion();
-  const _qSpinCloud = new THREE.Quaternion();
-
-  function addCumulusCloud(parent) {
-    const group = new THREE.Group();
-    const phi = Math.acos(2 * Math.random() - 1);
-    const theta = Math.random() * Math.PI * 2;
-    const sinP = Math.sin(phi);
-    group.position.set(
-      CLOUD_SHELL_R * sinP * Math.cos(theta),
-      CLOUD_SHELL_R * Math.cos(phi),
-      CLOUD_SHELL_R * sinP * Math.sin(theta)
-    );
-    // Asse locale +Y = normale uscente dal pianeta → nuvola “sdraiata” sul tangente
-    _cloudNormal.copy(group.position).normalize();
-    _qAlignCloud.setFromUnitVectors(new THREE.Vector3(0, 1, 0), _cloudNormal);
-    _qSpinCloud.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI * 2);
-    group.quaternion.copy(_qAlignCloud).multiply(_qSpinCloud);
-
-    const blobs = 3 + Math.floor(Math.random() * 3);
-    for (let b = 0; b < blobs; b++) {
-      const mesh = new THREE.Mesh(puffGeo, cloudMat);
-      mesh.position.set(
-        (Math.random() - 0.5) * 3.2,
-        (Math.random() - 0.5) * 0.75,
-        (Math.random() - 0.5) * 3.2
-      );
-      const sWide = 2.4 + Math.random() * 4.2;
-      const sThin = sWide * (0.28 + Math.random() * 0.16);
-      const sWideB = sWide * (0.75 + Math.random() * 0.35);
-      mesh.scale.set(sWideB, sThin, sWide);
-      group.add(mesh);
+  const cloudCount = qualityStage >= 2 ? 0 : 16;
+  if (cloudCount > 0) {
+    const puffBase = new THREE.IcosahedronGeometry(1, 1);
+    const pieces = [];
+    const n = new THREE.Vector3(), u = new THREE.Vector3(), v = new THREE.Vector3();
+    const m = new THREE.Matrix4(), basis = new THREE.Matrix4(), q = new THREE.Quaternion();
+    const pos = new THREE.Vector3(), scl = new THREE.Vector3();
+    for (let c = 0; c < cloudCount; c++) {
+      n.set(Math.random() * 2 - 1, (Math.random() * 2 - 1) * 0.85, Math.random() * 2 - 1).normalize();
+      u.set(Math.abs(n.y) < 0.9 ? 0 : 1, Math.abs(n.y) < 0.9 ? 1 : 0, 0).cross(n).normalize();
+      v.crossVectors(n, u);
+      const yaw = Math.random() * Math.PI * 2;
+      u.multiplyScalar(Math.cos(yaw)).addScaledVector(v.clone(), Math.sin(yaw));
+      // Terna destrorsa (u, n, u × n): una mancina sarebbe una riflessione e
+      // setFromRotationMatrix ne ricaverebbe un quaternione senza senso.
+      v.crossVectors(u, n);
+      basis.makeBasis(u, n, v);
+      q.setFromRotationMatrix(basis);
+      const R = FLY_ALTITUDE + 9 + Math.random() * 5;
+      const size = 1.3 + Math.random() * 1.3;
+      const puffs = 4 + Math.floor(Math.random() * 4);
+      for (let p = 0; p < puffs; p++) {
+        const along = (p / (puffs - 1) - 0.5) * 5.2 * size;
+        const bulge = 1 - Math.abs(p / (puffs - 1) - 0.5) * 1.1; // più gonfie al centro
+        const r = size * (0.9 + 0.8 * bulge) * (0.8 + Math.random() * 0.4);
+        pos.copy(n).multiplyScalar(R)
+          .addScaledVector(u, along)
+          .addScaledVector(v, (Math.random() - 0.5) * 1.6 * size)
+          .addScaledVector(n, r * 0.25 * bulge);
+        scl.set(r * 1.25, r * 0.7, r);
+        m.compose(pos, q, scl);
+        pieces.push(puffBase.clone().applyMatrix4(m));
+      }
     }
-    parent.add(group);
+    const merged = mergeGeometries(pieces, false);
+    for (const g of pieces) g.dispose();
+    puffBase.dispose();
+    const clouds = new THREE.Mesh(merged, cloudMat);
+    clouds.frustumCulled = false;
+    cloudRoot.add(clouds);
   }
-
-  const cloudCount = qualityStage >= 2 ? 4 : 8;
-  for (let c = 0; c < cloudCount; c++) addCumulusCloud(cloudRoot);
-  cloudRoot.visible = qualityStage < 2;
+  cloudRoot.visible = cloudCount > 0;
   scene.add(cloudRoot);
 
   // Intensità base di fill/rim per poterle scalare col "giorno"
@@ -443,20 +453,6 @@ export function createSky(scene, lights, options = {}) {
   let time = 0;
   let lastNightFactor = 0;
 
-  function setQualityStage(stage) {
-    qualityStage = Math.max(qualityStage, stage ?? 0);
-    if (qualityStage >= 1) nebula.visible = false;
-    if (qualityStage >= 2) {
-      stars.visible = false;
-      cloudRoot.visible = false;
-      for (const s of shootingStars.splice(0)) {
-        scene.remove(s.line);
-        s.geo.dispose();
-        s.mat.dispose();
-      }
-    }
-  }
-
   function update(delta) {
     time += delta * CYCLE_SPEED;
     const total = skyStates.length;
@@ -513,11 +509,12 @@ export function createSky(scene, lights, options = {}) {
     // Stessa “notte” delle stelle (0=giorno, 1=notte): nuvole spariscono in morbida
     const nf = fieldOpacity;
     // smoothstep(x, min, max): 0 se x<=min, 1 se x>=max — x deve essere nf
-    const cloudNightFade = 1.0 - THREE.MathUtils.smoothstep(nf, 0.2, 0.9);
-    cloudMat.opacity = 0.52 * cloudNightFade;
-    cloudRoot.visible = qualityStage < 2 && cloudMat.opacity > 0.03;
-    cloudTintScratch.set(0xf0f5ff).lerp(skyUniforms.topColor.value, 0.2 + nf * 0.14);
+    const cloudNightFade = 1.0 - THREE.MathUtils.smoothstep(nf, 0.25, 0.95);
+    cloudMat.opacity = 0.94 * cloudNightFade;
+    cloudRoot.visible = cloudCount > 0 && cloudMat.opacity > 0.03;
+    cloudTintScratch.set(0xffffff).lerp(skyUniforms.midColor.value, 0.12 + nf * 0.2);
     cloudMat.color.copy(cloudTintScratch);
+    cloudMat.emissive.set(0x8a96b4).lerp(skyUniforms.midColor.value, 0.25).multiplyScalar(1 - nf * 0.65);
 
     if (cloudRoot.visible) {
       cloudRoot.rotation.y += 0.005 * delta;
@@ -533,8 +530,9 @@ export function createSky(scene, lights, options = {}) {
     nebula,
     cloudRoot,
     update,
-    setQualityStage,
     /** 0..1: 0=giorno, 1=notte (derivato da opacità stelle) */
     getNightFactor: () => lastNightFactor,
+    /** Colore del cielo all'orizzonte (tinge l'atmosfera del pianeta). */
+    horizonColor: skyUniforms.midColor.value,
   };
 }

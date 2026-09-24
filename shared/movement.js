@@ -84,3 +84,27 @@ export function moveOnSphere(theta, phi, heading, delta) {
 
   return moved;
 }
+
+/**
+ * Predice dove sarà un aereo dopo `dt` secondi, continuando a volare alla
+ * velocità `speed` (rad/s) e a virare di `turnRate` (rad/s).
+ *
+ * Serve in due punti: il server compensa la latenza di chi invia la propria
+ * posizione, e i client mostrano gli aerei remoti dove sono *adesso* invece
+ * che dove erano quando è partito l'ultimo pacchetto (dead reckoning).
+ * La virata viene integrata a piccoli passi: su un giro stretto un passo unico
+ * taglierebbe la curva.
+ */
+export function advanceOnSphere(theta, phi, heading, speed, turnRate, dt) {
+  let t = theta, p = phi, h = heading;
+  if (!(dt > 0)) return { theta: t, phi: p, heading: h };
+  const steps = Math.max(1, Math.ceil(dt / 0.034));
+  const step = dt / steps;
+  for (let i = 0; i < steps; i++) {
+    h += turnRate * step * 0.5;
+    const m = moveOnSphere(t, p, h, speed * step);
+    t = m.theta; p = m.phi; h = m.heading;
+    h += turnRate * step * 0.5;
+  }
+  return { theta: t, phi: p, heading: h };
+}

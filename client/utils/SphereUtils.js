@@ -10,37 +10,36 @@ export {
   moveOnSphere,
 } from '../../shared/movement.js';
 
-/**
- * Distanza cartesiana tra due punti sulla sfera di raggio r.
- */
-export function sphereDistance(theta1, phi1, theta2, phi2, r = 1) {
-  const p1 = sphericalToCartesian(theta1, phi1, r);
-  const p2 = sphericalToCartesian(theta2, phi2, r);
-  return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2 + (p1.z - p2.z) ** 2);
-}
+// Scratch: sphereOrientation gira per ogni aereo a ogni frame; allocare qui
+// sette oggetti a chiamata era spazzatura continua per il garbage collector.
+let _up, _north, _east, _fwd, _side, _m;
 
 /**
  * Calcola la matrice di orientamento di un oggetto sulla sfera.
  * "up" = radiale verso fuori, "forward" = direzione heading.
- * Ritorna un THREE.Quaternion.
+ * Scrive in `out` (se passato) o in un nuovo THREE.Quaternion.
  */
-export function sphereOrientation(THREE, theta, phi, heading) {
+export function sphereOrientation(THREE, theta, phi, heading, out = new THREE.Quaternion()) {
+  if (!_up) {
+    _up = new THREE.Vector3(); _north = new THREE.Vector3(); _east = new THREE.Vector3();
+    _fwd = new THREE.Vector3(); _side = new THREE.Vector3(); _m = new THREE.Matrix4();
+  }
   // up = direzione radiale (verso l'esterno della sfera)
-  const up = new THREE.Vector3(
+  const up = _up.set(
     Math.sin(theta) * Math.cos(phi),
     Math.cos(theta),
     Math.sin(theta) * Math.sin(phi),
   ).normalize();
 
-  // Nord locale (tangente verso il polo positivo Y)
-  const northV = new THREE.Vector3(
+  // Nord locale (tangente verso theta crescente)
+  const northV = _north.set(
     Math.cos(theta) * Math.cos(phi),
     -Math.sin(theta),
     Math.cos(theta) * Math.sin(phi),
   ).normalize();
 
   // Est locale — degenera ai poli, gestione esplicita
-  let eastV = new THREE.Vector3(-Math.sin(phi), 0, Math.cos(phi));
+  const eastV = _east.set(-Math.sin(phi), 0, Math.cos(phi));
   if (eastV.lengthSq() < 1e-6) {
     eastV.set(1, 0, 0);
     eastV.addScaledVector(up, -eastV.dot(up)).normalize();
@@ -49,18 +48,18 @@ export function sphereOrientation(THREE, theta, phi, heading) {
   }
 
   // Forward = direzione di volo nel piano tangente (heading 0 = nord)
-  const forward = new THREE.Vector3()
+  const forward = _fwd.set(0, 0, 0)
     .addScaledVector(northV, Math.cos(heading))
     .addScaledVector(eastV, Math.sin(heading))
     .normalize();
 
   // sideW = ala destra (forward × up, terza colonna della matrice)
-  const sideW = new THREE.Vector3().crossVectors(forward, up).normalize();
+  const sideW = _side.crossVectors(forward, up).normalize();
 
   // makeBasis(X, Y, Z):
   //   col 0 → local +X (naso aereo) = forward  ✓
   //   col 1 → local +Y (su aereo)   = up        ✓
   //   col 2 → local +Z (ala)        = sideW     ✓
-  const m = new THREE.Matrix4().makeBasis(forward, up, sideW);
-  return new THREE.Quaternion().setFromRotationMatrix(m);
+  _m.makeBasis(forward, up, sideW);
+  return out.setFromRotationMatrix(_m);
 }
