@@ -25,14 +25,63 @@ import { Pass, FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
  */
 
 /**
+ * Tetto dell'ingresso del bloom (HDR lineare). La scena voluta sta sotto:
+ * sole ~2.7, finestre 2.6, e solo il primo fotogramma di un'esplosione
+ * arriva a ~20 in pochi pixel.
+ */
+const BLOOM_INPUT_MAX = 8.0;
+
+/**
+ * Filtro passa-alto del bloom: quello stock (LuminosityHighPassShader) più
+ * la pulizia dell'ingresso, nella stessa passata.
+ *
+ * Il filtro legge la scena con un solo campione per pixel del target ridotto
+ * (da 1/5 a 1/8 della risoluzione per lato), e la sfocatura di
+ * UnrealBloomPass ha sigma pari al raggio del kernel, tagliata lì: è quasi
+ * una scatola. Un solo pixel enorme (un half float traboccato) diventava
+ * così due quadrati annidati, uno per mip, larghi 35 e 115 px; un NaN o un
+ * infinito (un pow() con base negativa) si propaga per tutti i mip e
+ * spegneva il fotogramma intero. Qui NaN e infiniti valgono 0 e il resto è
+ * limitato a BLOOM_INPUT_MAX scalando tutto il colore, così un nucleo
+ * arancio resta arancio: il caso peggiore è ora un alone tenue come quello
+ * di una luce vera.
+ */
+const HIGH_PASS_FRAG = /* glsl */`
+  uniform sampler2D tDiffuse;
+  uniform vec3 defaultColor;
+  uniform float defaultOpacity;
+  uniform float luminosityThreshold;
+  uniform float smoothWidth;
+  varying vec2 vUv;
+  void main() {
+    vec3 c = texture2D(tDiffuse, vUv).rgb;
+    #if __VERSION__ >= 300
+      if (any(isnan(c)) || any(isinf(c))) c = vec3(0.0);
+    #endif
+    c = clamp(c, 0.0, 65504.0);
+    c *= min(1.0, ${BLOOM_INPUT_MAX.toFixed(1)} / max(max(c.r, max(c.g, c.b)), 1e-4));
+    float v = dot(c, vec3(0.299, 0.587, 0.114));
+    float alpha = smoothstep(luminosityThreshold, luminosityThreshold + smoothWidth, v);
+    gl_FragColor = mix(vec4(defaultColor, defaultOpacity), vec4(c, 1.0), alpha);
+  }
+`;
+
+/**
  * UnrealBloomPass che si ferma alla composizione dei mip: niente copia della
  * scena a schermo e niente somma finale, ci pensa il GradePass.
  *
  * Dipende dall'implementazione di UnrealBloomPass di three r160 (campi
  * renderTargetBright, renderTargetsHorizontal/Vertical, separableBlurMaterials,
- * compositeMaterial): aggiornando three va ricontrollata.
+ * compositeMaterial, materialHighPassFilter): aggiornando three va ricontrollata.
  */
 export class BloomOnlyPass extends UnrealBloomPass {
+  constructor(resolution, strength, radius, threshold) {
+    super(resolution, strength, radius, threshold);
+    // Mai compilato finora: basta sostituire il sorgente. Vale anche per il
+    // ripiego a schermo di render() (super.render usa lo stesso materiale).
+    this.materialHighPassFilter.fragmentShader = HIGH_PASS_FRAG;
+  }
+
   /** Bloom già composto, a risoluzione ridotta, in lineare HDR. */
   get bloomTexture() {
     return this.renderTargetsHorizontal[0].texture;

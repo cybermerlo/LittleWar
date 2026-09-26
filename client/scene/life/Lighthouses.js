@@ -139,7 +139,7 @@ const BEAM_FRAG = /* glsl */`
     if (vKind < 1.5) {
       float along = vUv.x;
       float across = abs(vUv.y * 2.0 - 1.0);
-      a = pow(1.0 - along, 1.6) * (1.0 - smoothstep(0.3, 1.0, across)) * smoothstep(0.0, 0.05, along) * 0.24;
+      a = pow(max(1.0 - along, 0.0), 1.6) * (1.0 - smoothstep(0.3, 1.0, across)) * smoothstep(0.0, 0.05, along) * 0.24;
       col = vec3(1.0, 0.95, 0.8);
     } else {
       float d = length(vUv - 0.5) * 2.0;

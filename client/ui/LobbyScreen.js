@@ -44,6 +44,8 @@ export class LobbyScreen {
     this.selectedColor = PLAYER_COLORS[0];
     this.selectedModel = MODELS[0].id;
     this.selectedQuality = getRenderQualityPreference();
+    /** Colori occupati secondo l'ultima lobby-info. */
+    this._taken = new Set();
     this._isFull = false;
     this._leaveTimer = null;
 
@@ -78,6 +80,9 @@ export class LobbyScreen {
     this._nicknameEl.addEventListener('change', onNicknameMaybeChanged);
     this._nicknameEl.addEventListener('focus', onNicknameMaybeChanged);
     this._nicknameEl.addEventListener('keydown', (e) => {
+      // Le lettere del nickname non sono tasti di gioco: senza questo "h"
+      // apriva l'overlay di debug e "r" cambiava la radio all'ingresso.
+      e.stopPropagation();
       if (e.key !== 'Enter') return;
       e.preventDefault();
       this._handlePlay();
@@ -176,6 +181,7 @@ export class LobbyScreen {
    */
   setTakenColors(takenColors) {
     const taken = new Set(takenColors);
+    this._taken = taken;
     let currentStillFree = false;
 
     this._colorEl.querySelectorAll('.color-btn').forEach(btn => {
@@ -196,6 +202,29 @@ export class LobbyScreen {
       const firstFree = this._colorEl.querySelector('.color-btn:not([disabled])');
       if (firstFree) this._selectColor(firstFree.dataset.color);
     }
+  }
+
+  /**
+   * Di ritorno dalla partita: riseleziona il colore con cui si è volato, se è
+   * libero. In multiplayer la lobby-info arrivata a partita iniziata lo dava
+   * occupato (da noi stessi) e la selezione scivolava sul primo libero, così
+   * il GIOCA successivo rientrava con un altro colore.
+   * @param {string}  color
+   * @param {object}  [opts]
+   * @param {boolean} [opts.release]  il colore era nostro nella partita
+   *   condivisa: il server lo libera, ma a socket chiuso la lobby-info
+   *   aggiornata non arriva più
+   */
+  reclaimColor(color, { release = false } = {}) {
+    if (!color) return;
+    if (release && this._taken.has(color)) {
+      const taken = new Set(this._taken);
+      taken.delete(color);
+      this.setTakenColors(taken);
+    }
+    const btn = Array.from(this._colorEl.querySelectorAll('.color-btn'))
+      .find((b) => b.dataset.color === color);
+    if (btn && !btn.disabled) this._selectColor(color);
   }
 
   _buildModelPicker() {

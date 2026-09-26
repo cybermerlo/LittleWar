@@ -449,10 +449,20 @@ export class HUD {
     const el = this.el.players;
     if (!el) return;
     const open = !el.classList.contains('is-open');
-    el.classList.toggle('is-open', open);
+    this._setScoreboardOpen(open);
     if (this._playersOpenTimer) clearTimeout(this._playersOpenTimer);
     this._playersOpenTimer = open
-      ? setTimeout(() => el.classList.remove('is-open'), 4000)
+      ? setTimeout(() => this._setScoreboardOpen(false), 4000)
       : null;
+  }
+
+  /**
+   * Le notifiche stanno fuori da #hud per restare sopra la schermata di
+   * morte, quindi coprivano la classifica aperta nonostante il suo z-index:
+   * finché è aperta si nascondono (solo su telefono, vedi index.html).
+   */
+  _setScoreboardOpen(open) {
+    this.el.players?.classList.toggle('is-open', open);
+    this.el.toasts?.classList.toggle('is-under-board', open);
   }
 }

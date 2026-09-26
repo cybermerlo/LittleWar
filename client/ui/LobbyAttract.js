@@ -211,7 +211,7 @@ export class LobbyAttract {
     const tanHalf = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
     this._orbitR = Math.max(ORBIT_RADIUS, PLANET_FIT_RADIUS / (tanHalf * (W / H)));
     // Stessa soglia della colonna singola in index.html.
-    const singleColumn = (W <= 900 && H > W) || W <= 640;
+    const singleColumn = (W <= 900 && H > W) || (W <= 640 && H > 560);
     this._offX = singleColumn ? 0 : 0.17;
     this._offY = singleColumn ? 0.22 : 0;
     this._setOffset(1);

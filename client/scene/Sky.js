@@ -9,6 +9,8 @@ const _ssTail = new THREE.Vector3();
 const _viewUp = new THREE.Vector3();
 const _sunH = new THREE.Vector3();
 const _side = new THREE.Vector3();
+// Temporaneo per l'ordine delle nuvole (una volta per render della scena)
+const _cloudCam = new THREE.Vector3();
 
 /**
  * Velocità del ciclo giorno/notte, in "unità di ciclo" al secondo. Il ciclo
@@ -20,8 +22,39 @@ const _side = new THREE.Vector3();
  */
 const CYCLE_SPEED = 0.03;
 
-/** Altezza del disco del sole/luna sopra il bordo del pianeta (rad). */
-const DISC_LIFT = 0.14;
+/**
+ * Quota del disco di sole/luna rispetto al bordo del pianeta (rad), per stato
+ * (`discLift`). Il disco non sfuma più sul posto: sommato al cielo azzurro un
+ * sole che si spegneva diventava un'ellisse grigia incollata all'orizzonte.
+ * Ora sorge e tramonta dietro al bordo (lo copre il terreno) e di giorno sale
+ * oltre il bordo alto dell'inquadratura: la camera di gioco vede fino a ~0.8
+ * rad sopra il bordo del pianeta, ~0.9 col FOV del boost; la lobby ~0.35.
+ */
+const DISC_LIFT = 0.14;   // appoggiato sull'orizzonte: tramonto, notte, alba
+const DISC_SET = -0.075;  // tutto sotto il bordo (disco più grande: 0.052)
+const DISC_HIGH = 1.2;    // giorno: sopra l'inquadratura di gioco
+/**
+ * Da qui a DISC_HIGH il disco sfuma, già fuori vista: di giorno il ramo del
+ * disco nello shader si salta del tutto.
+ */
+const DISC_FADE_LOW = 0.95;
+/**
+ * Ordine di disegno delle nuvole: trasparenti e senza profondità, come il mare
+ * (renderOrder 1). Da sotto lo strato il mare non sta quasi mai dietro a una
+ * nuvola e resta l'ordine 0, per profondità con fuoco e fumo delle esplosioni
+ * che possono passare davanti a una nuvola all'orizzonte. Da sopra (orbita
+ * della lobby) le nuvole venivano prima del mare, che ci passava sopra: quelle
+ * sul mare sparivano. Lì vanno dopo ogni effetto del mondo, che da sopra sta
+ * tutto sotto di loro, ma prima delle speed lines (20), attaccate alla camera.
+ */
+const CLOUD_ORDER_BELOW = 0;
+const CLOUD_ORDER_ABOVE = 6.5;
+/**
+ * Quota della camera oltre la quale si usa CLOUD_ORDER_ABOVE: sopra tutto lo
+ * strato (centri fino a +14, sbuffi fino a ~+19) e sopra la camera di gioco,
+ * che al massimo dello zoom e in boost arriva a ~72 (FLY_ALTITUDE + 16).
+ */
+const CLOUD_ABOVE_RADIUS = FLY_ALTITUDE + 20;
 /**
  * Nebbia come prospettiva aerea. Parte poco sotto la camera e segue la sua
  * quota: così scala da sola con lo zoom e con la vista in orbita. Dalla
@@ -55,7 +88,8 @@ const skyFragmentShader = /* glsl */ `
   uniform vec3  uDiscDir;   // centro del disco (sole o luna), sopra il bordo
   uniform vec3  uShadowDir; // centro dell'ombra che fa la falce di luna
   uniform vec3  uDiscColor;
-  uniform float uDisc;
+  uniform float uDisc;      // luminosità di disco e alone
+  uniform float uDiscAlpha; // opacità di disco e alone (0 = sole alto di giorno)
   uniform float uDiscSize;  // raggio del disco (rad)
   uniform float uCrescent;
   varying vec3 vWorldPosition;
@@ -86,18 +120,21 @@ const skyFragmentShader = /* glsl */ `
     float band = exp(-max(angle - uLimb, 0.0) * 5.0);
     col += uGlowColor * (band * az * az * az * uGlow);
 
-    // Disco appoggiato sul bordo del pianeta: sole all'alba e al tramonto,
-    // luna (a falce) di notte. HDR, così il bloom lo fa brillare; il terreno
-    // lo copre da solo, perché il cielo è disegnato per primo.
+    // Disco sul bordo del pianeta: sole che sorge e tramonta, luna (a falce)
+    // di notte. HDR, così il bloom lo fa brillare; sotto il bordo lo copre il
+    // terreno, perché il cielo è disegnato per primo.
+    // L'alone si somma, il disco invece copre il cielo: sommato, un disco
+    // semitrasparente si mescolava all'azzurro e diventava grigio.
     // Distanze come corde, non coseni: vicino a 1 il coseno perde precisione.
     // Ramo su una uniform (coerente su tutta la GPU): di giorno non costa nulla.
-    if (uDisc > 0.001) {
+    if (uDiscAlpha > 0.001) {
       float dc = length(viewDir - uDiscDir);
       float disc = 1.0 - smoothstep(uDiscSize - 0.0025, uDiscSize + 0.0015, dc);
       float shade = 1.0 - smoothstep(uDiscSize - 0.0025, uDiscSize + 0.0015, length(viewDir - uShadowDir));
       disc *= 1.0 - shade * uCrescent;
       float halo = exp(-dc * 16.0) * 0.35 + exp(-dc * 60.0) * 0.5;
-      col += uDiscColor * ((disc * 1.8 + halo) * uDisc);
+      col += uDiscColor * (halo * uDisc * uDiscAlpha);
+      col = mix(col, uDiscColor * ((1.8 + halo) * uDisc), disc * uDiscAlpha);
     }
 
     gl_FragColor = vec4(col, 1.0);
@@ -244,6 +281,11 @@ const L = (r, g, b) => new THREE.Color(r, g, b); // valori lineari, per il gradi
  * nero e al tramonto ACES spingeva tutto il frame verso un rosso saturo.
  * `night` è il vecchio "fattore notte" (0 giorno, 1 notte) che leggono aerei,
  * torrette e ombre: i suoi valori non sono cambiati.
+ *
+ * Disco: `discLift` è la quota sul bordo (vedi DISC_LIFT), `discInt` la
+ * luminosità di disco e alone. Fra due stati con astri diversi (`moon`) il
+ * primo tramonta nella prima metà della sfumatura e il secondo sorge nella
+ * seconda; colore, dimensione e falce cambiano mentre nessuno dei due si vede.
  */
 const skyStates = [
   // 1. Giorno: azzurro pieno, alone chiaro dietro al pianeta.
@@ -253,7 +295,8 @@ const skyStates = [
     lightInt: 1.2, ambInt: 0.6, sun: C(0xffe7bf), amb: C(0xfff3e6), elevation: 0.9,
     night: 0.2, starOpacity: 0.0, exposure: 1.03, atmosphere: 0.55,
     grade: { sat: 1.08, contrast: 0.08, vignette: 0.2, white: L(1, 1, 1), lift: L(0, 0, 0) },
-    glow: C(0xfff1c8), glowInt: 0.3, disc: C(0xfff4d6), discInt: 0, discSize: 0.05, crescent: 0,
+    glow: C(0xfff1c8), glowInt: 0.3, disc: C(0xfff4d6), discInt: 1.0, discSize: 0.05, crescent: 0,
+    discLift: DISC_HIGH, // invisibile: discInt è la luce del sole mentre scende o sale
   },
   // 2. Tramonto dorato: arancio all'orizzonte, viola in alto, sole sul bordo.
   //    Prima era cremisi + arancio fuoco: con ACES tutto il frame diventava rosso.
@@ -264,6 +307,7 @@ const skyStates = [
     night: 0.4, starOpacity: 0.12, exposure: 1.0, atmosphere: 0.6,
     grade: { sat: 0.94, contrast: 0.1, vignette: 0.24, white: L(1.0, 0.98, 0.95), lift: L(0.012, 0.004, 0.018) },
     glow: C(0xffb347), glowInt: 0.9, disc: C(0xff8a30), discInt: 1.0, discSize: 0.05, crescent: 0,
+    discLift: DISC_LIFT,
   },
   // 3. Crepuscolo: rosa brace all'orizzonte, cielo che si spegne.
   {
@@ -273,6 +317,7 @@ const skyStates = [
     night: 0.8, starOpacity: 0.7, exposure: 1.12, atmosphere: 0.42,
     grade: { sat: 0.9, contrast: 0.1, vignette: 0.26, white: L(0.98, 0.96, 1.02), lift: L(0.01, 0.006, 0.024) },
     glow: C(0xff5a2a), glowInt: 0.6, disc: C(0xff6a2a), discInt: 0.6, discSize: 0.052, crescent: 0,
+    discLift: DISC_SET, // tramontato: resta l'alone sopra il bordo
   },
   // 4. Notte di luna: blu e leggibile, non più un terreno quasi nero.
   {
@@ -282,6 +327,7 @@ const skyStates = [
     night: 1.0, starOpacity: 1.0, exposure: 1.18, atmosphere: 0.26,
     grade: { sat: 0.82, contrast: 0.1, vignette: 0.28, white: L(0.86, 0.95, 1.15), lift: L(0.004, 0.01, 0.03) },
     glow: C(0xbcd4ff), glowInt: 0.15, disc: C(0xdbe7ff), discInt: 0.55, discSize: 0.034, crescent: 0.82,
+    discLift: DISC_LIFT, moon: true,
   },
   // 5. Alba: lavanda rosata all'orizzonte, pesca tenue al centro.
   {
@@ -291,6 +337,7 @@ const skyStates = [
     night: 0.5, starOpacity: 0.3, exposure: 1.05, atmosphere: 0.5,
     grade: { sat: 1.0, contrast: 0.08, vignette: 0.22, white: L(1.02, 0.98, 1.0), lift: L(0.01, 0.006, 0.014) },
     glow: C(0xffc2a0), glowInt: 0.7, disc: C(0xffb070), discInt: 0.8, discSize: 0.05, crescent: 0,
+    discLift: DISC_LIFT,
   },
 ];
 
@@ -331,6 +378,7 @@ export function createSky(scene, lights, options = {}) {
     uShadowDir:  { value: new THREE.Vector3(0, -1, 0) },
     uDiscColor:  { value: skyStates[0].disc.clone() },
     uDisc:       { value: 0 },
+    uDiscAlpha:  { value: 0 },
     uDiscSize:   { value: 0.05 },
     uCrescent:   { value: 0 },
   };
@@ -450,7 +498,11 @@ export function createSky(scene, lights, options = {}) {
   const cloudTintScratch = new THREE.Color();
   const cloudRoot = new THREE.Group();
   cloudRoot.frustumCulled = false;
+  // Resta 0: l'ordine di un Group vale per tutto ciò che contiene e
+  // scavalcherebbe ogni altro oggetto. Quello della mesh si decide a ogni render
+  // (scene.onBeforeRender, più sotto).
   cloudRoot.renderOrder = 0;
+  let clouds = null;
 
   const cloudCount = qualityStage >= 2 ? 0 : 16;
   if (cloudCount > 0) {
@@ -492,8 +544,9 @@ export function createSky(scene, lights, options = {}) {
     const merged = mergeGeometries(pieces, false);
     for (const g of pieces) g.dispose();
     puffBase.dispose();
-    const clouds = new THREE.Mesh(merged, cloudMat);
+    clouds = new THREE.Mesh(merged, cloudMat);
     clouds.frustumCulled = false;
+    clouds.renderOrder = CLOUD_ORDER_BELOW;
     cloudRoot.add(clouds);
   }
   cloudRoot.visible = cloudCount > 0;
@@ -622,6 +675,7 @@ export function createSky(scene, lights, options = {}) {
 
   let time = 0;
   let lastNightFactor = 0;
+  let discLift = skyStates[0].discLift;
 
   /** Stato corrente e successivo della timeline, più il peso di sfumatura. */
   const _loc = { idx: 0, next: 1, t: 0 };
@@ -651,10 +705,29 @@ export function createSky(scene, lights, options = {}) {
     skyUniforms.bottomColor.value.lerpColors(cur.bottom, nxt.bottom, t);
     skyUniforms.uGlowColor.value.lerpColors(cur.glow, nxt.glow, t);
     skyUniforms.uGlow.value = lerp(cur.glowInt, nxt.glowInt, t);
-    skyUniforms.uDiscColor.value.lerpColors(cur.disc, nxt.disc, t);
-    skyUniforms.uDisc.value = lerp(cur.discInt, nxt.discInt, t);
-    skyUniforms.uDiscSize.value = lerp(cur.discSize, nxt.discSize, t);
-    skyUniforms.uCrescent.value = lerp(cur.crescent, nxt.crescent, t);
+    // Disco. Stesso astro: si interpola tutto, quota compresa (il sole scende
+    // e tramonta, poi all'alba sale e sparisce in alto). Astri diversi: il
+    // primo scende sotto il bordo, lì si scambiano e il secondo sorge.
+    let discAlpha = 1;
+    if (!!cur.moon !== !!nxt.moon) {
+      const d = t < 0.5 ? cur : nxt;
+      const s = Math.abs(2 * t - 1); // 1 agli estremi, 0 a metà (astro nascosto)
+      skyUniforms.uDiscColor.value.copy(d.disc);
+      skyUniforms.uDisc.value = d.discInt;
+      skyUniforms.uDiscSize.value = d.discSize;
+      skyUniforms.uCrescent.value = d.crescent;
+      discLift = lerp(DISC_SET, d.discLift, s);
+      // L'alone resterebbe sopra il bordo e a metà cambierebbe colore di colpo.
+      discAlpha = THREE.MathUtils.smoothstep(s, 0, 0.3);
+    } else {
+      skyUniforms.uDiscColor.value.lerpColors(cur.disc, nxt.disc, t);
+      skyUniforms.uDisc.value = lerp(cur.discInt, nxt.discInt, t);
+      skyUniforms.uDiscSize.value = lerp(cur.discSize, nxt.discSize, t);
+      skyUniforms.uCrescent.value = lerp(cur.crescent, nxt.crescent, t);
+      discLift = lerp(cur.discLift, nxt.discLift, t);
+    }
+    // Salendo verso DISC_HIGH il disco sfuma nel cielo del giorno.
+    skyUniforms.uDiscAlpha.value = discAlpha * (1 - THREE.MathUtils.smoothstep(discLift, DISC_FADE_LOW, DISC_HIGH));
 
     const sunInt = lerp(cur.lightInt, nxt.lightInt, t);
     const ambInt = lerp(cur.ambInt,   nxt.ambInt,   t);
@@ -760,8 +833,8 @@ export function createSky(scene, lights, options = {}) {
     _sunH.normalize();
     u.uSunH.value.copy(_sunH);
 
-    // Disco poco sopra il bordo, nella direzione del sole (centro = −su).
-    const a = limb + DISC_LIFT;
+    // Disco sopra (o sotto) il bordo, nella direzione del sole (centro = −su).
+    const a = limb + discLift;
     u.uDiscDir.value.copy(_viewUp).multiplyScalar(-Math.cos(a)).addScaledVector(_sunH, Math.sin(a));
     // Ombra della falce: spostata di lato e un filo in alto rispetto al disco.
     _side.crossVectors(_viewUp, _sunH);
@@ -787,6 +860,19 @@ export function createSky(scene, lights, options = {}) {
   sky.onBeforeRender = (_renderer, _scene, cam) => {
     setView(_camPos.setFromMatrixPosition(cam.matrixWorld));
   };
+
+  // Ordine delle nuvole secondo la quota della camera (vedi CLOUD_ORDER_*).
+  // Va deciso prima che il renderer ordini la lista: nel onBeforeRender del
+  // cielo è già tardi, e una singola inquadratura (un taglio di camera, gli
+  // screenshot dei test) userebbe l'ordine della camera precedente.
+  if (clouds) {
+    const prevSceneHook = scene.onBeforeRender;
+    scene.onBeforeRender = function (renderer, scn, cam, target) {
+      prevSceneHook.call(this, renderer, scn, cam, target);
+      const r = _cloudCam.setFromMatrixPosition(cam.matrixWorld).length();
+      clouds.renderOrder = r > CLOUD_ABOVE_RADIUS ? CLOUD_ORDER_ABOVE : CLOUD_ORDER_BELOW;
+    };
+  }
 
   return {
     sky,

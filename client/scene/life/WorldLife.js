@@ -49,8 +49,9 @@ export class WorldLife {
   onWorldReady(terrainGroup, { houseTemplate = null } = {}) {
     const towns = terrainGroup?.userData?.towns ?? [];
     const buildings = terrainGroup?.userData?.buildings ?? [];
+    const trees = terrainGroup?.userData?.trees ?? [];
     const t0 = performance.now();
-    this.birds = new Birds(this.scene, { towns, lowQuality: this.lowQuality });
+    this.birds = new Birds(this.scene, { towns, obstacles: [...buildings, ...trees], lowQuality: this.lowQuality });
     this.lighthouses = new Lighthouses(this.scene, { towns, terrainGroup, lowQuality: this.lowQuality });
     this.paths = new Paths(this.scene, { towns, buildings, terrainGroup });
     if (!this.lowQuality) this.smoke = new ChimneySmoke(this.scene, { buildings, houseTemplate });

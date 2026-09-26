@@ -175,16 +175,26 @@ const FRAGMENT_PARS = /* glsl */`
  * in giallo pieno sembrava un'insegna al neon.
  * Il vetro acceso perde il ciano del giorno: sommato al giallo diventerebbe
  * bianco.
+ *
+ * Rosso forte, poco verde, niente blu. Di notte l'esposizione è 1.18 (quasi
+ * 2× dentro ACES, che divide per 0.6) e il grading desatura e tira al blu:
+ * il vecchio mix(arancio, giallo) × 2.5 usciva color crema, il bloom ci
+ * aggiungeva un alone bianco e una fascia di vetro diventava una lastra al
+ * neon. Il bloom scatta sulla luminanza (0.299, 0.587, 0.114) sopra 0.88,
+ * prima del tone mapping: per avere l'alone serve quella luminanza, e
+ * ottenerla col rosso invece che col verde lascia il vetro ambra
+ * (~ 247,195,140 sRGB a notte piena) con un alone arancio. Abbassare il
+ * rosso sotto ~2.5 spegne l'alone; alzare il verde torna verso il bianco.
  */
 const WINDOW_FRAGMENT = /* glsl */`
 #ifdef LW_WINDOWS
   {
     float on = smoothstep(vSeed, vSeed + 0.05, uLit);
-    vec3 tint = mix(vec3(1.0, 0.56, 0.2), vec3(1.0, 0.8, 0.42), fract(vSeed * 17.0));
+    vec3 tint = mix(vec3(2.6, 0.21, 0.012), vec3(2.2, 0.4, 0.04), fract(vSeed * 17.0));
     float tv = step(0.93, fract(vSeed * 31.0));
-    tint = mix(tint, vec3(0.42, 0.62, 1.0) * (0.75 + 0.25 * sin(uWorldTime * 9.0 + vSeed * 60.0)), tv);
+    tint = mix(tint, vec3(0.28, 0.46, 1.0) * (0.7 + 0.25 * sin(uWorldTime * 9.0 + vSeed * 60.0)), tv);
     float hospital = step(vSeed, ${HOSPITAL_SEED_MAX.toFixed(3)});
-    tint = mix(tint * 2.5, vec3(0.75, 0.92, 1.0) * 0.85, hospital);
+    tint = mix(tint, vec3(0.75, 0.92, 1.0) * 0.85, hospital);
     totalEmissiveRadiance += tint * on;
     diffuseColor.rgb *= 1.0 - 0.75 * on;
   }
