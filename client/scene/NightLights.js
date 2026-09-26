@@ -17,8 +17,8 @@ import { worldUniforms, GLOW_SLOTS } from './worldShaders.js';
 /** Raggio angolare dell'alone (rad): le case di un paese stanno entro ~0.13. */
 const GLOW_RADIUS = 0.17;
 /** Luce calda che cade sul terreno attorno ai paesi (lineare). */
-const GLOW_COLOR = new THREE.Color(1.0, 0.55, 0.22);
-const GLOW_INTENSITY = 0.55;
+const GLOW_COLOR = new THREE.Color(1.0, 0.5, 0.16);
+const GLOW_INTENSITY = 0.7;
 
 export class NightLights {
   constructor() {

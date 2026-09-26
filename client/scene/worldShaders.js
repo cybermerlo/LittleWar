@@ -184,7 +184,7 @@ const WINDOW_FRAGMENT = /* glsl */`
     float tv = step(0.93, fract(vSeed * 31.0));
     tint = mix(tint, vec3(0.42, 0.62, 1.0) * (0.75 + 0.25 * sin(uWorldTime * 9.0 + vSeed * 60.0)), tv);
     float hospital = step(vSeed, ${HOSPITAL_SEED_MAX.toFixed(3)});
-    tint = mix(tint * 2.2, vec3(0.75, 0.92, 1.0) * 0.85, hospital);
+    tint = mix(tint * 2.5, vec3(0.75, 0.92, 1.0) * 0.85, hospital);
     totalEmissiveRadiance += tint * on;
     diffuseColor.rgb *= 1.0 - 0.75 * on;
   }
@@ -192,16 +192,18 @@ const WINDOW_FRAGMENT = /* glsl */`
 `;
 
 /**
- * L'ombra toglie solo la luce diretta (l'ambiente resta), l'alone del paese è
- * luce che cade sul terreno: si moltiplica per il colore della faccia, così
- * un prato diventa oro caldo e non un velo arancione uniforme.
+ * L'ombra toglie solo la luce diretta (l'ambiente resta). L'alone del paese è
+ * luce che cade sul terreno, quindi si moltiplica per il colore della faccia
+ * e non è un velo arancione uniforme; ma solo in parte: moltiplicato per il
+ * verde pieno di un prato il giallo diventava verde acido, e con la luna blu
+ * della notte non si leggeva più come luce calda.
  */
 const LIGHT_FRAGMENT = /* glsl */`
 #ifdef LW_CLOUDS
   reflectedLight.directDiffuse *= vCloudLit;
 #endif
 #ifdef LW_GLOW
-  reflectedLight.directDiffuse += vGlow * diffuseColor.rgb;
+  reflectedLight.directDiffuse += vGlow * mix(diffuseColor.rgb, vec3(0.45), 0.4);
 #endif
 `;
 
