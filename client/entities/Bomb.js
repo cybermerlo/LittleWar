@@ -4,6 +4,7 @@ import { groundRadius } from '../scene/planetSurface.js';
 import {
   segments,
   markers,
+  surfaceMarkPoint,
   SEG_TRAIL,
   MARK_IMPACT,
   MARK_RETICLE,
@@ -126,6 +127,9 @@ export class BombEntity {
     // attraverserebbe il terreno prima di scoppiare. Sotto il suolo non si
     // vede. La direzione non cambia durante la caduta: basta campionare una volta.
     this.groundR = groundRadius(this.dir);
+    this.markPoint = new THREE.Vector3();
+    this.markNormal = new THREE.Vector3();
+    surfaceMarkPoint(this.dir, this.markPoint, this.markNormal);
     _bombs.add(this);
   }
 
@@ -155,7 +159,7 @@ export function tickBombFx(delta) {
 
     // Punto d'impatto: lampeggia per tutto il secondo e mezzo di caduta e
     // avvisa chi è sotto (utile a chi difende la propria torretta).
-    markers?.add(b.dir, 2.2, _impactColor, MARK_IMPACT, b.phase);
+    markers?.addAt(b.markPoint, b.markNormal, 2.2, _impactColor, MARK_IMPACT, b.phase);
 
     if (b.altitude <= b.groundR + 0.2 || n >= BOMB_CAPACITY) continue;
     _bp.copy(b.dir).multiplyScalar(b.altitude);

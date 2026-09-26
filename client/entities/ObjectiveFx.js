@@ -399,6 +399,22 @@ const _mScale = new THREE.Vector3();
 const _mMat = new THREE.Matrix4();
 const _zAxis = new THREE.Vector3(0, 0, 1);
 
+/**
+ * Punto e normale della superficie visibile lungo `dir`: faccia vera del
+ * terreno (sampleGround) oppure pelo dell'acqua. Per i segni a terra.
+ */
+export function surfaceMarkPoint(dir, outPoint, outNormal) {
+  _mDir.copy(dir).normalize();
+  sampleGround(_mDir, _mHit);
+  if (_mHit.radius < SEA_SURFACE_RADIUS) {
+    outPoint.copy(_mDir).multiplyScalar(SEA_SURFACE_RADIUS);
+    outNormal.copy(_mDir);
+  } else {
+    outPoint.copy(_mHit.point);
+    outNormal.copy(_mHit.normal);
+  }
+}
+
 class MarkerBatch {
   constructor(root) {
     const geo = new THREE.PlaneGeometry(1, 1);
@@ -436,18 +452,20 @@ class MarkerBatch {
    * terra emersa (faccia vera, via sampleGround) oppure pelo dell'acqua.
    */
   add(dir, size, color, style, param = 0) {
+    surfaceMarkPoint(dir, _mPos, _mNormal);
+    this.addAt(_mPos, _mNormal, size, color, style, param);
+  }
+
+  /** Come add, con punto e normale già calcolati (surfaceMarkPoint). */
+  addAt(point, normal, size, color, style, param = 0) {
     if (this._flush) { this.n = 0; this._flush = false; }
     if (this.n >= MARKER_CAPACITY) return;
-    _mDir.copy(dir).normalize();
-    sampleGround(_mDir, _mHit);
-    let r = _mHit.radius;
-    _mNormal.copy(_mHit.normal);
-    if (r < SEA_SURFACE_RADIUS) { r = SEA_SURFACE_RADIUS; _mNormal.copy(_mDir); }
     // Il mirino è largo 6 unità: sulle facce inclinate lo si alza un po' di
     // più, così non si pianta nel pendio accanto.
-    const lift = 0.1 + (1 - _mNormal.dot(_mDir)) * size * 0.5;
-    _mPos.copy(_mDir).multiplyScalar(r).addScaledVector(_mNormal, lift);
-    _mQuat.setFromUnitVectors(_zAxis, _mNormal);
+    _mDir.copy(point).normalize();
+    const lift = 0.1 + (1 - normal.dot(_mDir)) * size * 0.5;
+    _mPos.copy(point).addScaledVector(normal, lift);
+    _mQuat.setFromUnitVectors(_zAxis, normal);
     _mScale.set(size, size, 1);
     _mMat.compose(_mPos, _mQuat, _mScale);
     const i = this.n++;

@@ -4,7 +4,6 @@ import {
   OBJECTIVE_TIME,
   createConformingBandGeometry,
   spawnObjectiveBurst,
-  isObjectiveLowQuality,
   DECAL_VERT,
   DECAL_FRAG_END,
 } from './ObjectiveFx.js';
@@ -145,8 +144,10 @@ export function initTargetFx(scene) {
 
   // Fumo segnaletico: sbuffi opachi che salgono e si rimpiccioliscono in
   // cima (niente ordinamento dei trasparenti). Arancio acceso e salita
-  // continua: non si confonde col fumo grigio delle esplosioni.
-  const puffs = isObjectiveLowQuality() ? 4 : SMOKE_PUFFS;
+  // continua: non si confonde col fumo grigio delle esplosioni. Anche in
+  // qualità bassa restano otto: con quattro la colonna si sgranava in sassi
+  // volanti, e otto icosaedri costano la stessa, unica draw call.
+  const puffs = SMOKE_PUFFS;
   const smoke = new THREE.InstancedMesh(
     new THREE.IcosahedronGeometry(1, 0),
     new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true, emissive: 0x4a1c06 }),
