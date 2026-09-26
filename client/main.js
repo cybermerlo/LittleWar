@@ -73,6 +73,13 @@ import { worldUniforms } from './scene/worldShaders.js';
 // [hook:imports:life]
 
 // [hook:imports:objectives]
+import {
+  initObjectiveFx, objectiveFxRoot, tickObjectiveTime, endObjectiveFx, precompileObjectives,
+} from './entities/ObjectiveFx.js';
+import { initBombFx, tickBombFx, showBombReticle } from './entities/Bomb.js';
+import { initTargetFx } from './entities/Target.js';
+import { createBuildingPrototypes } from './entities/Building.js';
+import { createPowerupPrototypes, preloadPowerupModels } from './entities/PowerUp.js';
 
 // [hook:imports:ui]
 
@@ -495,6 +502,11 @@ perfProbe.scenarios.push(
 // [hook:init:life]
 
 // [hook:init:objectives]
+// Effetti di obiettivi, bombe e bersaglio: InstancedMesh create ora, così i
+// loro shader rientrano nella pre-compilazione (vedi ObjectiveFx.js).
+initObjectiveFx(scene, { lowQuality: LOW_POWER_DEFAULTS });
+initBombFx(objectiveFxRoot());
+initTargetFx(objectiveFxRoot());
 
 // [hook:init:ui]
 
@@ -526,6 +538,28 @@ const worldReady = Promise.all([
   // [hook:world-ready:life]
 
   // [hook:world-ready:objectives]
+  // Copie nascoste di avamposto, torretta conquistata e powerup: i loro
+  // programmi si compilano ora, in lobby, e non alla prima conquista. Restano
+  // nella scena invisibili (costo nullo: il render scarta i rami nascosti).
+  preloadPowerupModels().then(() => {
+    const protos = new THREE.Group();
+    protos.name = 'objective-prototypes';
+    protos.visible = false;
+    protos.add(createBuildingPrototypes(), createPowerupPrototypes());
+    scene.add(protos);
+    // Stesso render target della RenderPass: tone mapping e spazio colore
+    // fanno parte della chiave del programma.
+    const rp = composer.passes[0];
+    precompileObjectives(renderer, scene, camera, [objectiveFxRoot(), protos],
+      rp?.renderToScreen ? null : composer.readBuffer);
+  });
+  if (import.meta.env?.DEV && window.__lwDebug) {
+    // Per le verifiche visive degli obiettivi (solo sviluppo).
+    Object.defineProperty(window.__lwDebug, 'objectives', {
+      configurable: true,
+      get: () => ({ buildings: buildingEntities, powerups: powerupEntities, target: targetEntity, bombs: bombEntities }),
+    });
+  }
 
   // [hook:world-ready:ui]
 });
@@ -965,7 +999,9 @@ const net = new NetworkManager({
           );
           AudioManager.playBombAtDistance(dist);
         }
-        bombEntities.set(b.id, new BombEntity(scene, b.id, b.theta, b.phi, b.altitude));
+        bombEntities.set(b.id, new BombEntity(
+          scene, b.id, b.theta, b.phi, b.altitude, playerInfo.get(b.ownerId)?.color,
+        ));
       } else {
         bombEntities.get(b.id).update(b.theta, b.phi, b.altitude);
       }
@@ -1122,14 +1158,21 @@ const net = new NetworkManager({
 
   onPowerupSpawned(pu) {
     const id = powerupKey(pu.id);
-    if (!powerupEntities.has(id)) {
-      powerupEntities.set(id, new PowerUpEntity(scene, id, pu.type, pu.theta, pu.phi));
+    let e = powerupEntities.get(id);
+    if (!e) {
+      e = new PowerUpEntity(scene, id, pu.type, pu.theta, pu.phi);
+      powerupEntities.set(id, e);
     }
+    // Nato adesso: da qui si conosce la scadenza (lampeggia negli ultimi secondi).
+    e.markSpawned();
     powerupPositions.set(id, { theta: pu.theta, phi: pu.phi });
   },
 
   onPowerupCollected({ playerId, powerupId }) {
     const id = powerupKey(powerupId);
+    // Scoppio visibile a tutti: prima spariva e basta, e gli altri giocatori
+    // non capivano cosa fosse successo.
+    powerupEntities.get(id)?.burst();
     removePowerupEntity(scene, powerupId);
     powerupPositions.delete(id);
     powerupLastTryAt.delete(id);
@@ -1144,6 +1187,8 @@ const net = new NetworkManager({
       scale: 1.35,
       color: hit ? 0xffffff : 0x9a7a60,
     });
+    // Coriandoli sul bersaglio centrato (arriva prima di `new-target`).
+    if (hit) targetEntity?.burst();
     // Suono all’impatto: es. `AudioManager.playExplosion()` — disattivato per ora.
     if (hit && ownerId === localPlayerId) {
       hud.showBombHitNotice();
@@ -1254,7 +1299,10 @@ function applyBuildingStates(list) {
       e = new BuildingEntity(scene, b.id, b.theta, b.phi);
       buildingEntities.set(b.id, e);
     }
-    e.update(b, currentNightFactor);
+    // Il colore di chi conquista: il server manda solo l'id.
+    const conqueror = b.conqueringPlayerId ? playerInfo.get(b.conqueringPlayerId)?.color : null;
+    const justConquered = e.update(b, currentNightFactor, conqueror);
+    if (justConquered && b.ownerId === localPlayerId) AudioManager.playPopup();
   }
 }
 
@@ -1273,12 +1321,6 @@ let _perfGsRate = 0;
 // ── Game Loop ─────────────────────────────────────────────────────────────────
 
 const clock = new THREE.Clock();
-
-// Cache posizione camera per throttle su billboard lookAt (vedi aggiornamento edifici).
-// Soglia conservativa: 0.25 unità di movimento (distanceSq > 0.0625) produce un
-// cambio angolare < 1° su barre conquista a ~30 unità → impercettibile.
-const _prevCamPos = new THREE.Vector3(Infinity, Infinity, Infinity);
-const CAM_MOVE_THRESHOLD_SQ = 0.0625;
 
 function animate() {
   requestAnimationFrame(animate);
@@ -1527,26 +1569,32 @@ function animate() {
   tickExplosions(delta);
   tickTurretEffects(delta);
 
-  // Aggiorna edifici: billboard barra progresso + beacon notturno lampeggiante.
-  // Il lookAt sulla progressGroup è costoso; la saltiamo quando la camera non si
-  // è mossa abbastanza (e forziamo l'update alla prima apparizione della barra).
-  const camMovedEnough =
-    _prevCamPos.distanceToSquared(camera.position) >= CAM_MOVE_THRESHOLD_SQ;
-  if (camMovedEnough) _prevCamPos.copy(camera.position);
+  // Edifici: chi c'è nella zona di conquista (per lo stato "conteso", che il
+  // server non manda), mira e laser delle torrette, anello, bandiera, beacon.
+  const localInZone = inGame && isAlive && localAirplane ? localAirplane.mesh.position : null;
   for (const be of buildingEntities.values()) {
-    if (be.progressGroup.visible && (camMovedEnough || !be._progressOriented)) {
-      be.progressGroup.lookAt(camera.position);
-      be._progressOriented = true;
+    let contenders = 0;
+    let localInside = false;
+    if (!be.ownerId) {
+      if (localInZone && be.zoneContains(localInZone.x, localInZone.y, localInZone.z)) {
+        localInside = true;
+        contenders++;
+      }
+      for (const t of _hitTargets) if (be.zoneContains(t.x, t.y, t.z)) contenders++;
     }
+    be.setZoneState(localInside, contenders, localInZone);
     // Il cannone segue il bersaglio scelto dal server, nella posizione in cui
     // è disegnato (ogni frame: prima scattava a 40 Hz sul dato di rete).
     if (be.turretTargetId) {
       const tgt = be.turretTargetId === localPlayerId
         ? (isAlive ? localAirplane?.mesh : null)
         : remoteAirplanes.get(be.turretTargetId)?.mesh;
-      if (tgt?.visible) be.aimAt(tgt.position);
+      if (tgt?.visible) {
+        be.aimAt(tgt.position);
+        be.drawLaser(tgt.position, now);
+      }
     }
-    be.tick(delta, nightFactor);
+    be.tick(delta, nightFactor, camera);
   }
 
   // [hook:frame:render]
@@ -1587,6 +1635,13 @@ function animate() {
   // [hook:frame:life]
 
   // [hook:frame:objectives]
+  tickObjectiveTime(delta);
+  // Mirino di sgancio: solo con la bomba pronta e un obiettivo vicino.
+  if (inGame && isAlive && localAirplane && now - lastBombTime > BOMB_COOLDOWN) {
+    showBombReticle(theta, phi, currentTarget, buildingStates, localPlayerId);
+  }
+  tickBombFx(delta);
+  endObjectiveFx(delta, camera);
 
   // [hook:frame:ui]
 
