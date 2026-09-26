@@ -46,6 +46,21 @@ import {
 } from '../shared/constants.js';
 import { shotHeadingOffsets } from '../shared/projectile.js';
 
+// Punti di aggancio per i pacchetti di lavoro paralleli: ognuno aggiunge il
+// proprio codice subito dopo il PROPRIO segnaposto, così i merge non si
+// pestano i piedi. Verranno tolti a integrazione finita.
+// [hook:imports:render]
+
+// [hook:imports:aircraft]
+
+// [hook:imports:terrain]
+
+// [hook:imports:life]
+
+// [hook:imports:objectives]
+
+// [hook:imports:ui]
+
 /** Distanza 3D tra due punti sferici allo stesso raggio — stessa formula del server. */
 function sphereDist(t1, p1, t2, p2, r) {
   const dx = r * Math.sin(t1) * Math.cos(p1) - r * Math.sin(t2) * Math.cos(p2);
@@ -328,6 +343,18 @@ initExplosionPool(scene);
 initTurretEffects(scene);
 const planeShadows = new PlaneShadows(scene);
 
+// [hook:init:render]
+
+// [hook:init:aircraft]
+
+// [hook:init:terrain]
+
+// [hook:init:life]
+
+// [hook:init:objectives]
+
+// [hook:init:ui]
+
 /** Risolve quando mondo e modelli sono pronti: gate per la pre-compilazione. */
 const worldReady = Promise.all([
   loadTreeTemplates(),
@@ -337,6 +364,18 @@ const worldReady = Promise.all([
   preloadAirplaneModels(),
 ]).then(([treeTemplates, buildingTemplates, hospitalTemplates]) => {
   terrainGroup = createTerrain(scene, treeTemplates, buildingTemplates, hospitalTemplates);
+
+  // [hook:world-ready:render]
+
+  // [hook:world-ready:aircraft]
+
+  // [hook:world-ready:terrain]
+
+  // [hook:world-ready:life]
+
+  // [hook:world-ready:objectives]
+
+  // [hook:world-ready:ui]
 });
 
 /**
@@ -1297,6 +1336,18 @@ function animate() {
     }
     be.tick(delta, nightFactor);
   }
+
+  // [hook:frame:render]
+
+  // [hook:frame:aircraft]
+
+  // [hook:frame:terrain]
+
+  // [hook:frame:life]
+
+  // [hook:frame:objectives]
+
+  // [hook:frame:ui]
 
   // HUD
   if (inGame) {

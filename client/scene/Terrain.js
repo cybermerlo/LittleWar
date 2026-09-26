@@ -666,7 +666,7 @@ export function createTerrain(scene, treeTemplates = [], buildingTemplates = [],
   let fitBudget = Math.round(3000 * Math.max(0.5, TERRAIN_DENSITY_SCALE));
 
   /** Prova a piazzare una casa/ospedale vicino a `centerDir` (entro `spread` rad). */
-  function tryPlaceBuildingNear(makeFn, normalOffset, centerDir, spread) {
+  function tryPlaceBuildingNear(makeFn, normalOffset, centerDir, spread, kind = 'house') {
     if (fitBudget <= 0) return false;
     const obj = makeFn();
     const footprint = estimateFootprintRadiusXZ(obj);
@@ -684,7 +684,14 @@ export function createTerrain(scene, treeTemplates = [], buildingTemplates = [],
       if (!placeBuildingBaseOnTerrain(obj, dir, normalOffset)) continue;
 
       terrainGroup.add(obj);
-      placedBuildings.push({ dir: dir.clone(), footprintRadius: footprint });
+      placedBuildings.push({
+        dir: dir.clone(),
+        footprintRadius: footprint,
+        position: obj.position.clone(),
+        up: new THREE.Vector3(0, 1, 0).applyQuaternion(obj.quaternion),
+        size: footprint,
+        kind,
+      });
       recordPlacement('building', obj);
       return true;
     }
@@ -729,7 +736,7 @@ export function createTerrain(scene, treeTemplates = [], buildingTemplates = [],
     const [lo, hi] = HOUSES_PER_TOWN;
     const houses = lo + Math.floor(rand() * (hi - lo + 1));
     if (i % 2 === 0) {
-      tryPlaceBuildingNear(() => makeHospital(hospitalTemplates), HOSPITAL_GROUND_NORMAL_OFFSET, center, 0.03);
+      tryPlaceBuildingNear(() => makeHospital(hospitalTemplates), HOSPITAL_GROUND_NORMAL_OFFSET, center, 0.03, 'hospital');
     }
     for (let h = 0; h < houses; h++) {
       tryPlaceBuildingNear(() => makeBuilding(buildingTemplates), BUILDING_GROUND_NORMAL_OFFSET, center, TOWN_RADIUS * 1.5);
@@ -777,6 +784,11 @@ export function createTerrain(scene, treeTemplates = [], buildingTemplates = [],
   if (import.meta.env?.DEV) console.log('[terrain]', JSON.stringify({ towns: towns.length, buildings: placedBuildings.length, trees }));
   mergeStaticTerrain(terrainGroup);
   terrainGroup.userData.isTerrainGroup = true;
+  // Per chi decora il mondo dopo la costruzione (luci notturne, fumo, fari…):
+  // centri dei paesi (direzioni unitarie) ed edifici piazzati (posizione world,
+  // verticale locale, raggio d'impronta, 'house' | 'hospital').
+  terrainGroup.userData.towns = towns.map((t) => t.clone());
+  terrainGroup.userData.buildings = placedBuildings.map(({ position, up, size, kind }) => ({ position, up, size, kind }));
   terrainGroup.userData.placements = placements;
   scene.add(terrainGroup);
   return terrainGroup;
