@@ -333,6 +333,7 @@ if (import.meta.env?.DEV) {
     get projectiles() { return projectiles; },
     get net() { return net; },
     get remoteAirplanes() { return remoteAirplanes; },
+    sky,
     get localId() { return localPlayerId; },
     get localPos() { return localAirplane?.mesh.position.clone(); },
     teleport(t, p, h) { theta = t; phi = p; heading = h; },

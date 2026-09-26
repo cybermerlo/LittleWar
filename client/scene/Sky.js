@@ -532,6 +532,8 @@ export function createSky(scene, lights, options = {}) {
     update,
     /** 0..1: 0=giorno, 1=notte (derivato da opacità stelle) */
     getNightFactor: () => lastNightFactor,
+    /** Solo per test e screenshot: salta a una fase del ciclo (0..5, 3 = notte). */
+    setPhase(p) { time = p; },
     /** Colore del cielo all'orizzonte (tinge l'atmosfera del pianeta). */
     horizonColor: skyUniforms.midColor.value,
   };
