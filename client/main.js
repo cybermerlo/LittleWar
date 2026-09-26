@@ -95,8 +95,12 @@ const BASE_RENDER_DPR = LOW_POWER_DEFAULTS ? 1.0 : Math.min(DEVICE_DPR, IS_TOUCH
 const BLOOM_SCALE = LOW_POWER_DEFAULTS ? 0.3 : (IS_TOUCH_DEVICE ? 0.32 : (DEVICE_DPR > 1.5 ? 0.34 : 0.38));
 const BLOOM_INITIAL_STRENGTH = LOW_POWER_DEFAULTS ? 0 : (IS_TOUCH_DEVICE ? 0.12 : 0.22);
 
+// Niente antialiasing sul framebuffer finale: con il composer la scena viene
+// disegnata in un render target e a schermo arriva solo una copia a tutto
+// schermo, dove l'MSAA non ha spigoli da ammorbidire. L'antialiasing vero sta
+// sul render target del composer (vedi sotto).
 const renderer = new THREE.WebGLRenderer({
-  antialias: !LOW_POWER_DEFAULTS,
+  antialias: false,
   powerPreference: 'high-performance',
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -114,7 +118,28 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(0, 80, 0);
 
-const composer = new EffectComposer(renderer);
+/**
+ * Antialiasing: MSAA sul render target del composer.
+ *
+ * Prima non c'era alcun antialiasing in qualità alta: `antialias: true` vale
+ * solo per il framebuffer a schermo, ma con l'EffectComposer la scena viene
+ * disegnata in un render target creato senza campioni — e su un pianeta fatto
+ * tutto di spigoli (facce, coste, alberi) la seghettatura era ovunque.
+ * Il target è in half float (serve all'HDR del bloom): l'MSAA su half float
+ * richiede EXT_color_buffer_float, senza il quale alcuni telefoni darebbero
+ * uno schermo nero. In quel caso, e in qualità bassa (dove il bloom è spento e
+ * la scena va dritta a schermo), niente MSAA.
+ */
+const MSAA_SAMPLES = (!LOW_POWER_DEFAULTS && renderer.capabilities.isWebGL2
+  && renderer.extensions.has('EXT_color_buffer_float'))
+  ? (IS_TOUCH_DEVICE ? 2 : 4)
+  : 0;
+const composerTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
+  type: THREE.HalfFloatType,
+  samples: MSAA_SAMPLES,
+});
+composerTarget.texture.name = 'EffectComposer.rt1';
+const composer = new EffectComposer(renderer, composerTarget);
 composer.setPixelRatio(BASE_RENDER_DPR);
 const renderPass = new RenderPass(scene, camera);
 composer.addPass(renderPass);
@@ -187,6 +212,14 @@ const _setRenderScale = (scale) => {
   composer.setSize(window.innerWidth, window.innerHeight);
 };
 
+function setComposerSamples(n) {
+  for (const rt of [composer.renderTarget1, composer.renderTarget2]) {
+    if (rt.samples === n) continue;
+    rt.samples = n;
+    rt.dispose();
+  }
+}
+
 /** Nasconde un Object3D ripristinandone poi la visibilità originale. */
 function hideScenario(label, getObject) {
   let previous = null;
@@ -221,6 +254,12 @@ const perfProbe = new PerfProbe([
     label: 'bloom (post-processing)',
     off() { bloomPass.enabled = false; },
     on()  { bloomPass.enabled = !LOW_POWER_DEFAULTS; },
+  },
+  {
+    // Cambiare i campioni richiede di ricreare i render target (dispose).
+    label: `antialiasing MSAA ${MSAA_SAMPLES}x`,
+    off() { setComposerSamples(0); },
+    on()  { setComposerSamples(MSAA_SAMPLES); },
   },
   {
     label: `risoluzione a 1x (ora ${BASE_RENDER_DPR}x)`,
@@ -1284,7 +1323,7 @@ function animate() {
       `── Rendering ─────────────`,
       `FPS        ${coli(_perfFps,  50, 30, String(_perfFps).padStart(6))}`,
       `Frame      ${col(_perfFrameMs, 20, 33, _perfFrameMs.toFixed(1).padStart(5)+' ms')}`,
-      `Qualita    ${RENDER_QUALITY_LABEL}`,
+      `Qualita    ${RENDER_QUALITY_LABEL} · MSAA ${MSAA_SAMPLES}x`,
       `Risoluzione ${adaptiveResolution.label.padStart(9)}`,
       `Draw calls ${col(ri.calls, 300, 600, String(ri.calls).padStart(6))}`,
       `Triangoli  ${col(ri.triangles/1000, 200, 500, (ri.triangles/1000).toFixed(1).padStart(5)+' k')}`,
