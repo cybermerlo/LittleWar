@@ -1,31 +1,236 @@
 import * as THREE from 'three';
-import { sphericalToCartesian } from '../utils/SphereUtils.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { groundRadius } from '../scene/planetSurface.js';
+import {
+  segments,
+  markers,
+  SEG_TRAIL,
+  MARK_IMPACT,
+  MARK_RETICLE,
+  isObjectiveLowQuality,
+} from './ObjectiveFx.js';
+import { PLANET_RADIUS, BOMB_FALL_SPEED, BOMB_HIT_RADIUS } from '../../shared/constants.js';
 
-const bombGeo = new THREE.IcosahedronGeometry(0.34, 0);
-const bombMat = new THREE.MeshLambertMaterial({ color: 0x2b2b33, flatShading: true });
-const _bombDir = new THREE.Vector3();
+// ── Bombe ─────────────────────────────────────────────────────────────────────
+//
+// Bombetta cartoon con alette e una fascia del colore di chi l'ha sganciata,
+// muso in giù. Tutte le bombe sono istanze di due InstancedMesh (corpo e
+// fascia): prima era una Mesh per bomba, con un materiale che nasceva al primo
+// sgancio (e lì veniva compilato).
+//
+// Caduta fluida: la posizione arrivava solo col game-state (40 Hz, volatile)
+// e la bomba andava a scatti, soprattutto ricadendo sul polling. Ora il client
+// la fa cadere da sé alla velocità del server e si riallinea solo se si
+// discosta troppo. L'esplosione resta decisa dal server (`bomb-exploded`).
+
+const BOMB_CAPACITY = 16;
+/** Scarto oltre il quale la quota simulata si riallinea a quella del server. */
+const BOMB_RESYNC = 0.4;
+/** Il server fa esplodere la bomba a questa quota fissa. */
+const BOMB_BURST_R = PLANET_RADIUS + 0.5;
+
+function colorize(geo, hex) {
+  const c = new THREE.Color(hex);
+  const n = geo.getAttribute('position').count;
+  const arr = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
+  geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+  geo.deleteAttribute('uv');
+  return geo;
+}
+
+/** Corpo della bomba lungo +Z (muso in +Z), ~60 triangoli. */
+function buildBombBodyGeometry() {
+  const parts = [];
+  const body = new THREE.CylinderGeometry(0.2, 0.2, 0.46, 8, 1);
+  body.rotateX(Math.PI / 2);
+  parts.push(colorize(body, 0x2b2d36));
+  const nose = new THREE.SphereGeometry(0.2, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2);
+  nose.rotateX(Math.PI / 2);
+  nose.translate(0, 0, 0.23);
+  parts.push(colorize(nose, 0x2b2d36));
+  const tail = new THREE.CylinderGeometry(0.2, 0.08, 0.22, 8, 1);
+  tail.rotateX(Math.PI / 2);
+  tail.translate(0, 0, -0.34);
+  parts.push(colorize(tail, 0x2b2d36));
+  for (let k = 0; k < 4; k++) {
+    const fin = new THREE.BoxGeometry(0.03, 0.2, 0.2);
+    fin.translate(0, 0.17, -0.38);
+    fin.rotateZ((k * Math.PI) / 2 + Math.PI / 4);
+    parts.push(colorize(fin, 0xc9ccd4));
+  }
+  return mergeGeometries(parts.map((g) => g.toNonIndexed()), false);
+}
+
+let _bombFx = null;
+/** Bombe vive: le disegna tickBombFx, un'istanza ciascuna. */
+const _bombs = new Set();
+
+const _bm = new THREE.Matrix4();
+const _bq = new THREE.Quaternion();
+const _bq2 = new THREE.Quaternion();
+const _bs = new THREE.Vector3(1, 1, 1);
+const _bp = new THREE.Vector3();
+const _bTop = new THREE.Vector3();
+const _bNeg = new THREE.Vector3();
+const _bColor = new THREE.Color();
+const _bZ = new THREE.Vector3(0, 0, 1);
+const _impactColor = new THREE.Color(1.35, 0.14, 0.08);
+const _trailColor = new THREE.Color(0.95, 0.95, 1.0);
+
+/**
+ * Registra le InstancedMesh delle bombe. Da chiamare all'avvio, prima della
+ * pre-compilazione degli shader (come initExplosionPool).
+ */
+export function initBombFx(scene) {
+  if (_bombFx) return;
+  const bodyMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+  const body = new THREE.InstancedMesh(buildBombBodyGeometry(), bodyMat, BOMB_CAPACITY);
+  const bandGeo = new THREE.CylinderGeometry(0.212, 0.212, 0.12, 8, 1);
+  bandGeo.rotateX(Math.PI / 2);
+  bandGeo.translate(0, 0, -0.04);
+  const bandMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+  const band = new THREE.InstancedMesh(bandGeo, bandMat, BOMB_CAPACITY);
+  band.setColorAt(0, _bColor.set(0xffffff));
+  for (const m of [body, band]) {
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    m.frustumCulled = false;
+    m.count = 0;
+    m.visible = false;
+    scene.add(m);
+  }
+  _bombFx = { body, band };
+}
 
 export class BombEntity {
-  constructor(scene, id, theta, phi, altitude) {
+  /**
+   * @param {THREE.Scene} _scene
+   * @param {string} id
+   * @param {number} theta
+   * @param {number} phi
+   * @param {number} altitude  quota dal game-state
+   * @param {string} [color]   colore di chi l'ha sganciata
+   */
+  constructor(_scene, id, theta, phi, altitude, color) {
     this.id = id;
-    this.mesh = new THREE.Mesh(bombGeo, bombMat);
-    scene.add(this.mesh);
-    this.update(theta, phi, altitude);
-  }
-
-  update(theta, phi, altitude) {
-    const pos = sphericalToCartesian(theta, phi, altitude);
-    this.mesh.position.set(pos.x, pos.y, pos.z);
+    this.dir = new THREE.Vector3(
+      Math.sin(theta) * Math.cos(phi),
+      Math.cos(theta),
+      Math.sin(theta) * Math.sin(phi),
+    );
+    this.altitude = altitude;
+    this.color = new THREE.Color(color ?? '#dddddd');
+    this.roll = Math.random() * Math.PI * 2;
+    this.phase = Math.random();
     // Il server fa esplodere la bomba a quota fissa: sopra una collina
-    // attraverserebbe il terreno prima di scoppiare. Sotto il suolo non si vede.
-    this.mesh.visible = altitude > groundRadius(_bombDir.set(pos.x, pos.y, pos.z)) + 0.2;
-    this.mesh.rotation.x += 0.2;
+    // attraverserebbe il terreno prima di scoppiare. Sotto il suolo non si
+    // vede. La direzione non cambia durante la caduta: basta campionare una volta.
+    this.groundR = groundRadius(this.dir);
+    _bombs.add(this);
   }
 
-  dispose(scene) {
-    scene.remove(this.mesh);
+  /** Quota del server: corregge la simulazione solo se si è discostata. */
+  update(_theta, _phi, altitude) {
+    if (Math.abs(altitude - this.altitude) > BOMB_RESYNC) this.altitude = altitude;
   }
+
+  dispose() {
+    _bombs.delete(this);
+  }
+}
+
+/**
+ * Caduta, rotazione, scia e segno d'impatto di tutte le bombe. Una volta per
+ * frame, prima di endObjectiveFx.
+ */
+export function tickBombFx(delta) {
+  if (!_bombFx) return;
+  const dt = Math.min(Math.max(delta || 0, 0), 0.1);
+  const { body, band } = _bombFx;
+  const low = isObjectiveLowQuality();
+  let n = 0;
+  for (const b of _bombs) {
+    b.altitude = Math.max(BOMB_BURST_R, b.altitude - BOMB_FALL_SPEED * dt);
+    b.roll += dt * 2.4;
+
+    // Punto d'impatto: lampeggia per tutto il secondo e mezzo di caduta e
+    // avvisa chi è sotto (utile a chi difende la propria torretta).
+    markers?.add(b.dir, 2.2, _impactColor, MARK_IMPACT, b.phase);
+
+    if (b.altitude <= b.groundR + 0.2 || n >= BOMB_CAPACITY) continue;
+    _bp.copy(b.dir).multiplyScalar(b.altitude);
+    // Muso verso il centro del pianeta, lento rollio attorno all'asse.
+    _bq.setFromUnitVectors(_bZ, _bNeg.copy(b.dir).negate());
+    _bq2.setFromAxisAngle(_bZ, b.roll);
+    _bq.multiply(_bq2);
+    _bm.compose(_bp, _bq, _bs);
+    body.setMatrixAt(n, _bm);
+    band.setMatrixAt(n, _bm);
+    band.setColorAt(n, b.color);
+
+    if (!low && segments) {
+      _bp.addScaledVector(b.dir, 0.4);
+      _bTop.copy(_bp).addScaledVector(b.dir, 1.8);
+      segments.add(_bp, _bTop, 0.2, _trailColor, SEG_TRAIL, 0, 0.35);
+    }
+    n++;
+  }
+  body.count = n;
+  band.count = n;
+  body.visible = n > 0;
+  band.visible = n > 0;
+  if (n > 0) {
+    body.instanceMatrix.needsUpdate = true;
+    band.instanceMatrix.needsUpdate = true;
+    band.instanceColor.needsUpdate = true;
+  }
+}
+
+// ── Mirino di sgancio ─────────────────────────────────────────────────────────
+
+/** Distanza (sulla sfera del server) entro cui il mirino compare. */
+const RETICLE_SHOW_DIST = 14;
+const _reticleDir = new THREE.Vector3();
+const _reticleIdle = new THREE.Color(1.0, 0.93, 0.62);
+const _reticleLock = new THREE.Color(0.35, 1.0, 0.42);
+const _reticleColor = new THREE.Color();
+
+/** Distanza cartesiana fra due punti sferici a raggio PLANET_RADIUS (come bombLanded sul server). */
+function surfaceDist(t1, p1, t2, p2) {
+  const r = PLANET_RADIUS;
+  const dx = r * Math.sin(t1) * Math.cos(p1) - r * Math.sin(t2) * Math.cos(p2);
+  const dy = r * Math.cos(t1) - r * Math.cos(t2);
+  const dz = r * Math.sin(t1) * Math.sin(p1) - r * Math.sin(t2) * Math.sin(p2);
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+/**
+ * Mirino a terra sotto l'aereo locale, quando la bomba è pronta e c'è vicino
+ * un obiettivo (bersaglio o torretta nemica). È esatto: la bomba cade dritta
+ * sotto il punto di sgancio, e il cerchio ha il raggio utile del server
+ * (BOMB_HIT_RADIUS). Verde e pulsante quando l'obiettivo è dentro.
+ *
+ * @param {number} theta     posizione locale (predetta, non quella del server)
+ * @param {number} phi
+ * @param {object|null} target        bersaglio corrente {theta, phi}
+ * @param {Array} buildings           stati degli edifici
+ * @param {string|null} localId
+ */
+export function showBombReticle(theta, phi, target, buildings, localId) {
+  if (!markers) return;
+  let best = target ? surfaceDist(theta, phi, target.theta, target.phi) : Infinity;
+  for (const b of buildings) {
+    if (!b.ownerId || b.ownerId === localId) continue;
+    const d = surfaceDist(theta, phi, b.theta, b.phi);
+    if (d < best) best = d;
+  }
+  if (best > RETICLE_SHOW_DIST) return;
+  const lock = best < BOMB_HIT_RADIUS ? 1 : 0;
+  _reticleColor.copy(lock ? _reticleLock : _reticleIdle);
+  if (lock) _reticleColor.multiplyScalar(1.25);
+  _reticleDir.set(Math.sin(theta) * Math.cos(phi), Math.cos(theta), Math.sin(theta) * Math.sin(phi));
+  // L'anello del mirino sta a 0.95 del quad: raggio esatto = BOMB_HIT_RADIUS.
+  markers.add(_reticleDir, (BOMB_HIT_RADIUS * 2) / 0.95, _reticleColor, MARK_RETICLE, lock);
 }
 
 // ── Esplosioni ────────────────────────────────────────────────────────────────
