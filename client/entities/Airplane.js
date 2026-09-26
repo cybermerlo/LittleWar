@@ -44,6 +44,8 @@ const _predA = new THREE.Vector3();
 const _predB = new THREE.Vector3();
 const _modelLoader = createGLTFLoader();
 const _modelTemplateCache = new Map();
+/** Modelli già caricati (nome → template): da qui si vestono senza aspettare. */
+const _modelTemplateReady = new Map();
 
 const MODEL_PATHS = {
   spitfire: '/models/spitfire.glb',
@@ -154,8 +156,12 @@ function buildFallbackAirplaneMesh(color, look, ownMaterials) {
   return group;
 }
 
+function safeModelNameOf(modelName) {
+  return MODEL_PATHS[modelName] ? modelName : 'spitfire';
+}
+
 function getModelTemplate(modelName) {
-  const safeModelName = MODEL_PATHS[modelName] ? modelName : 'spitfire';
+  const safeModelName = safeModelNameOf(modelName);
   if (_modelTemplateCache.has(safeModelName)) {
     return _modelTemplateCache.get(safeModelName);
   }
@@ -163,7 +169,11 @@ function getModelTemplate(modelName) {
   const templatePromise = new Promise((resolve) => {
     _modelLoader.load(
       MODEL_PATHS[safeModelName],
-      (gltf) => resolve({ scene: gltf.scene, animations: gltf.animations }),
+      (gltf) => {
+        const template = { scene: gltf.scene, animations: gltf.animations };
+        _modelTemplateReady.set(safeModelName, template);
+        resolve(template);
+      },
       undefined,
       () => resolve(null),
     );
@@ -256,8 +266,14 @@ function buildAirplaneMesh(color, modelName, look) {
   const group = new THREE.Group();
   const ownMaterials = [];
   group.userData.ownMaterials = ownMaterials;
-  const fallbackMesh = buildFallbackAirplaneMesh(color, look, ownMaterials);
-  group.add(fallbackMesh);
+  // Modello già in memoria (preloadAirplaneModels): si veste subito, senza
+  // sostituto. Con la sola promessa, anche già risolta, il modello arrivava in
+  // un microtask DOPO il render del frame: l'aereo locale, creato dentro
+  // animate(), mostrava per un frame il sostituto procedurale e ne compilava
+  // lo shader in piena partita (il warmup non l'aveva mai visto).
+  const readyTemplate = _modelTemplateReady.get(safeModelNameOf(modelName)) ?? null;
+  const fallbackMesh = readyTemplate ? null : buildFallbackAirplaneMesh(color, look, ownMaterials);
+  if (fallbackMesh) group.add(fallbackMesh);
 
   // Geometria e materiale condivisi da tutti gli aerei: prima ognuno aveva
   // la propria SphereGeometry e il proprio MeshBasicMaterial.
@@ -274,7 +290,7 @@ function buildAirplaneMesh(color, modelName, look) {
   group.userData.rightTipLocal = new THREE.Vector3(-0.1, 0, 1.1);
   group.userData.guns = makeGuns(0.25, 0, -1.1, 1.1);
 
-  getModelTemplate(modelName).then((template) => {
+  const attachModel = (template) => {
     if (!template || group.userData.disposed) return;
 
     const model = template.scene.clone(true);
@@ -328,7 +344,10 @@ function buildAirplaneMesh(color, modelName, look) {
         group.userData.propSpeed = cfg.propSpeed ?? 6.0;
       }
     }
-  });
+  };
+
+  if (readyTemplate) attachModel(readyTemplate);
+  else getModelTemplate(modelName).then(attachModel);
 
   return group;
 }

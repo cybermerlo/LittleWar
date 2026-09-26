@@ -172,6 +172,16 @@ class TrailRibbons {
     if (id < 0 || !this.mesh) return -1;
     this.cut(id);
     this._inUse[id] = 0;
+    // `build()` salta gli slot liberi ma il draw range arriva fino al più alto
+    // in uso: senza azzerarli qui, gli ultimi nastri di un aereo rimosso (la
+    // demo della lobby, un giocatore uscito) restavano sospesi nel cielo.
+    // Alfa 0 e triangoli degeneri: nessun frammento. Solo al rilascio.
+    const P = this.points;
+    const v0 = id * P * 2, v1 = v0 + P * 2;
+    this._alpha.fill(0, v0, v1);
+    this._pos.fill(0, v0 * 3, v1 * 3);
+    this._alphaAttr.needsUpdate = true;
+    this._posAttr.needsUpdate = true;
     return -1;
   }
 
