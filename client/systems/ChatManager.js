@@ -134,34 +134,31 @@ export class ChatManager {
 
   // ── Ricezione messaggi ─────────────────────────────────────────────────────
 
-  receive({ nickname, color, text, variant, meta }) {
-    if (variant !== 'kill-feed') this._onAudio();
+  /**
+   * Messaggio di chat. Il kill feed non passa più da qui: ha un suo riquadro
+   * nell'HUD (HUD.pushKillFeed), così la chat resta dei giocatori.
+   */
+  receive({ nickname, color, text }) {
+    this._onAudio();
 
     const entry = document.createElement('div');
     entry.className = 'chat-entry';
-    if (variant === 'kill-feed') {
-      entry.classList.add('chat-entry--killfeed');
-    }
+
+    // Il colore del giocatore va nel pallino e il nome resta bianco: scritti
+    // nel proprio colore, nero, blu e viola erano illeggibili sul pannello.
+    const dot = document.createElement('span');
+    dot.className = 'chat-dot';
+    dot.style.setProperty('--c', color ?? '#adc6ff');
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'chat-nick';
-    if (variant === 'kill-feed') {
-      nameSpan.classList.add('chat-nick--killfeed');
-    }
-    nameSpan.style.color = color ?? '#adc6ff';
     nameSpan.textContent = nickname ?? '?';
 
     const textSpan = document.createElement('span');
     textSpan.className = 'chat-text';
-    if (variant === 'kill-feed') {
-      textSpan.classList.add('chat-text--killfeed');
-    }
-    if (variant === 'kill-feed') {
-      this._renderKillFeedText(textSpan, text, meta);
-    } else {
-      textSpan.textContent = text;
-    }
+    textSpan.textContent = text;
 
+    entry.appendChild(dot);
     entry.appendChild(nameSpan);
     entry.appendChild(textSpan);
 
@@ -180,41 +177,5 @@ export class ChatManager {
       entry.classList.remove('chat-entry--visible');
       entry.addEventListener('transitionend', () => entry.remove(), { once: true });
     }, 6000);
-  }
-
-  _renderKillFeedText(textSpan, fallbackText, meta) {
-    if (!meta || typeof meta !== 'object') {
-      textSpan.textContent = fallbackText;
-      return;
-    }
-
-    if (meta.kind === 'player-kill' && meta.killer && meta.victim) {
-      textSpan.appendChild(this._createPlayerNameSpan(meta.killer.nickname, meta.killer.color));
-      if (meta.killer.byTurret) {
-        const turretTag = document.createElement('span');
-        turretTag.className = 'chat-killfeed-tag';
-        turretTag.textContent = ' [Torretta]';
-        textSpan.appendChild(turretTag);
-      }
-      textSpan.appendChild(document.createTextNode(' ha abbattuto '));
-      textSpan.appendChild(this._createPlayerNameSpan(meta.victim.nickname, meta.victim.color));
-      return;
-    }
-
-    if (meta.kind === 'main-objective-destroyed' && meta.actor) {
-      textSpan.appendChild(this._createPlayerNameSpan(meta.actor.nickname, meta.actor.color));
-      textSpan.appendChild(document.createTextNode(" ha distrutto l'obiettivo principale!"));
-      return;
-    }
-
-    textSpan.textContent = fallbackText;
-  }
-
-  _createPlayerNameSpan(name, color) {
-    const span = document.createElement('span');
-    span.className = 'chat-killfeed-name';
-    span.style.color = color ?? '#ffb86b';
-    span.textContent = name ?? 'Sconosciuto';
-    return span;
   }
 }

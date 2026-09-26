@@ -20,6 +20,9 @@ export class MobileControls {
     this._btnShoot = document.getElementById('mc-shoot');
     this._btnBomb  = document.getElementById('mc-bomb');
     this._btnBoost = document.getElementById('mc-boost');
+    this._boostRing = undefined;
+    this._bombRing = undefined;
+    this._bombCooling = null;
 
     // Previene pinch-to-zoom iOS quando si usano più dita contemporaneamente.
     // gesturestart/gesturechange sono eventi webkit-only per pinch/rotate.
@@ -40,6 +43,33 @@ export class MobileControls {
 
   show() { if (this.root) this.root.style.display = 'block'; }
   hide() { if (this.root) this.root.style.display = 'none'; }
+
+  /**
+   * Anelli sui bottoni: energia del boost e ricarica della bomba, 0..1.
+   * Chiamato a ogni frame, ma la variabile CSS si riscrive solo quando il
+   * valore si sposta di almeno 0.02 (e sempre quando arriva agli estremi).
+   */
+  setMeters(boost01, bombReady01) {
+    this._boostRing = this._writeRing(this._btnBoost, boost01, this._boostRing);
+    const prev = this._bombRing;
+    this._bombRing = this._writeRing(this._btnBomb, bombReady01, prev);
+    const cooling = this._bombRing < 1;
+    if (cooling !== this._bombCooling) {
+      this._bombCooling = cooling;
+      this._btnBomb?.classList.toggle('is-cooling', cooling);
+    }
+  }
+
+  _writeRing(el, value, last) {
+    if (!el) return last;
+    let v = Math.max(0, Math.min(1, value));
+    if (v > 0.995) v = 1;
+    if (v < 0.005) v = 0;
+    const edge = (v === 1 || v === 0) && v !== last;
+    if (!edge && last !== undefined && Math.abs(v - last) < 0.02) return last;
+    el.style.setProperty('--ring', v.toFixed(3));
+    return v;
+  }
 
   _bindJoystick() {
     const j = this._joystick;
