@@ -446,8 +446,6 @@ let _fxExtreme = false;
 /** Primo frame dopo il respawn: il sole salta sulla zona nuova invece di arrivarci in un secondo. */
 let _fxSnapSun = false;
 let _lastNearMissAt = 0;
-/** Istante (performance.now) dell'ultima morte del giocatore locale. */
-let _diedAt = 0;
 
 /** Scossone per un'esplosione in `pos`: forte da vicino, nullo oltre 30 unità. */
 function shakeForExplosionAt(pos, strength = 0.9) {
@@ -620,11 +618,20 @@ function warmupShaders() {
   _shadersWarmed = true;
   return worldReady
     .then(() => {
-      if (typeof renderer.compileAsync === 'function') {
-        return renderer.compileAsync(scene, camera);
+      // Tone mapping e spazio colore fanno parte della chiave del programma e
+      // `compile` li ricava dal render target corrente: compilando a schermo
+      // si preparavano le varianti sbagliate (sRGB + ACES) e quelle vere, per
+      // il render target del composer, nascevano al primo uso in partita.
+      const rp = composer.passes[0];
+      const prev = renderer.getRenderTarget();
+      renderer.setRenderTarget(rp?.renderToScreen ? null : composer.readBuffer);
+      try {
+        if (typeof renderer.compileAsync === 'function') return renderer.compileAsync(scene, camera);
+        renderer.compile(scene, camera);
+        return undefined;
+      } finally {
+        renderer.setRenderTarget(prev);
       }
-      renderer.compile(scene, camera);
-      return undefined;
     })
     .catch(() => { /* la compilazione anticipata è un'ottimizzazione, non un requisito */ });
 }
@@ -861,6 +868,13 @@ const net = new NetworkManager({
   onJoined({ playerId, players, powerups, target, buildings }) {
     localPlayerId = playerId;
     localState = players.find(p => p.id === playerId) ?? null;
+    // Chi entra in partita è vivo: tornando in lobby durante il "Mayday" e
+    // rientrando, il client restava morto per sempre (nessun `respawned`
+    // arriva a un giocatore appena creato).
+    isAlive = true;
+    death.hide();
+    camCtrl.snap();
+    localAirplane?.revive(0);
 
     if (localState) {
       theta   = localState.theta;
@@ -1174,7 +1188,6 @@ const net = new NetworkManager({
 
     if (victimIsLocal) {
       isAlive = false;
-      _diedAt = fxNow;
       // Ferma motore e boost: il game loop non li aggiorna più quando !isAlive
       AudioManager.stopEngine();
       AudioManager.stopBoost();
@@ -1232,6 +1245,7 @@ const net = new NetworkManager({
       scale: 1.35,
       color: hit ? 0xffffff : 0x9a7a60,
     });
+    shakeForExplosionAt(_deathPos, 0.9);
     // Coriandoli sul bersaglio centrato (arriva prima di `new-target`).
     if (hit) targetEntity?.burst();
     // Suono all’impatto: es. `AudioManager.playExplosion()` — disattivato per ora.
@@ -1256,6 +1270,10 @@ const net = new NetworkManager({
     awardedKill = true,
   }) {
     spawnTurretDestruction(scene, theta, phi, surfaceRadiusSpherical(theta, phi) + 1.5);
+    {
+      const c = sphericalToCartesian(theta, phi, surfaceRadiusSpherical(theta, phi) + 1.5);
+      shakeForExplosionAt(_hitPos.set(c.x, c.y, c.z), 1.0);
+    }
     if (destroyerId === localPlayerId) {
       if (awardedKill) hud.showTowerDestroyedNotice();
       else hud.showOwnTowerDestroyedNotice();
@@ -1271,7 +1289,6 @@ const net = new NetworkManager({
     phi     = state.phi;
     heading = state.heading;
     boostEnergy = typeof state.boostEnergy === 'number' ? state.boostEnergy : BOOST_MAX;
-    _invincibleUntil = Date.now() + RESPAWN_INVINCIBILITY;
     death.hide();
     AudioManager.startEngine();
     // Il server fa rinascere in un punto qualsiasi della sfera: la camera
@@ -1315,7 +1332,6 @@ const net = new NetworkManager({
 // Creato quando riceviamo onJoined, ma ci serve il colore — lo creiamo dopo.
 // Usiamo un riferimento lazy.
 let localAirplane = null;
-let _invincibleUntil = 0;
 
 function ensureLocalAirplane(color, model) {
   if (!localAirplane) {
@@ -1338,6 +1354,9 @@ function spawnImpact(pos) {
   spawnExplosionAt(scene, pos, { scale: 0.32, sparks: 6, smoke: false });
 }
 
+/** Ultimo avviso "una torretta ti ha nel mirino" (performance.now). */
+let _turretWarnAt = -Infinity;
+
 function applyBuildingStates(list) {
   buildingStates = list;
   for (const b of list) {
@@ -1348,8 +1367,17 @@ function applyBuildingStates(list) {
     }
     // Il colore di chi conquista: il server manda solo l'id.
     const conqueror = b.conqueringPlayerId ? playerInfo.get(b.conqueringPlayerId)?.color : null;
+    // Una torretta nemica ci ha appena preso di mira: avviso, al massimo ogni 6 s.
+    if (b.turretTargetId === localPlayerId && e.turretTargetId !== localPlayerId && isAlive
+      && performance.now() - _turretWarnAt > 6000) {
+      _turretWarnAt = performance.now();
+      hud.notify?.('bad', 'Una torretta ti ha nel mirino!', { icon: 'i-turret' });
+    }
     const justConquered = e.update(b, currentNightFactor, conqueror);
-    if (justConquered && b.ownerId === localPlayerId) AudioManager.playPopup();
+    if (justConquered && b.ownerId === localPlayerId) {
+      AudioManager.playPopup();
+      hud.notify?.('tower', 'Torretta conquistata!', { icon: 'i-turret' });
+    }
   }
 }
 
@@ -1663,11 +1691,6 @@ function animate() {
   // Da morti la camera orbita sull'esplosione e cerca chi ha sparato.
   if (inGame && !isAlive) {
     camCtrl.updateDeath(delta);
-    // Rete di sicurezza: morti per il client ma vivi per il server da ben
-    // oltre il respawn. Succede tornando in lobby durante il "Mayday" e
-    // rientrando: il server crea un giocatore nuovo, vivo, e nessun
-    // `respawned` arriverà mai — il client restava fermo sull'esplosione.
-    if (localState?.alive && now - _diedAt > RESPAWN_DELAY + 1500) net.handlers.onRespawned(localState);
   }
   tickAirplaneLook(now / 1000, nightFactor);
   setGlowViewportHeight(window.innerHeight);

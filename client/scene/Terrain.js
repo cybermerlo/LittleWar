@@ -537,8 +537,12 @@ function cheapMaterial(m) {
     && (m.transmission > 0 || m.clearcoat > 0 || m.sheen > 0 || m.iridescence > 0);
   const reliefOrReflections = m.normalMap || m.bumpMap || m.displacementMap || m.envMap
     || m.roughnessMap || m.metalnessMap || m.lightMap || m.aoMap;
+  // La metallicità non conta: nella scena non c'è alcuna mappa d'ambiente,
+  // quindi un metallo senza nulla da riflettere esce quasi nero. Succedeva
+  // alle pareti dell'ospedale (e a un materiale della casa), che nel glTF non
+  // dichiarano metallicFactor e ricevono il default 1: erano intonaco bianco.
   let out = m;
-  if (m.metalness <= 0.1 && !physical && !reliefOrReflections) {
+  if (!physical && !reliefOrReflections) {
     out = new THREE.MeshLambertMaterial({
       name: m.name,
       color: m.color,
@@ -840,6 +844,8 @@ export function createTerrain(scene, treeTemplates = [], buildingTemplates = [],
         up: new THREE.Vector3(0, 1, 0).applyQuaternion(obj.quaternion),
         size: footprint,
         kind,
+        quaternion: obj.quaternion.clone(),
+        scale: obj.scale.x,
       });
       recordPlacement('building', obj);
       return true;
@@ -941,7 +947,7 @@ export function createTerrain(scene, treeTemplates = [], buildingTemplates = [],
   // centri dei paesi (direzioni unitarie) ed edifici piazzati (posizione world,
   // verticale locale, raggio d'impronta, 'house' | 'hospital').
   terrainGroup.userData.towns = towns.map((t) => t.clone());
-  terrainGroup.userData.buildings = placedBuildings.map(({ position, up, size, kind }) => ({ position, up, size, kind }));
+  terrainGroup.userData.buildings = placedBuildings.map(({ position, up, size, kind, quaternion, scale }) => ({ position, up, size, kind, quaternion, scale }));
   terrainGroup.userData.placements = placements;
   scene.add(terrainGroup);
   return terrainGroup;

@@ -130,6 +130,7 @@ class AircraftFx {
       depthWrite: false,
       side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
+      fog: false,
     });
     this._muzzle = new THREE.InstancedMesh(makeMuzzleGeometry(), this._muzzleMat, MUZZLE_CAPACITY);
     this._muzzle.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -149,7 +150,7 @@ class AircraftFx {
     this._rings = Array.from({ length: RING_SLOTS }, () => {
       const mat = new THREE.MeshBasicMaterial({
         color: 0xffffff, transparent: true, opacity: 0, depthWrite: false,
-        side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide, blending: THREE.AdditiveBlending, fog: false,
       });
       const mesh = new THREE.Mesh(ringGeo, mat);
       mesh.matrixAutoUpdate = false;
@@ -168,6 +169,7 @@ class AircraftFx {
       depthWrite: false,
       side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
+      fog: false,
     });
     this._shards = new THREE.InstancedMesh(makeShardGeometry(), this._shardMat, BURST_SLOTS * SHARDS_PER_BURST);
     this._shards.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
