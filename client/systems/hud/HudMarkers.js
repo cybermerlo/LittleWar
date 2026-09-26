@@ -35,6 +35,7 @@ const MOVE_EPS = 0.5;            // px
 const ROT_EPS = 1;               // gradi
 const TURN_PROBE = 4;            // unità lungo la rotta, per la direzione "davanti" a schermo
 const EDGE_MIN_SEP = 0.15;       // rad fra due frecce sull'ellisse
+const KILLER_COLOR = '#ff4d5a';
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
@@ -91,6 +92,7 @@ class Marker {
     this.occluded = false;
     this.short = null;
     this.close = false;
+    this.killer = false;
     // Fuori da ogni schermo: la prima posizione viene sempre scritta.
     this.x = -1e6; this.y = -1e6; this.rot = -1e6;
     this.edgeAngle = 0;
@@ -150,6 +152,10 @@ class Marker {
   reset() {
     this.id = null;
     this.nick = null;
+    if (this.killer) {
+      this.killer = false;
+      this.root.classList.remove('is-killer');
+    }
     this.distText = '';
     this.textAt = -Infinity;
     this.setOn(false);
@@ -176,6 +182,7 @@ export class HudMarkers {
     this._edgeN = 0;
     this._aheadX = 0;
     this._aheadY = -1;
+    this._killerNick = null;
     this._isMobile = false;
     this._lastW = 0;
     this._lastH = 0;
@@ -186,6 +193,16 @@ export class HudMarkers {
     for (const m of this._slots) m.reset();
     this._slotById.clear();
     this._target.setOn(false);
+    this._killerNick = null;
+  }
+
+  /**
+   * Chi ci ha appena abbattuto (nickname, o null): la sua etichetta diventa
+   * rossa con "TI HA ABBATTUTO" e resta visibile anche da morti, freccia
+   * compresa, finché non si rientra in volo.
+   */
+  setKiller(nick) {
+    this._killerNick = nick || null;
   }
 
   update(frame, allPlayers, target, camera, W, H, now) {
@@ -197,6 +214,7 @@ export class HudMarkers {
     this._updateEllipse(W, H);
     this._edgeN = 0;
     if (frame.alive) this._computeAhead(camera, W, H, f);
+    else { this._aheadX = 0; this._aheadY = -1; }
 
     // Candidati: nemici vivi e disegnati, ordinati per distanza (≤ 9, a inserimento).
     let n = 0;
@@ -250,7 +268,12 @@ export class HudMarkers {
   }
 
   _placePlane(m, c, rank, frame, camera, W, H, now, f) {
-    m.setColor(c.color);
+    const killer = this._killerNick !== null && c.nick === this._killerNick;
+    if (killer !== m.killer) {
+      m.killer = killer;
+      m.root.classList.toggle('is-killer', killer);
+    }
+    m.setColor(killer ? KILLER_COLOR : c.color);
     // Nome intero ai più vicini, iniziale agli altri (e sempre su telefono):
     // nessun elemento compare o sparisce quando cambia l'ordine di vicinanza.
     const short = this._isMobile || rank >= FULL_LABELS;
@@ -278,7 +301,7 @@ export class HudMarkers {
       m.setOn(true);
       m.setMode(false, false);
       m.moveTo((_v.x * 0.5 + 0.5) * W, (-_v.y * 0.5 + 0.5) * H);
-    } else if (frame.alive) {
+    } else if (frame.alive || killer) {
       m.setOn(true);
       m.setMode(true, occluded);
       this._placeOnEdge(m, p.x, p.y, p.z, f);

@@ -90,6 +90,7 @@ export class HUD {
     this._boostEmpty = null;
     this._extremeState = null;
     this._shieldOn = null;
+    this._wasAlive = true;
 
     this._toasts = [];
     this._radioTimer = null;
@@ -282,6 +283,11 @@ export class HUD {
     };
 
     if (meta?.kind === 'player-kill' && meta.killer && meta.victim) {
+      // Siamo noi la vittima: l'aereo di chi ci ha colpito resta segnalato
+      // (le torrette no, non sono aerei) fino al rientro in volo.
+      if (this._localNick && meta.victim.nickname === this._localNick) {
+        this._markers.setKiller(meta.killer.byTurret ? null : meta.killer.nickname);
+      }
       who(meta.killer);
       row.appendChild(meta.killer.byTurret
         ? svgIcon('i-turret', 'lw-ico kf-ico kf-ico--turret')
@@ -353,6 +359,10 @@ export class HUD {
       this._boostEmpty = empty;
       this.el.boost?.classList.toggle('hud-boost--empty', empty);
     }
+
+    const aliveNow = localPlayer.alive !== false;
+    if (aliveNow && !this._wasAlive) this._markers.setKiller(null);
+    this._wasAlive = aliveNow;
 
     const shieldOn = !!localPlayer.hasShield;
     if (shieldOn !== this._shieldOn) {

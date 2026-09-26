@@ -1116,6 +1116,16 @@
     }
     .mk.is-occluded .mk-edge { opacity: 0.75; }
 
+    /* Chi ci ha appena abbattuto: etichetta rossa, visibile anche da morti. */
+    .mk.is-killer { z-index: 1; }
+    .mk.is-killer .mk-label { background: #6b0f1c; opacity: 1 !important; }
+    .mk.is-killer .mk-label::before {
+      content: 'TI HA ABBATTUTO';
+      font-size: 0.6rem;
+      letter-spacing: 0.08em;
+      color: #ffc2c7;
+    }
+
     /* Bersaglio da bombardare: disegnato, non più l'emoji 🎯. */
     .mk--target { --c: #ff9a2e; }
     .mk-target {
