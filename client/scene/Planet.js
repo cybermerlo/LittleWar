@@ -261,6 +261,10 @@ const ATM_FRAG = /* glsl */`
     float sun = 0.3 + 0.7 * smoothstep(-0.35, 0.6, dot(normalize(vWorldPos), uSunDir));
     float a = f * uIntensity * sun;
     gl_FragColor = vec4(uColor * a, a);
+    // Vuoti nel render target del composer; a schermo (qualità bassa, o la
+    // sonda F9 senza post-processing) codificano in sRGB come tutto il resto.
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }
 `;
 
