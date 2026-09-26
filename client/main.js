@@ -50,6 +50,8 @@ import { shotHeadingOffsets } from '../shared/projectile.js';
 // proprio codice subito dopo il PROPRIO segnaposto, così i merge non si
 // pestano i piedi. Verranno tolti a integrazione finita.
 // [hook:imports:render]
+import { BloomOnlyPass, GradePass, ScreenEffects } from './scene/PostFX.js';
+import { excludeAdditiveFromFog } from './scene/Lighting.js';
 
 // [hook:imports:aircraft]
 
@@ -108,20 +110,31 @@ const BASE_RENDER_DPR = LOW_POWER_DEFAULTS ? 1.0 : Math.min(DEVICE_DPR, IS_TOUCH
  * target ridotto mentre l'aereo si muove.
  */
 const BLOOM_SCALE = LOW_POWER_DEFAULTS ? 0.3 : (IS_TOUCH_DEVICE ? 0.32 : (DEVICE_DPR > 1.5 ? 0.34 : 0.38));
-const BLOOM_INITIAL_STRENGTH = LOW_POWER_DEFAULTS ? 0 : (IS_TOUCH_DEVICE ? 0.12 : 0.22);
+/**
+ * Minimo del bloom rispetto alla finestra CSS. La risoluzione adattiva abbassa
+ * il DPR e con lui il bloom: su un monitor a DPR 1 il gradino più basso (0.7)
+ * lo portava a 0.27 della larghezza, sotto la soglia dello sfarfallio.
+ */
+const BLOOM_MIN_CSS_SCALE = 0.3;
+// Ora il bloom si somma in HDR prima del tone mapping (vedi scene/PostFX.js):
+// ACES ne smorza i nuclei ma lo rende più visibile sugli scuri, quindi la
+// forza va tarata su questo, non sul vecchio valore sommato dopo.
+const BLOOM_INITIAL_STRENGTH = LOW_POWER_DEFAULTS ? 0 : (IS_TOUCH_DEVICE ? 0.16 : 0.3);
 
-// Niente antialiasing sul framebuffer finale: con il composer la scena viene
-// disegnata in un render target e a schermo arriva solo una copia a tutto
-// schermo, dove l'MSAA non ha spigoli da ammorbidire. L'antialiasing vero sta
-// sul render target del composer (vedi sotto).
 const renderer = new THREE.WebGLRenderer({
-  antialias: false,
+  // In qualità alta il framebuffer riceve solo il passo finale a tutto
+  // schermo, dove l'MSAA non ha spigoli da ammorbidire: l'antialiasing vero
+  // sta sul render target del composer (vedi sotto). In bassa invece la scena
+  // va dritta a schermo, e sui telefoni (GPU a tile) l'MSAA del framebuffer
+  // si risolve on-chip, quasi gratis. Su desktop in bassa resta spento.
+  antialias: LOW_POWER_DEFAULTS && IS_TOUCH_DEVICE,
   powerPreference: 'high-performance',
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(BASE_RENDER_DPR);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
+// Valore di partenza: a ogni frame lo decide il ciclo giorno/notte (sky.exposure).
 renderer.toneMappingExposure = 1.03;
 // Disabilita auto-reset: EffectComposer chiama render() più volte per frame (uno per
 // pass), e ogni call resetterebbe renderer.info.render azzerando il conteggio totale.
@@ -143,23 +156,38 @@ camera.position.set(0, 80, 0);
  * Il target è in half float (serve all'HDR del bloom): l'MSAA su half float
  * richiede EXT_color_buffer_float, senza il quale alcuni telefoni darebbero
  * uno schermo nero. In quel caso, e in qualità bassa (dove il bloom è spento e
- * la scena va dritta a schermo), niente MSAA.
+ * la scena va dritta a schermo), niente MSAA: in alta lo sostituisce un FXAA
+ * nel passo finale.
+ *
+ * Budget di pixel: 4 campioni solo fino a ~2.2 Mpx di rendering (schermo
+ * intero × DPR², preso dallo schermo e non dalla finestra, che cambia appena
+ * si va a tutto schermo), altrimenti 2. A 2 Mpx un target 4x in half float
+ * sono già ~100 MB. Poi la risoluzione adattiva scende prima a 2x, poi di
+ * risoluzione, e solo all'ultimo gradino rinuncia all'MSAA.
  */
-const MSAA_SAMPLES = (!LOW_POWER_DEFAULTS && renderer.capabilities.isWebGL2
-  && renderer.extensions.has('EXT_color_buffer_float'))
-  ? (IS_TOUCH_DEVICE ? 2 : 4)
-  : 0;
+const MSAA_SUPPORTED = !LOW_POWER_DEFAULTS && renderer.capabilities.isWebGL2
+  && renderer.extensions.has('EXT_color_buffer_float');
+const MSAA_PIXEL_BUDGET = 2.2e6;
+const _screenPx = (window.screen?.width || window.innerWidth)
+  * (window.screen?.height || window.innerHeight) * BASE_RENDER_DPR * BASE_RENDER_DPR;
+const MSAA_SAMPLES = !MSAA_SUPPORTED ? 0
+  : (IS_TOUCH_DEVICE || _screenPx > MSAA_PIXEL_BUDGET ? 2 : 4);
 const composerTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
   type: THREE.HalfFloatType,
-  samples: MSAA_SAMPLES,
 });
 composerTarget.texture.name = 'EffectComposer.rt1';
 const composer = new EffectComposer(renderer, composerTarget);
+// Campioni solo sul target in cui disegna la RenderPass (readBuffer =
+// renderTarget2). Nessun pass della catena scambia i buffer, quindi l'altro
+// non viene mai allocato; e se un giorno un pass lo facesse, non nascerebbe
+// un secondo target MSAA da ~100 MB.
+composer.renderTarget2.samples = MSAA_SAMPLES;
 composer.setPixelRatio(BASE_RENDER_DPR);
 const renderPass = new RenderPass(scene, camera);
 composer.addPass(renderPass);
 
-const bloomPass = new UnrealBloomPass(
+// Calcola solo la texture del bloom: la somma la fa il GradePass (PostFX.js).
+const bloomPass = new BloomOnlyPass(
   new THREE.Vector2(window.innerWidth * BLOOM_SCALE, window.innerHeight * BLOOM_SCALE),
   BLOOM_INITIAL_STRENGTH,
   0.62,
@@ -168,11 +196,22 @@ const bloomPass = new UnrealBloomPass(
 bloomPass.enabled = !LOW_POWER_DEFAULTS;
 // Deve stare PRIMA di addPass, che chiama subito setSize con la dimensione piena.
 const _bloomSetSize = UnrealBloomPass.prototype.setSize.bind(bloomPass);
-bloomPass.setSize = (width, height) => _bloomSetSize(
-  Math.max(4, Math.round(width * BLOOM_SCALE)),
-  Math.max(4, Math.round(height * BLOOM_SCALE)),
-);
+bloomPass.setSize = (width, height) => {
+  const scale = Math.max(BLOOM_SCALE, window.innerWidth * BLOOM_MIN_CSS_SCALE / Math.max(1, width));
+  _bloomSetSize(
+    Math.max(4, Math.round(width * scale)),
+    Math.max(4, Math.round(height * scale)),
+  );
+};
 composer.addPass(bloomPass);
+
+// Passo finale unico: bloom in HDR, tone mapping, grading, vignettatura,
+// effetti di gioco, sRGB e dithering. In bassa è spento e la RenderPass
+// disegna direttamente a schermo, senza passate in più.
+const gradePass = new GradePass(bloomPass);
+gradePass.enabled = !LOW_POWER_DEFAULTS;
+gradePass.setFxaa(!LOW_POWER_DEFAULTS && MSAA_SAMPLES === 0);
+composer.addPass(gradePass);
 
 
 window.addEventListener('resize', () => {
@@ -227,15 +266,24 @@ const _setRenderScale = (scale) => {
   composer.setSize(window.innerWidth, window.innerHeight);
 };
 
+/**
+ * Campioni MSAA del target della RenderPass. Cambiarli richiede di ricreare
+ * il render target (dispose) ma non ricompila nulla. A zero campioni, in
+ * qualità alta, il passo finale applica un FXAA al loro posto.
+ */
 function setComposerSamples(n) {
-  for (const rt of [composer.renderTarget1, composer.renderTarget2]) {
-    if (rt.samples === n) continue;
-    rt.samples = n;
-    rt.dispose();
-  }
+  gradePass.setFxaa(!LOW_POWER_DEFAULTS && n === 0);
+  const rt = composer.renderTarget2;
+  if (rt.samples === n) return;
+  rt.samples = n;
+  rt.dispose();
 }
 
-/** Nasconde un Object3D ripristinandone poi la visibilità originale. */
+/**
+ * Nasconde un Object3D ripristinandone poi la visibilità originale.
+ * `userData.probeHidden` serve a chi ne ricalcola la visibilità a ogni frame
+ * (stelle, nebulosa e nuvole in Sky.update), che altrimenti la riaccenderebbe.
+ */
 function hideScenario(label, getObject) {
   let previous = null;
   return {
@@ -243,10 +291,11 @@ function hideScenario(label, getObject) {
     off() {
       const o = getObject();
       previous = o ? o.visible : null;
-      if (o) o.visible = false;
+      if (o) { o.visible = false; o.userData.probeHidden = true; }
     },
     on() {
       const o = getObject();
+      if (o) o.userData.probeHidden = false;
       if (o && previous !== null) o.visible = previous;
       previous = null;
     },
@@ -261,25 +310,36 @@ function hideScenario(label, getObject) {
  */
 const adaptiveResolution = new AdaptiveResolution({
   baseDpr: BASE_RENDER_DPR,
-  apply: (dpr) => _setRenderScale(dpr),
+  maxSamples: MSAA_SAMPLES,
+  apply: ({ dpr, msaa }) => {
+    _setRenderScale(dpr);
+    setComposerSamples(msaa);
+  },
 });
 
 const perfProbe = new PerfProbe([
   {
+    // Il passo finale se ne accorge da solo e salta la lettura del bloom.
     label: 'bloom (post-processing)',
     off() { bloomPass.enabled = false; },
     on()  { bloomPass.enabled = !LOW_POWER_DEFAULTS; },
   },
   {
-    // Cambiare i campioni richiede di ricreare i render target (dispose).
-    label: `antialiasing MSAA ${MSAA_SAMPLES}x`,
+    // Spento, il bloom torna a comporsi da sé a schermo come faceva prima
+    // (copia + somma): misura il passo unico contro le due passate originali.
+    label: 'passo finale (grading)',
+    off() { gradePass.enabled = false; },
+    on()  { gradePass.enabled = !LOW_POWER_DEFAULTS; },
+  },
+  {
+    get label() { return `MSAA ${adaptiveResolution.msaa}x (al suo posto FXAA)`; },
     off() { setComposerSamples(0); },
-    on()  { setComposerSamples(MSAA_SAMPLES); },
+    on()  { setComposerSamples(adaptiveResolution.msaa); },
   },
   {
     label: `risoluzione a 1x (ora ${BASE_RENDER_DPR}x)`,
     off() { _setRenderScale(1); },
-    on()  { _setRenderScale(BASE_RENDER_DPR); },
+    on()  { _setRenderScale(adaptiveResolution.dpr); },
   },
   hideScenario('acqua', () => waterMesh),
   hideScenario('atmosfera', () => atmosphereMesh),
@@ -344,6 +404,10 @@ initTurretEffects(scene);
 const planeShadows = new PlaneShadows(scene);
 
 // [hook:init:render]
+/** Effetti a schermo di gioco (turbo, morte, scudo perso): vedi scene/PostFX.js. */
+const screenFx = new ScreenEffects({ gradePass, lowQuality: LOW_POWER_DEFAULTS });
+/** Stato letto a ogni frame per gli effetti, riusato: niente allocazioni. */
+const _fxState = { active: false, alive: true, boost: false, extreme: false, shield: false };
 
 // [hook:init:aircraft]
 
@@ -366,6 +430,10 @@ const worldReady = Promise.all([
   terrainGroup = createTerrain(scene, treeTemplates, buildingTemplates, hospitalTemplates);
 
   // [hook:world-ready:render]
+  // Prima della pre-compilazione: la nebbia ora è attiva e sui materiali
+  // additivi farebbe aloni (vedi Lighting.js).
+  excludeAdditiveFromFog(scene);
+  if (import.meta.env?.DEV && window.__lwDebug) window.__lwDebug.postFx = screenFx;
 
   // [hook:world-ready:aircraft]
 
@@ -1338,6 +1406,17 @@ function animate() {
   }
 
   // [hook:frame:render]
+  // Disco del sole, bagliore e nebbia li orienta il cielo da sé sulla camera
+  // che lo disegna (Sky.js, onBeforeRender); qui esposizione e grading.
+  renderer.toneMappingExposure = sky.exposure;
+  gradePass.setGrade(sky.grade);
+  atmosphereMesh.material.uniforms.uIntensity.value = sky.atmosphere;
+  _fxState.active = inGame;
+  _fxState.alive = isAlive;
+  _fxState.extreme = extremeBoostTimer > 0;
+  _fxState.boost = !_fxState.extreme && input.isBoost() && boostEnergy > 0.01;
+  _fxState.shield = !!localState?.hasShield;
+  screenFx.update(delta, _fxState);
 
   // [hook:frame:aircraft]
 

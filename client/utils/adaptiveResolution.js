@@ -27,6 +27,13 @@
  * Si misura la **mediana** della finestra, non la media: un singolo picco (una
  * raccolta della memoria, una compilazione di shader) non deve far degradare
  * la risoluzione di tutta la partita.
+ *
+ * Ogni gradino porta con sé anche i campioni MSAA. Il primo a cedere è metà
+ * dell'MSAA (4x → 2x): a parità di pixel costa parecchia banda e si vede
+ * poco. Poi scende la risoluzione, e solo all'ultimo gradino l'MSAA sparisce
+ * del tutto (il GradePass lo sostituisce con un FXAA). Cambiare i campioni
+ * rialloca il render target ma non ricompila nulla: non entrano nella chiave
+ * dei programmi.
  */
 
 /** Sopra questo tempo di frame si scende di un gradino (~48 FPS). */
@@ -42,8 +49,9 @@ const STARTUP_FRAMES = 150;
 /** Quante discese da uno stesso livello prima di dichiararlo irraggiungibile. */
 const MAX_FAILURES = 2;
 
+/** Mediana; ordina l'array sul posto (la finestra viene svuotata subito dopo). */
 function median(values) {
-  const s = [...values].sort((a, b) => a - b);
+  const s = values.sort((a, b) => a - b);
   const mid = s.length >> 1;
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) * 0.5;
 }
@@ -52,13 +60,23 @@ export class AdaptiveResolution {
   /**
    * @param {object}   opts
    * @param {number}   opts.baseDpr        risoluzione scelta dal profilo qualità
-   * @param {(dpr: number) => void} opts.apply  applica la risoluzione al renderer
+   * @param {(step: {dpr: number, msaa: number}) => void} opts.apply
+   *        applica risoluzione e campioni MSAA al renderer
    * @param {number}   [opts.floor]        risoluzione minima assoluta
+   * @param {number}   [opts.maxSamples]   campioni MSAA al gradino più alto (0 = niente MSAA)
    */
-  constructor({ baseDpr, apply, floor = 0.7 }) {
+  constructor({ baseDpr, apply, floor = 0.7, maxSamples = 0 }) {
+    const mid = Math.min(maxSamples, 2);
+    const raw = [
+      ...(maxSamples > mid ? [{ f: 1, msaa: maxSamples }] : []),
+      { f: 1, msaa: mid },
+      { f: 0.85, msaa: mid },
+      { f: 0.72, msaa: mid },
+      { f: 0.6, msaa: 0 },
+    ].map(s => ({ dpr: Math.max(floor, baseDpr * s.f), msaa: s.msaa }));
     // Gradini decrescenti, senza duplicati e mai sotto il minimo.
-    const raw = [1, 0.85, 0.72, 0.6].map(f => Math.max(floor, baseDpr * f));
-    this.steps = raw.filter((v, i) => i === 0 || Math.abs(v - raw[i - 1]) > 0.02);
+    this.steps = raw.filter((v, i) => i === 0
+      || Math.abs(v.dpr - raw[i - 1].dpr) > 0.02 || v.msaa !== raw[i - 1].msaa);
 
     this.apply = apply;
     this.level = 0;
@@ -71,15 +89,26 @@ export class AdaptiveResolution {
     this._changes = 0;
   }
 
+  /** Gradino attualmente applicato: `{ dpr, msaa }`. */
+  get step() {
+    return this.steps[this.level];
+  }
+
   /** Risoluzione attualmente applicata. */
   get dpr() {
-    return this.steps[this.level];
+    return this.steps[this.level].dpr;
+  }
+
+  /** Campioni MSAA attualmente applicati. */
+  get msaa() {
+    return this.steps[this.level].msaa;
   }
 
   /** Descrizione breve per l'overlay diagnostico. */
   get label() {
-    const pct = Math.round(this.dpr / this.steps[0] * 100);
-    return this.level === 0 ? `${this.dpr.toFixed(2)}x` : `${this.dpr.toFixed(2)}x (${pct}%)`;
+    const pct = Math.round(this.dpr / this.steps[0].dpr * 100);
+    const aa = this.msaa > 0 ? ` · MSAA ${this.msaa}x` : (this.steps[0].msaa > 0 ? ' · FXAA' : '');
+    return (pct === 100 ? `${this.dpr.toFixed(2)}x` : `${this.dpr.toFixed(2)}x (${pct}%)`) + aa;
   }
 
   /** Sospende la regolazione, ad esempio mentre la sonda F9 misura. */
@@ -95,7 +124,7 @@ export class AdaptiveResolution {
     this._changes++;
     this._samples.length = 0;
     this._settle = SETTLE_FRAMES;
-    this.apply(this.dpr);
+    this.apply(this.step);
   }
 
   /** Da chiamare una volta per frame con il tempo di frame in millisecondi. */
