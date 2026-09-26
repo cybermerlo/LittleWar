@@ -32,7 +32,7 @@ const VERTEX = /* glsl */ `
     // position.x: -0.5..0.5 sulla larghezza, position.y: -0.5..0.5 sulla lunghezza.
     vec3 p = vec3(dir * rad + across * position.x * 0.05, z + (position.y + 0.5) * uLen);
     // Entrano sfumate da lontano ed escono sfumate prima di toccare la camera.
-    float fadeIn = smoothstep(0.0, 0.3, ph);
+    float fadeIn = smoothstep(0.0, 0.45, ph);
     float fadeOut = 1.0 - smoothstep(0.75, 1.0, ph);
     vAlpha = uAmount * fadeIn * fadeOut * (0.45 + 0.55 * fract(aSeed.z * 7.13));
     vAcross = position.x * 2.0;
@@ -64,7 +64,7 @@ export class SpeedLines {
       // Angoli distribuiti uniformemente con un po' di disordine, lontano
       // dall'asse: il centro dello schermo è dove si mira.
       seeds[i * 3] = ((i + Math.random() * 0.8) / count) * Math.PI * 2;
-      seeds[i * 3 + 1] = 2.6 + Math.random() * 3.4;
+      seeds[i * 3 + 1] = 3.0 + Math.random() * 3.4;
       seeds[i * 3 + 2] = Math.random();
     }
     geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds, 3));
@@ -83,6 +83,9 @@ export class SpeedLines {
       transparent: true,
       depthWrite: false,
       depthTest: false,
+      // Il quad viene rimappato nel vertex shader: a seconda del quadrante
+      // dello schermo il suo verso di avvolgimento cambia.
+      side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
     });
     this.mesh = new THREE.Mesh(geo, this.material);
@@ -113,8 +116,8 @@ export class SpeedLines {
 
     const u = this.uniforms;
     u.uTime.value = this._time;
-    u.uAmount.value = this._amount * 0.8;
-    u.uLen.value = 2 + 5 * this._extreme;
+    u.uAmount.value = this._amount * 0.5;
+    u.uLen.value = 2 + 3.5 * this._extreme;
     u.uSpeed.value = 1.5 + 1.3 * this._extreme;
     this.mesh.visible = this._amount > 0.01;
   }

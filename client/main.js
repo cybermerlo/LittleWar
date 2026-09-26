@@ -1095,6 +1095,10 @@ const net = new NetworkManager({
     camCtrl.snap();
     _fxSnapSun = true;
     localAirplane?.revive(RESPAWN_INVINCIBILITY);
+    // La schermata Mayday non blocca più i tocchi (pointer-events: none): un
+    // FUOCO o una BOMBA premuti da morti non devono partire al respawn.
+    input.touch.shoot = false;
+    input.touch.bomb = false;
   },
 
   /** Uno scudo ha assorbito un colpo: schegge sull'aereo giusto, scossone se è il nostro. */

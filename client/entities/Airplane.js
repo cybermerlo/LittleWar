@@ -106,7 +106,6 @@ const SHIELD_BREAK_HOLD_MS = 600;
 const _rightW = new THREE.Vector3();
 const _upW = new THREE.Vector3();
 const _navWorld = new THREE.Vector3();
-const _pos = new THREE.Vector3();
 const _vel = new THREE.Vector3();
 const _white = new THREE.Color(1, 1, 1);
 const _muzzleWarm = new THREE.Color(1.6, 1.25, 0.72);

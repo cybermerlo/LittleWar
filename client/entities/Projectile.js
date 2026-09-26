@@ -100,7 +100,6 @@ const trailMat = new THREE.MeshBasicMaterial({
 const _white = new THREE.Color(1, 1, 1);
 const _hot = new THREE.Color(1.0, 0.9, 0.62);
 const _glowTmp = new THREE.Color();
-const _tmpColor = new THREE.Color();
 const _p = { x: 0, y: 0, z: 0 };
 const _hitAt = new THREE.Vector3();
 const _t = { x: 0, y: 0, z: 0 };
