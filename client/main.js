@@ -83,6 +83,7 @@ import { createBuildingPrototypes } from './entities/Building.js';
 import { createPowerupPrototypes, preloadPowerupModels } from './entities/PowerUp.js';
 
 // [hook:imports:ui]
+import { LobbyAttract } from './ui/LobbyAttract.js';
 
 /** Distanza 3D tra due punti sferici allo stesso raggio — stessa formula del server. */
 function sphereDist(t1, p1, t2, p2, r) {
@@ -515,6 +516,29 @@ initBombFx(objectiveFxRoot());
 initTargetFx(objectiveFxRoot());
 
 // [hook:init:ui]
+/** Lobby dal vivo: pianeta in orbita e aereo dimostrativo (ui/LobbyAttract.js). */
+const lobbyAttract = new LobbyAttract({
+  scene,
+  camera,
+  shadows: planeShadows,
+  lowQuality: LOW_POWER_DEFAULTS,
+  setRenderScale: _setRenderScale,
+  // In lobby non serve la nitidezza piena: si guarda un pianeta che ruota.
+  lobbyDpr: Math.min(1, BASE_RENDER_DPR),
+  getGameDpr: () => adaptiveResolution.dpr,
+});
+/** Stato del frame per l'HUD, riempito a ogni frame senza allocare. */
+const _hudFrame = {
+  alive: false, theta: 0, phi: 0, heading: 0, weaponLevel: 0,
+  localPos: null, localId: null, remotes: null, targets: null, powerups: null, delta: 0,
+};
+const _uiLocal = { airplane: null, alive: false };
+let _uiWasInGame = false;
+// Se il caricamento del mondo fallisse, la lobby non resta coperta per sempre.
+setTimeout(() => {
+  lobbyAttract.setWorldReady();
+  lobby.setWorldReady();
+}, 20000);
 
 /** Risolve quando mondo e modelli sono pronti: gate per la pre-compilazione. */
 const worldReady = Promise.all([
@@ -569,6 +593,17 @@ const worldReady = Promise.all([
   }
 
   // [hook:world-ready:ui]
+  // Mondo pronto: la lobby toglie la copertura e inizia a disegnare il pianeta.
+  // Gli shader si compilano già qui, mentre si sceglie il nickname, invece che
+  // al click su GIOCA (warmupShaders parte dopo che questa callback è finita,
+  // quindi include ciò che gli altri pacchetti hanno aggiunto sopra).
+  lobbyAttract.setWorldReady();
+  lobby.setWorldReady();
+  warmupShaders();
+  if (import.meta.env?.DEV && window.__lwDebug) {
+    window.__lwDebug.hud = hud;
+    window.__lwDebug.lobbyAttract = lobbyAttract;
+  }
 });
 
 /**
@@ -779,7 +814,10 @@ function _enterGame(nickname, color, model, solo = false) {
 const lobby = new LobbyScreen(
   (nickname, color, model) => _enterGame(nickname, color, model, false),
   (nickname, color, model) => _enterGame(nickname, color, model, true),
+  // L'aereo dimostrativo dietro la lobby prende subito il colore scelto.
+  { onColorChange: (color) => lobbyAttract.setColor(color) },
 );
+lobbyAttract.setColor(lobby.selectedColor);
 
 const net = new NetworkManager({
   onConnect() {
@@ -1267,7 +1305,9 @@ const net = new NetworkManager({
   },
 
   onChatMessage(msg) {
-    chat.receive(msg);
+    // Il kill feed arriva come chat-message ma ha un suo riquadro nell'HUD.
+    if (msg?.variant === 'kill-feed') hud.pushKillFeed(msg);
+    else chat.receive(msg);
   },
 });
 
@@ -1556,6 +1596,8 @@ function animate() {
   projectiles.update(now, _hitTargets, (rec, target, ageMs, point) => {
     net.sendHit(rec.id, target.id, ageMs);
     spawnImpact(point);
+    // Hit marker sul mirino, subito: il colpo lo decide chi spara.
+    hud.registerLocalHit(target.id);
   });
 
   // Ombre degli aerei sul terreno
@@ -1652,16 +1694,56 @@ function animate() {
   endObjectiveFx(delta, camera);
 
   // [hook:frame:ui]
+  if (inGame !== _uiWasInGame) {
+    _uiWasInGame = inGame;
+    if (inGame) {
+      // Le scie dell'aereo locale erano state spente al ritorno in lobby.
+      localAirplane?.setBoostParticlesVisible(true);
+    } else {
+      // Tornati in lobby il pianeta si vede di nuovo: via gli aerei rimasti
+      // fermi dove erano alla disconnessione.
+      if (localAirplane) {
+        localAirplane.mesh.visible = false;
+        localAirplane.setBoostParticlesVisible(false);
+      }
+      for (const plane of remoteAirplanes.values()) {
+        plane.mesh.visible = false;
+        plane.setBoostParticlesVisible(false);
+      }
+    }
+  }
+  _uiLocal.airplane = localAirplane;
+  _uiLocal.alive = isAlive;
+  // In lobby: camera in orbita e aereo dimostrativo; true = frame da saltare
+  // (la lobby si disegna a 30 fps). In partita: la planata d'ingresso.
+  if (lobbyAttract.frame(delta, inGame, nightFactor, _uiLocal)) return;
 
   // HUD
   if (inGame) {
+    // Matrici della camera di QUESTO frame: Three.js le aggiorna solo dentro
+    // render(), e senza questa riga mirino e indicatori restavano indietro di
+    // un frame nelle virate.
+    camera.updateMatrixWorld();
+    _hudFrame.alive = isAlive && !lobbyAttract.boarding;
+    _hudFrame.theta = theta;
+    _hudFrame.phi = phi;
+    _hudFrame.heading = heading;
+    _hudFrame.weaponLevel = Math.max(0, Math.floor(localState?.weaponLevel ?? 0));
+    _hudFrame.localPos = localAirplane?.mesh.position ?? null;
+    _hudFrame.localId = localPlayerId;
+    _hudFrame.remotes = remoteAirplanes;
+    _hudFrame.targets = _hitTargets;
+    _hudFrame.powerups = powerupPositions;
+    _hudFrame.delta = delta;
     hud.update(
       localState, allPlayerStates, currentTarget, camera,
       boostEnergy / BOOST_MAX, input.isBoost(),
       buildingStates,
       localHasExtremeBoost,
       extremeBoostTimer,
+      _hudFrame,
     );
+    mobile?.setMeters(boostEnergy / BOOST_MAX, Math.min(1, (now - lastBombTime) / BOMB_COOLDOWN));
   }
 
   renderer.info.reset();

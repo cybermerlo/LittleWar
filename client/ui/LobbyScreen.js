@@ -12,14 +12,40 @@ const QUALITY_OPTIONS = [
   { id: 'low', label: 'Low' },
 ];
 
+/** Nomi dei colori di PLAYER_COLORS, per l'etichetta e per i lettori di schermo. */
+const COLOR_NAMES = {
+  '#ff0000': 'Rosso',
+  '#0000ff': 'Blu',
+  '#ffff00': 'Giallo',
+  '#008000': 'Verde',
+  '#ffa500': 'Arancione',
+  '#800080': 'Viola',
+  '#ffc0cb': 'Rosa',
+  '#8b4513': 'Marrone',
+  '#ffffff': 'Bianco',
+  '#000000': 'Nero',
+};
+
+/** Durata dell'uscita del pannello (deve coprire le transizioni CSS di #lobby.lw-leaving). */
+const LEAVE_MS = 420;
+
 export class LobbyScreen {
-  constructor(onPlay, onPlaySolo) {
+  /**
+   * @param {Function} onPlay
+   * @param {Function} onPlaySolo
+   * @param {object}   [opts]
+   * @param {Function} [opts.onColorChange]  colore scelto (anche quando cambia da solo
+   *                                         perché quello selezionato è stato preso)
+   */
+  constructor(onPlay, onPlaySolo, { onColorChange } = {}) {
     this.onPlay = onPlay;
     this.onPlaySolo = onPlaySolo;
+    this.onColorChange = onColorChange ?? null;
     this.selectedColor = PLAYER_COLORS[0];
     this.selectedModel = MODELS[0].id;
     this.selectedQuality = getRenderQualityPreference();
     this._isFull = false;
+    this._leaveTimer = null;
 
     this._lobbyEl   = document.getElementById('lobby');
     this._nicknameEl = document.getElementById('nickname');
@@ -28,14 +54,23 @@ export class LobbyScreen {
     this._msgEl     = document.getElementById('lobby-msg');
     this._countEl   = document.getElementById('online-count');
     this._colorEl   = document.getElementById('color-options');
+    this._colorNameEl = document.getElementById('color-name');
     this._modelEl   = document.getElementById('model-options');
+    this._modelRow  = document.getElementById('model-row');
     this._qualityEl = document.getElementById('quality-options');
+    this._howEl     = document.getElementById('lw-how');
 
-    this._restoreLastNickname();
+    const hadNickname = this._restoreLastNickname();
+    // Istruzioni aperte solo alla prima visita e se c'è spazio: chi torna sa già
+    // giocare, e su schermi più bassi coprirebbero il pianeta e l'aereo.
+    if (this._howEl && !hadNickname && window.innerHeight >= 860 && window.innerWidth > 1100) {
+      this._howEl.open = true;
+    }
 
     this._buildColorPicker();
     this._buildModelPicker();
     this._buildQualityPicker();
+    this._showColorName();
     this._playBtn.addEventListener('click', () => this._handlePlay());
     this._soloBtnEl?.addEventListener('click', () => this._handlePlaySolo());
     const onNicknameMaybeChanged = () => this._updatePlayState();
@@ -60,13 +95,15 @@ export class LobbyScreen {
   _restoreLastNickname() {
     try {
       const raw = localStorage.getItem(LAST_NICKNAME_KEY);
-      if (raw == null || !this._nicknameEl) return;
+      if (raw == null || !this._nicknameEl) return false;
       const trimmed = String(raw).trim().slice(0, 16);
-      if (!trimmed) return;
+      if (!trimmed) return false;
       this._nicknameEl.value = trimmed;
       this._updatePlayState();
+      return true;
     } catch {
       /* localStorage non disponibile (privacy mode, ecc.) */
+      return false;
     }
   }
 
@@ -97,6 +134,22 @@ export class LobbyScreen {
     }
   }
 
+  _selectColor(c) {
+    const changed = c !== this.selectedColor;
+    this.selectedColor = c;
+    this._colorEl.querySelectorAll('.color-btn').forEach((b) => {
+      const on = b.dataset.color === c;
+      b.classList.toggle('selected', on);
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+    this._showColorName();
+    if (changed) this.onColorChange?.(c);
+  }
+
+  _showColorName() {
+    if (this._colorNameEl) this._colorNameEl.textContent = COLOR_NAMES[this.selectedColor] ?? '';
+  }
+
   _buildColorPicker() {
     PLAYER_COLORS.forEach((c, i) => {
       const btn = document.createElement('button');
@@ -104,11 +157,13 @@ export class LobbyScreen {
       btn.className = 'color-btn' + (i === 0 ? ' selected' : '');
       btn.dataset.color = c;
       btn.style.background = c;
+      btn.setAttribute('role', 'radio');
+      btn.setAttribute('aria-checked', i === 0 ? 'true' : 'false');
+      btn.setAttribute('aria-label', COLOR_NAMES[c] ?? c);
+      btn.title = COLOR_NAMES[c] ?? c;
       btn.addEventListener('click', () => {
         if (btn.disabled) return;
-        document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('selected'));
-        btn.classList.add('selected');
-        this.selectedColor = c;
+        this._selectColor(c);
       });
       this._colorEl.appendChild(btn);
     });
@@ -123,7 +178,7 @@ export class LobbyScreen {
     const taken = new Set(takenColors);
     let currentStillFree = false;
 
-    document.querySelectorAll('.color-btn').forEach(btn => {
+    this._colorEl.querySelectorAll('.color-btn').forEach(btn => {
       const c = btn.dataset.color;
       if (taken.has(c)) {
         btn.disabled = true;
@@ -138,26 +193,25 @@ export class LobbyScreen {
 
     if (!currentStillFree) {
       // Seleziona il primo colore libero disponibile
-      const firstFree = document.querySelector('.color-btn:not([disabled])');
-      if (firstFree) {
-        firstFree.classList.add('selected');
-        this.selectedColor = firstFree.dataset.color;
-      }
+      const firstFree = this._colorEl.querySelector('.color-btn:not([disabled])');
+      if (firstFree) this._selectColor(firstFree.dataset.color);
     }
   }
 
   _buildModelPicker() {
+    // Con un solo modello la riga non serve a nulla: resta nascosta.
+    if (this._modelRow) this._modelRow.hidden = MODELS.length < 2;
     MODELS.forEach((model, i) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'model-btn' + (i === 0 ? ' selected' : '');
       btn.textContent = model.label;
       btn.addEventListener('click', () => {
-        document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('selected'));
+        this._modelEl.querySelectorAll('.model-btn').forEach(b => b.classList.remove('selected'));
         btn.classList.add('selected');
         this.selectedModel = model.id;
       });
-      this._modelEl.appendChild(btn);
+      this._modelEl?.appendChild(btn);
     });
   }
 
@@ -214,11 +268,28 @@ export class LobbyScreen {
     this._msgEl.textContent = msg;
   }
 
+  /** Il mondo 3D dietro la lobby è pronto: via la copertura opaca. */
+  setWorldReady() {
+    this._lobbyEl.classList.remove('lw-world-loading');
+  }
+
+  /** Il pannello scivola via mentre la camera scende verso l'aereo. */
   hide() {
-    this._lobbyEl.style.display = 'none';
+    if (this._lobbyEl.style.display === 'none') return;
+    // Via il focus dal nickname: i tasti di volo non devono finire nel campo.
+    const active = document.activeElement;
+    if (active && this._lobbyEl.contains(active)) active.blur();
+    this._lobbyEl.classList.add('lw-leaving');
+    if (this._leaveTimer) clearTimeout(this._leaveTimer);
+    this._leaveTimer = setTimeout(() => {
+      this._leaveTimer = null;
+      this._lobbyEl.style.display = 'none';
+    }, LEAVE_MS);
   }
 
   show() {
+    if (this._leaveTimer) { clearTimeout(this._leaveTimer); this._leaveTimer = null; }
+    this._lobbyEl.classList.remove('lw-leaving');
     this._lobbyEl.style.display = 'flex';
     this._updatePlayState();
   }
