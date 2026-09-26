@@ -16,9 +16,13 @@ import { Paths } from './Paths.js';
  *  - `constructor`: ciò che dipende solo dal pianeta (barche, aurora);
  *  - `onWorldReady`: ciò che ha bisogno di paesi ed edifici del terreno.
  *
- * Nessuna luce vera: lanterne, fari e aurora sono emissione e geometria
- * additiva. Qualità bassa: niente scie, lanterne, fumo né aurora; meno barche
- * e uccelli; fari con fasci più corti.
+ * Nessuna luce vera: lanterne, fari, lampioni e aurora sono emissione e
+ * geometria additiva. Qualità bassa: niente scie, lanterne, fumo né aurora;
+ * 6 barche invece di 12, 2 stormi invece di 6; fari con fasci più corti;
+ * sentieri e lampioni uguali (costano 1–2 draw call e in bassa ci sono solo 4
+ * paesi, quindi pochi o nessun sentiero).
+ *
+ * CPU per frame: ~20 µs per le matrici delle barche, il resto sono uniform.
  */
 export class WorldLife {
   /**

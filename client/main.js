@@ -351,8 +351,8 @@ const planeShadows = new PlaneShadows(scene);
 // [hook:init:terrain]
 
 // [hook:init:life]
-// Barche e aurora dipendono solo dal pianeta; stormi, fari e fumo aspettano il
-// terreno (world-ready). Tutto entra in scena prima di warmupShaders.
+// Barche e aurora dipendono solo dal pianeta; stormi, fari, fumo e sentieri
+// aspettano il terreno (world-ready). Tutto entra in scena prima di warmupShaders.
 const worldLife = new WorldLife(scene, { lowQuality: LOW_POWER_DEFAULTS });
 perfProbe.scenarios.push(...worldLife.probeScenarios());
 if (import.meta.env?.DEV) window.__lwLife = worldLife;
