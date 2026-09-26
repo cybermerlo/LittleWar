@@ -56,6 +56,7 @@ import { shotHeadingOffsets } from '../shared/projectile.js';
 // [hook:imports:terrain]
 
 // [hook:imports:life]
+import { WorldLife } from './scene/life/WorldLife.js';
 
 // [hook:imports:objectives]
 
@@ -350,6 +351,11 @@ const planeShadows = new PlaneShadows(scene);
 // [hook:init:terrain]
 
 // [hook:init:life]
+// Barche e aurora dipendono solo dal pianeta; stormi, fari e fumo aspettano il
+// terreno (world-ready). Tutto entra in scena prima di warmupShaders.
+const worldLife = new WorldLife(scene, { lowQuality: LOW_POWER_DEFAULTS });
+perfProbe.scenarios.push(...worldLife.probeScenarios());
+if (import.meta.env?.DEV) window.__lwLife = worldLife;
 
 // [hook:init:objectives]
 
@@ -372,6 +378,7 @@ const worldReady = Promise.all([
   // [hook:world-ready:terrain]
 
   // [hook:world-ready:life]
+  worldLife.onWorldReady(terrainGroup, { houseTemplate: buildingTemplates[0] ?? null });
 
   // [hook:world-ready:objectives]
 
@@ -1344,6 +1351,7 @@ function animate() {
   // [hook:frame:terrain]
 
   // [hook:frame:life]
+  worldLife.update(delta, nightFactor, lights);
 
   // [hook:frame:objectives]
 
