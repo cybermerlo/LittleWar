@@ -6,6 +6,8 @@ import {
   segmentPointDistSq,
 } from '../../shared/projectile.js';
 import { FLY_ALTITUDE, BULLET_HIT_RADIUS } from '../../shared/constants.js';
+import { makeGlowSpriteMaterial, glowQuadGeometry } from './glowSprite.js';
+import { isLowPowerQuality } from '../utils/performanceProfile.js';
 
 /**
  * Proiettili lato client.
@@ -20,9 +22,15 @@ import { FLY_ALTITUDE, BULLET_HIT_RADIUS } from '../../shared/constants.js';
  * sono questi — quelli che il giocatore vede — a decidere se un aereo nemico
  * è stato colpito (vedi `update`, callback `onLocalHit`).
  *
- * Tutto il rendering sta in due InstancedMesh: una per i nuclei incandescenti
- * e una per le scie, colorate col colore di chi ha sparato. Due draw call in
- * tutto, qualunque sia il numero di proiettili.
+ * Tutto il rendering sta in tre InstancedMesh: i nuclei incandescenti, le
+ * scie colorate col colore di chi ha sparato e un alone a dimensione minima
+ * sullo schermo (vedi glowSprite.js). Tre draw call in tutto, qualunque sia
+ * il numero di proiettili.
+ *
+ * Il nucleo è una capsula di raggio 0.12 vista quasi di coda: a distanza
+ * copre 1-3 pixel e sfarfalla, e in qualità bassa (senza bloom) una raffica
+ * lontana quasi non si vedeva. L'alone resta un puntino netto di qualche
+ * pixel a qualunque distanza.
  */
 
 const MAX_INSTANCES = 512;
@@ -32,6 +40,31 @@ const TRAIL_LENGTH = 5.5;
 const LOCAL_HIT_RADIUS = BULLET_HIT_RADIUS + 0.1;
 /** Per quanto ricordare un proiettile già tolto (evita di ricrearlo da un evento tardivo). */
 const DEAD_MEMORY_MS = 4000;
+/** Un proiettile nemico che passa entro questa distanza dal nostro aereo è un "quasi colpo". */
+const NEAR_MISS_RADIUS = 3.5;
+/**
+ * I powerup aumentano "livello e dimensione dell'arma": i proiettili crescono
+ * col numero di colpi della raffica, che arriva già nell'evento `shots`, quindi
+ * senza toccare il protocollo.
+ */
+function salvoSize(bullets) {
+  return 1 + 0.12 * Math.min(Math.max(0, bullets - 1), 6);
+}
+const LOW_QUALITY = isLowPowerQuality();
+/** Alone: diametro mondo del puntino e sua intensità (senza bloom deve fare tutto lui). */
+const GLOW_SIZE = 0.45;
+/** Nei primi istanti l'alone si accende piano: il colpo nasce sopra l'abitacolo. */
+const GLOW_FADE_IN_MS = 90;
+const GLOW_GAIN = LOW_QUALITY ? 0.95 : 0.5;
+
+/**
+ * Chi vuole sapere delle salve nuove (vampate di sparo sugli aerei). Non per
+ * le riconciliazioni (`only`), che non sono spari nuovi.
+ */
+let _salvoListener = null;
+export function setSalvoListener(fn) {
+  _salvoListener = typeof fn === 'function' ? fn : null;
+}
 
 // ── Geometrie ─────────────────────────────────────────────────────────────────
 
@@ -66,7 +99,7 @@ const trailMat = new THREE.MeshBasicMaterial({
 
 const _white = new THREE.Color(1, 1, 1);
 const _hot = new THREE.Color(1.0, 0.9, 0.62);
-const _tmpColor = new THREE.Color();
+const _glowTmp = new THREE.Color();
 const _p = { x: 0, y: 0, z: 0 };
 const _hitAt = new THREE.Vector3();
 const _t = { x: 0, y: 0, z: 0 };
@@ -89,7 +122,12 @@ export class ProjectileSystem {
   constructor(scene) {
     this.core = new THREE.InstancedMesh(coreGeo, coreMat, MAX_INSTANCES);
     this.trail = new THREE.InstancedMesh(trailGeo, trailMat, MAX_INSTANCES);
-    for (const m of [this.core, this.trail]) {
+    this.glow = new THREE.InstancedMesh(
+      glowQuadGeometry,
+      makeGlowSpriteMaterial({ minPx: LOW_QUALITY ? 5 : 4.5, core: 0.12 }),
+      MAX_INSTANCES,
+    );
+    for (const m of [this.core, this.trail, this.glow]) {
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       m.frustumCulled = false;
       m.count = 0;
@@ -100,11 +138,27 @@ export class ProjectileSystem {
     }
     this.core.renderOrder = 3;
     this.trail.renderOrder = 2;
+    this.glow.renderOrder = 4;
 
     /** Record attivi, compatti: l'indice nell'array è lo slot di rendering. */
     this._active = [];
     this._byId = new Map();
     this._dead = new Map(); // id → ms di rimozione
+    /** Ultimo colpo a segno dei NOSTRI proiettili per bersaglio (id → ms). */
+    this._lastHitAt = new Map();
+
+    /**
+     * Posizione (world) del nostro aereo, per i quasi colpi; null se morto.
+     * La imposta main.js a ogni frame.
+     */
+    this.listener = null;
+    /** (rec, point) → void: un proiettile altrui ci è passato vicino. */
+    this.onNearMiss = null;
+  }
+
+  /** Ms dell'ultimo colpo a segno dei nostri proiettili su `targetId` (o -Infinity). */
+  lastLocalHitAt(targetId) {
+    return this._lastHitAt.get(targetId) ?? -Infinity;
   }
 
   get count() {
@@ -138,6 +192,8 @@ export class ProjectileSystem {
   spawnSalvo(o) {
     const coreColor = coreColorFor(o.color, new THREE.Color());
     const trailColor = trailColorFor(o.color, new THREE.Color());
+    const glowColor = _glowTmp.copy(coreColor).lerp(trailColor, 0.5).multiplyScalar(GLOW_GAIN).clone();
+    const size = salvoSize(o.headings.length);
     const altitude = o.altitude ?? FLY_ALTITUDE + 0.1;
     o.headings.forEach((heading, i) => {
       if (o.only && !o.only.includes(i)) return;
@@ -157,6 +213,9 @@ export class ProjectileSystem {
         local: !!o.local,
         coreColor,
         trailColor,
+        glowColor,
+        size,
+        nearMiss: false,
         prev: { x: traj.px, y: traj.py, z: traj.pz },
         cur: { x: traj.px, y: traj.py, z: traj.pz },
         slot: this._active.length,
@@ -168,6 +227,7 @@ export class ProjectileSystem {
       this.trail.setColorAt(rec.slot, trailColor);
     });
     this._flagColors();
+    if (!o.only) _salvoListener?.(o);
   }
 
   /** Indici dei proiettili di una salva ancora presenti. */
@@ -206,8 +266,10 @@ export class ProjectileSystem {
     for (const r of this._active) this._byId.delete(r.id);
     this._active.length = 0;
     this._dead.clear();
+    this._lastHitAt.clear();
     this.core.count = 0;
     this.trail.count = 0;
+    this.glow.count = 0;
   }
 
   /** Rimozione con scambio: l'ultimo record prende lo slot liberato. */
@@ -246,6 +308,8 @@ export class ProjectileSystem {
   update(now, targets, onLocalHit) {
     const R = FLY_ALTITUDE;
     const hitR2 = LOCAL_HIT_RADIUS * LOCAL_HIT_RADIUS;
+    const nearR2 = NEAR_MISS_RADIUS * NEAR_MISS_RADIUS;
+    const L = this.listener;
 
     for (let i = this._active.length - 1; i >= 0; i--) {
       const rec = this._active[i];
@@ -274,6 +338,7 @@ export class ProjectileSystem {
           _hitAt.set(t.px + (t.x - t.px) * f, t.py + (t.y - t.py) * f, t.pz + (t.z - t.pz) * f);
 
           this._dead.set(rec.id, now);
+          this._lastHitAt.set(t.id, now);
           this._detach(rec);
           onLocalHit?.(rec, t, hitAge, _hitAt);
           rec.hit = true;
@@ -281,12 +346,24 @@ export class ProjectileSystem {
         }
         if (rec.hit) continue;
       }
+      // Quasi colpo: un solo test segmento-punto per proiettile altrui, e una
+      // volta sola per proiettile.
+      if (!rec.local && !rec.nearMiss && L && this.onNearMiss) {
+        const A = rec.altitude, a = rec.prev, b = rec.cur;
+        if (segmentPointDistSq(a.x * A, a.y * A, a.z * A, b.x * A, b.y * A, b.z * A, L.x, L.y, L.z) < nearR2) {
+          rec.nearMiss = true;
+          _hitAt.set(b.x * A, b.y * A, b.z * A);
+          this.onNearMiss(rec, _hitAt);
+        }
+      }
       if (expired) this._detach(rec);
     }
 
     // Matrici: base (destra, radiale, avanti) scritta direttamente nel buffer.
     const cm = this.core.instanceMatrix.array;
     const tm = this.trail.instanceMatrix.array;
+    const gm = this.glow.instanceMatrix.array;
+    const gc = this.glow.instanceColor.array;
     for (let s = 0; s < this._active.length; s++) {
       const rec = this._active[s];
       const age = Math.max(0, now - rec.spawnAt);
@@ -306,14 +383,26 @@ export class ProjectileSystem {
       const fade = Math.min(1, (rec.lifetime - age) / (rec.lifetime * 0.2));
 
       const o = s * 16;
-      writeBasis(cm, o, rx, ry, rz, _p.x, _p.y, _p.z, _t.x, _t.y, _t.z, 1, 1, 1, px, py, pz);
-      writeBasis(tm, o, rx, ry, rz, _p.x, _p.y, _p.z, _t.x, _t.y, _t.z, fade, fade, Math.max(0.001, len), px, py, pz);
+      const k = rec.size;
+      writeBasis(cm, o, rx, ry, rz, _p.x, _p.y, _p.z, _t.x, _t.y, _t.z, k, k, k, px, py, pz);
+      writeBasis(tm, o, rx, ry, rz, _p.x, _p.y, _p.z, _t.x, _t.y, _t.z, fade * k, fade * k, Math.max(0.001, len), px, py, pz);
+      // Alone: solo traslazione e scala (il vertex shader lo gira verso la camera).
+      const g = GLOW_SIZE * k;
+      writeBasis(gm, o, 1, 0, 0, 0, 1, 0, 0, 0, 1, g, g, g, px, py, pz);
+      const gf = Math.max(0, fade) * Math.min(1, age / GLOW_FADE_IN_MS);
+      gc[s * 3] = rec.glowColor.r * gf;
+      gc[s * 3 + 1] = rec.glowColor.g * gf;
+      gc[s * 3 + 2] = rec.glowColor.b * gf;
     }
 
-    this.core.count = this._active.length;
-    this.trail.count = this._active.length;
+    const n = this._active.length;
+    this.core.count = n;
+    this.trail.count = n;
+    this.glow.count = n;
     this.core.instanceMatrix.needsUpdate = true;
     this.trail.instanceMatrix.needsUpdate = true;
+    this.glow.instanceMatrix.needsUpdate = true;
+    this.glow.instanceColor.needsUpdate = true;
 
     if (this._dead.size > 64) {
       for (const [id, t] of this._dead) if (now - t > DEAD_MEMORY_MS) this._dead.delete(id);

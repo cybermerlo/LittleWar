@@ -41,6 +41,7 @@ export class NetworkManager {
     this.socket.on('shot-rejected',     (d) => h.onShotRejected?.(d));
     this.socket.on('projectile-hit',    (d) => h.onProjectileHit?.(d));
     this.socket.on('player-killed',     (d) => h.onPlayerKilled?.(d));
+    this.socket.on('shield-broken',     (d) => h.onShieldBroken?.(d));
     this.socket.on('powerup-spawned',   (d) => h.onPowerupSpawned?.(d));
     this.socket.on('powerup-collected', (d) => h.onPowerupCollected?.(d));
     this.socket.on('bomb-exploded',     (d) => h.onBombExploded?.(d));

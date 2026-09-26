@@ -54,6 +54,16 @@ import { BloomOnlyPass, GradePass, ScreenEffects } from './scene/PostFX.js';
 import { excludeAdditiveFromFog } from './scene/Lighting.js';
 
 // [hook:imports:aircraft]
+import { RESPAWN_DELAY } from '../shared/constants.js';
+import { createAirplaneWarmupMesh } from './entities/Airplane.js';
+import { setSalvoListener } from './entities/Projectile.js';
+import { wingTrails } from './entities/TrailRibbons.js';
+import { aircraftFx } from './entities/AircraftFx.js';
+import { wreckage } from './entities/Wreckage.js';
+import { SpeedLines } from './entities/SpeedLines.js';
+import { setGlowViewportHeight } from './entities/glowSprite.js';
+import { tickAirplaneLook } from './entities/airplaneLook.js';
+import { NearMissFlash } from './ui/NearMissFlash.js';
 
 // [hook:imports:terrain]
 import { NightLights } from './scene/NightLights.js';
@@ -413,6 +423,49 @@ const screenFx = new ScreenEffects({ gradePass, lowQuality: LOW_POWER_DEFAULTS }
 const _fxState = { active: false, alive: true, boost: false, extreme: false, shield: false };
 
 // [hook:init:aircraft]
+// Effetti degli aerei (scie, luci di navigazione, vampate, anelli di comparsa,
+// schegge dello scudo, rottami, linee di velocità): tutti in pool fissi e in
+// scena da subito, così la pre-compilazione ne compila gli shader in lobby.
+wingTrails.init(scene, { lowQuality: LOW_POWER_DEFAULTS });
+aircraftFx.init(scene, { lowQuality: LOW_POWER_DEFAULTS });
+wreckage.init(scene, { lowQuality: LOW_POWER_DEFAULTS });
+const speedLines = new SpeedLines(scene, { lowQuality: LOW_POWER_DEFAULTS });
+const nearMissFlash = new NearMissFlash();
+/** Boost dell'aereo locale in questo frame, per le linee di velocità. */
+let _fxBoost = 0;
+let _fxExtreme = false;
+/** Primo frame dopo il respawn: il sole salta sulla zona nuova invece di arrivarci in un secondo. */
+let _fxSnapSun = false;
+let _lastNearMissAt = 0;
+/** Istante (performance.now) dell'ultima morte del giocatore locale. */
+let _diedAt = 0;
+
+/** Scossone per un'esplosione in `pos`: forte da vicino, nullo oltre 30 unità. */
+function shakeForExplosionAt(pos, strength = 0.9) {
+  const d = camCtrl.distanceTo(pos);
+  if (d < 30) camCtrl.addTrauma(strength * (1 - d / 30));
+}
+
+/** Un proiettile altrui ci è passato vicino: scossone, fischio e lampo dal lato giusto. */
+function onNearMissFx(rec, point) {
+  // I colpi della NOSTRA torretta non ci colpiscono (il server li ignora).
+  if (typeof rec.ownerId === 'string' && rec.ownerId.startsWith('turret-')) {
+    const bid = rec.ownerId.slice('turret-'.length);
+    for (const b of buildingStates) if (String(b.id) === bid && b.ownerId === localPlayerId) return;
+  }
+  const t = performance.now();
+  if (t - _lastNearMissAt < 150) return; // una raffica = un solo avviso
+  _lastNearMissAt = t;
+  camCtrl.addTrauma(0.35);
+  nearMissFlash.show(point, camera);
+  AudioManager.playShootAtDistance(34);
+}
+
+// Vampata sulle ali a ogni salva nuova, nostra o altrui (le torrette hanno la loro).
+setSalvoListener((o) => {
+  const plane = o.ownerId === localPlayerId ? localAirplane : remoteAirplanes.get(o.ownerId);
+  plane?.flashMuzzle(o.headings.length);
+});
 
 // [hook:init:terrain]
 // Mondo vivo: finestre e aloni dei paesi di notte, ombre delle nuvole, vento
@@ -462,6 +515,9 @@ const worldReady = Promise.all([
   if (import.meta.env?.DEV && window.__lwDebug) window.__lwDebug.postFx = screenFx;
 
   // [hook:world-ready:aircraft]
+  // Aereo invisibile con gli stessi materiali di quelli veri: rim, scudo,
+  // disco dell'elica e particelle turbo si compilano con la pre-compilazione.
+  scene.add(createAirplaneWarmupMesh());
 
   // [hook:world-ready:terrain]
   nightLights.setTerrain(terrainGroup);
@@ -1011,15 +1067,20 @@ const net = new NetworkManager({
     // L'esplosione va dove l'aereo è *disegnato*, non dove lo aveva il server:
     // con il dead reckoning i due punti differiscono di qualche unità.
     const remote = remoteAirplanes.get(victimId);
-    if (victimId === localPlayerId && localAirplane) _deathPos.copy(localAirplane.mesh.position);
+    const victimIsLocal = victimId === localPlayerId;
+    const victimPlane = victimIsLocal ? localAirplane : remote;
+    const victimSeen = !!victimPlane?.mesh.visible;
+    if (victimIsLocal && localAirplane) _deathPos.copy(localAirplane.mesh.position);
     else if (remote?.mesh.visible) _deathPos.copy(remote.mesh.position);
     else {
       const c = sphericalToCartesian(t, p, FLY_ALTITUDE);
       _deathPos.set(c.x, c.y, c.z);
     }
+    // Rottami nel colore della vittima, lanciati con la sua velocità (solo
+    // abbattimenti veri: gli scudi che si rompono hanno il loro evento).
+    wreckage.spawn(_deathPos, playerInfo.get(victimId)?.color, victimSeen ? victimPlane.velocity : null);
     if (remote) {
-      remote.mesh.visible = false;
-      remote.setBoostParticlesVisible(false);
+      remote.hideForDeath();
       remoteWasDead.set(victimId, true);
     }
 
@@ -1030,14 +1091,26 @@ const net = new NetworkManager({
       AudioManager.playExplosion();
     }
 
-    if (victimId === localPlayerId) {
+    if (victimIsLocal) {
       isAlive = false;
+      _diedAt = fxNow;
       // Ferma motore e boost: il game loop non li aggiorna più quando !isAlive
       AudioManager.stopEngine();
+      AudioManager.stopBoost();
+      // L'aereo sparisce dentro la propria esplosione (prima restava intatto
+      // e congelato lì in mezzo, con scie e particelle ferme).
+      localAirplane?.hideForDeath();
+      projectiles.listener = null;
+      nearMissFlash.hide();
+      camCtrl.addTrauma(1);
+      const killerPlane = byTurret ? null : remoteAirplanes.get(killerId);
+      camCtrl.startDeathCam(_deathPos, killerPlane?.mesh ?? null);
       const killer = allPlayerStates.find(pl => pl.id === killerId);
-      death.show(killer?.nickname ?? null, byTurret ?? false, () => {
-        // Il respawn arriva dal server via onRespawned
-      });
+      // La card arriva dopo un attimo e senza coprire il mondo; il respawn
+      // vero arriva comunque dal server via onRespawned.
+      death.show(killer?.nickname ?? null, byTurret ?? false, { respawnAt: fxNow + RESPAWN_DELAY });
+    } else {
+      shakeForExplosionAt(_deathPos);
     }
 
     if (killerId === localPlayerId) {
@@ -1111,6 +1184,34 @@ const net = new NetworkManager({
     _invincibleUntil = Date.now() + RESPAWN_INVINCIBILITY;
     death.hide();
     AudioManager.startEngine();
+    // Il server fa rinascere in un punto qualsiasi della sfera: la camera
+    // salta lì (prima volava in linea retta attraverso il pianeta) e il sole
+    // la segue al primo frame. L'aereo riappare con l'anello di comparsa e
+    // il bordo che pulsa per tutta l'invulnerabilità.
+    camCtrl.snap();
+    _fxSnapSun = true;
+    localAirplane?.revive(RESPAWN_INVINCIBILITY);
+    // La schermata Mayday non blocca più i tocchi (pointer-events: none): un
+    // FUOCO o una BOMBA premuti da morti non devono partire al respawn.
+    input.touch.shoot = false;
+    input.touch.bomb = false;
+  },
+
+  /** Uno scudo ha assorbito un colpo: schegge sull'aereo giusto, scossone se è il nostro. */
+  onShieldBroken({ playerId }) {
+    const victimIsLocal = playerId === localPlayerId;
+    const plane = victimIsLocal ? localAirplane : remoteAirplanes.get(playerId);
+    plane?.breakShield();
+    if (victimIsLocal) camCtrl.addTrauma(0.5);
+    else if (plane?.mesh.visible) shakeForExplosionAt(plane.mesh.position, 0.35);
+    // Il server non dice chi ha sparato: se un nostro colpo ha appena toccato
+    // quell'aereo, lo scudo l'abbiamo rotto noi.
+    const byLocal = !victimIsLocal && performance.now() - projectiles.lastLocalHitAt(playerId) < 1500;
+    hud.showShieldNotice?.({
+      victimIsLocal,
+      victimName: playerInfo.get(playerId)?.nickname ?? null,
+      byLocal,
+    });
   },
 
   onChatMessage(msg) {
@@ -1226,6 +1327,7 @@ function animate() {
       localHasExtremeBoost = false;
       extremeBoostTimer = EXTREME_BOOST_DURATION;
       _extremeBoostPendingConfirm = true;
+      camCtrl.addTrauma(0.35);
     }
     if (extremeBoostTimer > 0) {
       extremeBoostTimer = Math.max(0, extremeBoostTimer - delta);
@@ -1279,7 +1381,12 @@ function animate() {
     const instTurn = delta > 1e-4 ? turnDelta / delta : 0;
     _turnRate += (instTurn - _turnRate) * Math.min(1, delta * 12);
 
+    // Rete di sicurezza: vivi ma nascosti (respawn arrivato prima dell'aereo).
+    if (!localAirplane.mesh.visible) localAirplane.revive(0);
     localAirplane.setNightFactor(nightFactor);
+    // L'invulnerabilità post-respawn non fa più lampeggiare la mesh (che
+    // spegneva a scatti anche luci ed elica): la mostra il bordo pulsante,
+    // gestito da Airplane e visibile anche agli altri giocatori.
     localAirplane.update(
       theta,
       phi,
@@ -1289,14 +1396,20 @@ function animate() {
       delta,
       extremeBoostActive ? 1.0 : (boostActive ? (boostEnergy / BOOST_MAX) : 0),
     );
-    // Blink durante invincibilità post-respawn (5 Hz, 100ms on/off)
-    if (Date.now() < _invincibleUntil) {
-      localAirplane.mesh.visible = Math.floor(Date.now() / 100) % 2 === 0;
-    } else {
-      localAirplane.mesh.visible = true;
-    }
 
-    camCtrl.update(localAirplane.mesh, localAirplane.sphereQuaternion, localAirplane.flightQuaternion, delta);
+    camCtrl.shakeScale = input.gyro.enabled ? 0.5 : 1; // col telefono in mano gli scossoni stancano
+    camCtrl.update(
+      localAirplane.mesh, localAirplane.sphereQuaternion, localAirplane.flightQuaternion, delta,
+      boostActive ? 1 : 0, extremeBoostActive,
+    );
+    if (_fxSnapSun) {
+      lights.follow(camera.position, 0, true);
+      _fxSnapSun = false;
+    }
+    _fxBoost = boostActive ? 1 : 0;
+    _fxExtreme = extremeBoostActive;
+    projectiles.listener = localAirplane.mesh.position;
+    projectiles.onNearMiss = onNearMissFx;
 
     // Invia input al server (throttled)
     if (now - lastInputSend >= CLIENT_INPUT_SEND_MS) {
@@ -1329,6 +1442,9 @@ function animate() {
       net.sendShoot(seq, theta, phi, heading);
       AudioManager.playShoot();
       lastShootTime = now;
+      // Il rinculo si sente nella camera (una vibrazione appena percettibile
+      // a raffica continua); la vampata la accende il listener delle salve.
+      camCtrl.addTrauma(0.16 + 0.02 * Math.min(wl, 5));
     }
 
     // Bomba: audio solo allo sgancio (suono impatto bomba eventualmente in onBombExploded).
@@ -1447,6 +1563,22 @@ function animate() {
   screenFx.update(delta, _fxState);
 
   // [hook:frame:aircraft]
+  // Da morti la camera orbita sull'esplosione e cerca chi ha sparato.
+  if (inGame && !isAlive) {
+    camCtrl.updateDeath(delta);
+    // Rete di sicurezza: morti per il client ma vivi per il server da ben
+    // oltre il respawn. Succede tornando in lobby durante il "Mayday" e
+    // rientrando: il server crea un giocatore nuovo, vivo, e nessun
+    // `respawned` arriverà mai — il client restava fermo sull'esplosione.
+    if (localState?.alive && now - _diedAt > RESPAWN_DELAY + 1500) net.handlers.onRespawned(localState);
+  }
+  tickAirplaneLook(now / 1000, nightFactor);
+  setGlowViewportHeight(window.innerHeight);
+  speedLines.update(delta, inGame && isAlive ? _fxBoost : 0, inGame && isAlive && _fxExtreme);
+  // Dopo camera e aerei: il nastro guarda la camera di QUESTO frame.
+  wingTrails.build(camera.position, now);
+  aircraftFx.tick(delta);
+  wreckage.tick(delta);
 
   // [hook:frame:terrain]
   nightLights.update(delta, nightFactor);
