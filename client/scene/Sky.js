@@ -473,6 +473,9 @@ export function createSky(scene, lights, options = {}) {
       const R = FLY_ALTITUDE + 9 + Math.random() * 5;
       const size = 1.3 + Math.random() * 1.3;
       const puffs = 4 + Math.floor(Math.random() * 4);
+      // Ancora per l'ombra al suolo (CloudShadows.js): centro, asse lungo e
+      // semiassi in radianti, nel frame di cloudRoot.
+      (cloudRoot.userData.cloudAnchors ??= []).push({ dir: n.clone(), axis: u.clone(), halfLen: 3.7 * size / R, halfWid: 1.8 * size / R });
       for (let p = 0; p < puffs; p++) {
         const along = (p / (puffs - 1) - 0.5) * 5.2 * size;
         const bulge = 1 - Math.abs(p / (puffs - 1) - 0.5) * 1.1; // più gonfie al centro

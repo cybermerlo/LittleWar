@@ -4,7 +4,8 @@ import { terrainDensityScale, useDetailedTerrainModels } from '../utils/performa
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PLANET_RADIUS } from '../../shared/planetField.js';
 import { sampleGround, makeSurfaceHit, fitGroundPlane } from './planetSurface.js';
-import { BIOME, biomeAt } from './planetBiomes.js';
+import { BIOME, biomeAt, hash01 } from './planetBiomes.js';
+import { patchWorldMaterial, WINDOW_NEVER, HOSPITAL_SEED_MAX } from './worldShaders.js';
 
 /**
  * Alberi per famiglia: il bioma sceglie la famiglia (pini in tundra e in
@@ -254,6 +255,8 @@ function estimateFootprintRadiusXZ(obj) {
   const box = new THREE.Box3().setFromObject(obj);
   const hw = Math.max((box.max.x - box.min.x) * 0.5, 0.01);
   const hd = Math.max((box.max.z - box.min.z) * 0.5, 0.01);
+  // Già che la scatola c'è: l'altezza serve al vento sugli alberi.
+  obj.userData.height = box.max.y - box.min.y;
   // Media tra cerchio inscritto e circoscritto al rettangolo hw×hd: il
   // circoscritto da solo teneva le case a 6 unità l'una dall'altra e nei
   // paesi ne entravano due o tre.
@@ -340,26 +343,63 @@ export function loadHospitalTemplates() {
   return _hospitalTemplatesPromise;
 }
 
-// ── Albero procedurale (fallback se i GLB non caricano) ───────────────────────
+// ── Decori procedurali (qualità bassa, o se i GLB non caricano) ───────────────
+/**
+ * Un solo materiale per tutti i decori procedurali, con il colore nei vertici.
+ *
+ * Prima ogni albero aveva una chioma di colore HSL casuale, quindi un
+ * materiale diverso: il merge per aspetto non poteva unirle e la qualità
+ * *bassa* pagava ~78 draw call di sole chiome, più ~10 di case — circa quattro
+ * volte il terreno della qualità alta (24). Con il colore nei vertici tutto il
+ * terreno procedurale, finestre comprese, è una draw call sola, e i colori
+ * restano vari come prima.
+ */
+const PROC_MATERIAL = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+const TRUNK_COLOR = new THREE.Color(0x7a5230);
+/** Vetri di giorno; di notte li accende il materiale (worldShaders.js). */
+const PROC_WINDOW_COLOR = new THREE.Color(0x86cfe6);
+
+function procMesh(geometry, color) {
+  const count = geometry.getAttribute('position').count;
+  const rgb = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    rgb[i * 3] = color.r;
+    rgb[i * 3 + 1] = color.g;
+    rgb[i * 3 + 2] = color.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(rgb, 3));
+  return new THREE.Mesh(geometry, PROC_MATERIAL);
+}
+
+/**
+ * Fasce di finestre attorno a un blocco w×h×d appoggiato a Y = 0: poche
+ * facce, e di notte si accendono come le finestre dei modelli GLB.
+ */
+function windowBands(w, h, d) {
+  const rows = Math.max(1, Math.floor(h / 0.9));
+  const bands = [];
+  for (let i = 0; i < rows; i++) {
+    const band = procMesh(new THREE.BoxGeometry(w * 1.02, 0.13, d * 1.02), PROC_WINDOW_COLOR);
+    band.position.y = h * (i + 0.6) / (rows + 0.2);
+    band.userData.isWindow = true;
+    bands.push(band);
+  }
+  return bands;
+}
+
 function makeProceduralTree(kind = 'leafy') {
   const group = new THREE.Group();
   const trunkH = 0.5 + rand() * 0.4;
   const coneH  = (kind === 'pine' ? 1.4 : 1.0) + rand() * 0.8;
   const coneR  = (kind === 'pine' ? 0.32 : 0.4) + rand() * 0.3;
 
-  const trunk = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.08, 0.12, trunkH, 5),
-    new THREE.MeshLambertMaterial({ color: 0x7a5230, flatShading: true }),
-  );
+  const trunk = procMesh(new THREE.CylinderGeometry(0.08, 0.12, trunkH, 5), TRUNK_COLOR);
   trunk.position.y = trunkH / 2;
 
   const green = kind === 'autumn'
     ? new THREE.Color().setHSL(0.04 + rand() * 0.08, 0.75, 0.45)
     : new THREE.Color().setHSL((kind === 'pine' ? 0.36 : 0.30) + rand() * 0.05, 0.6, 0.28 + rand() * 0.1);
-  const leaves = new THREE.Mesh(
-    new THREE.ConeGeometry(coneR, coneH, 6),
-    new THREE.MeshLambertMaterial({ color: green, flatShading: true }),
-  );
+  const leaves = procMesh(new THREE.ConeGeometry(coneR, coneH, 6), green);
   leaves.position.y = trunkH + coneH / 2;
 
   group.add(trunk, leaves);
@@ -385,25 +425,19 @@ function makeProceduralBuilding() {
   const palette = [0xd4b896, 0xc0c0c0, 0xe8d8c0, 0xa8b8c8, 0xf0e0d0];
   const col = palette[Math.floor(rand() * palette.length)];
 
-  const building = new THREE.Mesh(
-    new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshLambertMaterial({ color: col, flatShading: true }),
-  );
+  const group = new THREE.Group();
+  const building = procMesh(new THREE.BoxGeometry(w, h, d), new THREE.Color(col));
   building.position.y = h / 2;
+  group.add(building, ...windowBands(w, h, d));
 
   if (rand() > 0.4) {
     const roofColor = new THREE.Color(col).multiplyScalar(0.75);
-    const roof = new THREE.Mesh(
-      new THREE.ConeGeometry(Math.max(w, d) * 0.75, 0.5, 4),
-      new THREE.MeshLambertMaterial({ color: roofColor, flatShading: true }),
-    );
+    const roof = procMesh(new THREE.ConeGeometry(Math.max(w, d) * 0.75, 0.5, 4), roofColor);
     roof.position.y = h + 0.25;
-    const group = new THREE.Group();
-    group.add(building, roof);
-    return withGroundOrigin(group);
+    group.add(roof);
   }
 
-  return withGroundOrigin(building);
+  return withGroundOrigin(group);
 }
 
 function makeBuilding(buildingTemplates) {
@@ -417,32 +451,23 @@ function makeBuilding(buildingTemplates) {
 function makeProceduralHospital() {
   const group = new THREE.Group();
 
-  const base = new THREE.Mesh(
-    new THREE.BoxGeometry(1.8, 1.2, 1.4),
-    new THREE.MeshLambertMaterial({ color: 0xf2f2f2, flatShading: true }),
-  );
+  const base = procMesh(new THREE.BoxGeometry(1.8, 1.2, 1.4), new THREE.Color(0xf2f2f2));
   base.position.y = 0.6;
 
-  const roof = new THREE.Mesh(
-    new THREE.BoxGeometry(1.9, 0.18, 1.5),
-    new THREE.MeshLambertMaterial({ color: 0xd9d9d9, flatShading: true }),
-  );
+  const roof = procMesh(new THREE.BoxGeometry(1.9, 0.18, 1.5), new THREE.Color(0xd9d9d9));
   roof.position.y = 1.26;
 
-  const sign = new THREE.Mesh(
-    new THREE.BoxGeometry(0.55, 0.55, 0.08),
-    new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }),
-  );
+  const sign = procMesh(new THREE.BoxGeometry(0.55, 0.55, 0.08), new THREE.Color(0xffffff));
   sign.position.set(0, 1.05, 0.75);
 
-  const crossMat = new THREE.MeshLambertMaterial({ color: 0xdd3333, flatShading: true });
-  const crossA = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.10, 0.02), crossMat);
-  const crossB = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.32, 0.02), crossMat);
+  const crossColor = new THREE.Color(0xdd3333);
+  const crossA = procMesh(new THREE.BoxGeometry(0.32, 0.10, 0.02), crossColor);
+  const crossB = procMesh(new THREE.BoxGeometry(0.10, 0.32, 0.02), crossColor);
   crossA.position.set(0, 0, 0.05);
   crossB.position.set(0, 0, 0.05);
   sign.add(crossA, crossB);
 
-  group.add(base, roof, sign);
+  group.add(base, roof, sign, ...windowBands(1.8, 1.2, 1.4));
   return withGroundOrigin(group);
 }
 
@@ -488,6 +513,88 @@ function materialSignature(m) {
   ].join('|');
 }
 
+const _cheapMaterials = new Map();
+
+/**
+ * Materiale Lambert equivalente a un materiale fisico che non usa nulla di
+ * fisico.
+ *
+ * GLTFLoader promuove a MeshPhysicalMaterial ogni materiale che dichiara le
+ * estensioni ior, specular, clearcoat o transmission, anche a fattore zero:
+ * case e ospedali arrivavano così, gli alberi come MeshStandardMaterial, il
+ * pianeta è Lambert — tre modelli d'illuminazione diversi e uno shader fisico
+ * completo per casette di colori piatti. Nessuno di questi materiali usa
+ * metallo, mappe di rilievo o riflessi; con ior = 1 (case e ospedali) il
+ * riflesso speculare era già nullo, e a rugosità 0.8–1 (alberi) quasi. La luce
+ * diffusa è la stessa formula in entrambi, quindi il colore non cambia mentre
+ * il costo per pixel scende.
+ */
+function cheapMaterial(m) {
+  if (!m.isMeshStandardMaterial) return m;
+  const cached = _cheapMaterials.get(m);
+  if (cached) return cached;
+  const physical = m.isMeshPhysicalMaterial
+    && (m.transmission > 0 || m.clearcoat > 0 || m.sheen > 0 || m.iridescence > 0);
+  const reliefOrReflections = m.normalMap || m.bumpMap || m.displacementMap || m.envMap
+    || m.roughnessMap || m.metalnessMap || m.lightMap || m.aoMap;
+  let out = m;
+  if (m.metalness <= 0.1 && !physical && !reliefOrReflections) {
+    out = new THREE.MeshLambertMaterial({
+      name: m.name,
+      color: m.color,
+      map: m.map,
+      emissive: m.emissive,
+      emissiveMap: m.emissiveMap,
+      emissiveIntensity: m.emissiveIntensity,
+      alphaMap: m.alphaMap,
+      alphaTest: m.alphaTest,
+      transparent: m.transparent,
+      opacity: m.opacity,
+      side: m.side,
+      vertexColors: m.vertexColors,
+      flatShading: m.flatShading,
+      depthWrite: m.depthWrite,
+    });
+  }
+  _cheapMaterials.set(m, out);
+  return out;
+}
+
+/**
+ * Vetri dei modelli GLB: 'Gesso (2)' in building-house, 'Gesso (5)' in
+ * hospital. Se una decimazione rinominasse i materiali (vedi CLAUDE.md) resta
+ * il ripiego sul colore: sono gli unici azzurri chiari e saturi del terreno.
+ */
+const WINDOW_MATERIAL_NAMES = new Set(['Gesso (2)', 'Gesso (5)']);
+function isWindowMesh(mesh) {
+  if (mesh.userData.isWindow) return true;
+  const m = mesh.material;
+  if (WINDOW_MATERIAL_NAMES.has(m.name)) return true;
+  const c = m.color; // lineare
+  return !!c && c.b > 0.95 && c.g > 0.65 && c.r < 0.6;
+}
+
+/** Ospedali: si accendono per primi e restano accesi fino all'alba, con luce fredda. */
+const HOSPITAL_WINDOW_SEED = HOSPITAL_SEED_MAX * 0.4;
+
+/**
+ * Peso del vento per ogni vertice di un albero: 0 al piede, `k` in cima, con
+ * andamento quadratico (il tronco quasi fermo, la chioma che ondeggia), più
+ * la fase dell'albero.
+ */
+function swayWeights(geo, base, up, sway) {
+  const pos = geo.getAttribute('position');
+  const out = new Float32Array(pos.count * 2);
+  const inv = 1 / Math.max(sway.h, 1e-3);
+  for (let i = 0; i < pos.count; i++) {
+    const y = ((pos.getX(i) - base.x) * up.x + (pos.getY(i) - base.y) * up.y + (pos.getZ(i) - base.z) * up.z) * inv;
+    const t = Math.min(Math.max(y, 0), 1);
+    out[i * 2] = sway.k * t * t;
+    out[i * 2 + 1] = sway.phase;
+  }
+  return out;
+}
+
 /**
  * Fonde tutte le mesh statiche del terreno raggruppandole per aspetto.
  * Riduce centinaia di draw call individuali (alberi, edifici, ospedali) a
@@ -496,6 +603,15 @@ function materialSignature(m) {
  * Object3D.clone() condivide geometry e material con il template originale, e
  * le normali vengono trasformate correttamente da applyMatrix4.
  *
+ * Il merge sa ancora a quale oggetto appartiene ogni mesh, e ne approfitta
+ * per scrivere nei vertici ciò che serve agli shader del mondo vivo
+ * (worldShaders.js), solo nei gruppi che ne hanno bisogno:
+ *  - `aSeed` nei gruppi con finestre: la soglia di accensione dell'edificio,
+ *    una per casa, così le case si accendono una alla volta;
+ *  - `aSway` nei gruppi con alberi: peso e fase del vento.
+ * Tutte le finestre del pianeta finiscono in una o due mesh fuse: accenderle
+ * di notte non costa nessuna draw call.
+ *
  * NOTA — spezzare il merge in chunk spaziali per far funzionare il frustum
  * culling è stato provato e misurato: faceva salire le draw call del 26% per
  * risparmiare la metà di appena 48k triangoli, un pessimo scambio. Se un
@@ -503,40 +619,72 @@ function materialSignature(m) {
  * sotto rende il chunking molto più conveniente di quanto lo fosse allora.
  */
 function mergeStaticTerrain(group) {
-  const byLook = new Map(); // firma → { material, geos[] }
+  const byLook = new Map(); // firma → { material, parts[], windows, sway }
   const keep = new Set(['position', 'normal', 'uv']);
+  const up = new THREE.Vector3();
 
-  group.traverse(obj => {
-    if (!(obj instanceof THREE.Mesh)) return;
-    if (!obj.geometry || !obj.material || Array.isArray(obj.material)) return;
+  group.children.forEach((root, index) => {
+    root.updateMatrixWorld(true);
+    const { kind, sway } = root.userData;
+    // `windowSeed` permette a chi aggiunge altri edifici di sceglierne l'ora
+    // di accensione: 0.12 appena cala il sole, 0.92 a notte fonda; sotto
+    // HOSPITAL_SEED_MAX la luce è fredda, come negli ospedali.
+    const windowSeed = root.userData.windowSeed
+      ?? (kind === 'hospital' ? HOSPITAL_WINDOW_SEED : (kind === 'house' ? 0.12 + hash01(index) * 0.8 : undefined));
+    if (sway) up.set(0, 1, 0).applyQuaternion(root.quaternion);
 
-    obj.updateWorldMatrix(true, false);
-    const geo = obj.geometry.clone();
-    geo.applyMatrix4(obj.matrixWorld);
+    root.traverse((obj) => {
+      if (!(obj instanceof THREE.Mesh)) return;
+      if (!obj.geometry || !obj.material || Array.isArray(obj.material)) return;
 
-    // Rimuovi attributi non usati per ridurre memoria (es. uv2, color se
-    // presenti) ma mantieni position/normal/uv, che servono ai materiali.
-    for (const name of Object.keys(geo.attributes)) {
-      if (!keep.has(name)) geo.deleteAttribute(name);
-    }
-    // mergeGeometries pretende lo stesso insieme di attributi in tutti i pezzi.
-    if (!geo.getAttribute('uv')) {
-      geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(geo.getAttribute('position').count * 2), 2));
-    }
+      const material = cheapMaterial(obj.material);
+      const geo = obj.geometry.clone();
+      geo.applyMatrix4(obj.matrixWorld);
 
-    const key = materialSignature(obj.material);
-    if (!byLook.has(key)) byLook.set(key, { material: obj.material, geos: [] });
-    byLook.get(key).geos.push(geo);
+      // Rimuovi gli attributi che nessun materiale legge (es. uv2) per ridurre
+      // memoria; il colore resta solo se il materiale usa i colori di vertice.
+      for (const name of Object.keys(geo.attributes)) {
+        if (!keep.has(name) && !(name === 'color' && material.vertexColors)) geo.deleteAttribute(name);
+      }
+      // mergeGeometries pretende lo stesso insieme di attributi in tutti i pezzi.
+      if (!geo.getAttribute('uv')) {
+        geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(geo.getAttribute('position').count * 2), 2));
+      }
+
+      const part = {
+        geo,
+        seed: windowSeed !== undefined && isWindowMesh(obj) ? windowSeed : WINDOW_NEVER,
+        sway: sway ? swayWeights(geo, root.position, up, sway) : null,
+      };
+      const key = materialSignature(material);
+      let look = byLook.get(key);
+      if (!look) byLook.set(key, look = { material, parts: [], windows: false, sway: false });
+      look.parts.push(part);
+      if (part.seed !== WINDOW_NEVER) look.windows = true;
+      if (part.sway) look.sway = true;
+    });
   });
 
   // Svuota il gruppo e aggiungi le mesh fuse
   group.clear();
 
-  for (const { material, geos } of byLook.values()) {
-    if (geos.length === 0) continue;
+  for (const look of byLook.values()) {
+    // Gli attributi extra vanno in tutti i pezzi del gruppo o in nessuno.
+    const geos = look.parts.map(({ geo, seed, sway }) => {
+      const n = geo.getAttribute('position').count;
+      if (look.windows) geo.setAttribute('aSeed', new THREE.BufferAttribute(new Float32Array(n).fill(seed), 1));
+      if (look.sway) geo.setAttribute('aSway', new THREE.BufferAttribute(sway ?? new Float32Array(n * 2), 2));
+      return geo;
+    });
     const merged = mergeGeometries(geos, false);
     for (const g of geos) g.dispose();
     if (!merged) continue;
+    // Copia: la patch va sul materiale della mesh fusa, non su quello del template.
+    const material = patchWorldMaterial(look.material.clone(), {
+      clouds: true,
+      windows: look.windows,
+      sway: look.sway,
+    });
     const mesh = new THREE.Mesh(merged, material);
     mesh.matrixAutoUpdate = false; // statico: niente ricalcolo matrice per frame
     mesh.updateMatrix();
@@ -683,6 +831,7 @@ export function createTerrain(scene, treeTemplates = [], buildingTemplates = [],
       fitBudget--;
       if (!placeBuildingBaseOnTerrain(obj, dir, normalOffset)) continue;
 
+      obj.userData.kind = kind;
       terrainGroup.add(obj);
       placedBuildings.push({
         dir: dir.clone(),
@@ -764,6 +913,10 @@ export function createTerrain(scene, treeTemplates = [], buildingTemplates = [],
 
     clampTilt(scratchInfo.normal, dir, MAX_TREE_TILT, _clampedNormal);
     orientOnSurface(tree, scratchInfo.point, _clampedNormal, TREE_GROUND_NORMAL_OFFSET);
+    // Vento: i pini più rigidi delle latifoglie; la fase da un hash, non da
+    // rand(), per non spostare boschi e paesi rispetto alle versioni precedenti.
+    tree.userData.kind = 'tree';
+    tree.userData.sway = { h: tree.userData.height, k: rule.kind === 'pine' ? 0.6 : 1, phase: hash01(trees + 7919) * Math.PI * 2 };
     terrainGroup.add(tree);
     placedTrees.push({ dir: dir.clone(), footprintRadius: fp });
     recordPlacement('tree', tree);
