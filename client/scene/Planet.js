@@ -281,7 +281,9 @@ function createAtmosphereMaterial() {
     depthWrite: false,
     side: THREE.BackSide,
     blending: THREE.AdditiveBlending,
-    toneMapped: false,
+    // Tone mapping sì: nel render target del composer non cambia nulla (lo fa
+    // il GradePass su tutta l'immagine), ma a schermo senza post-processing
+    // l'alone usciva più chiaro che in partita, sommato dopo ACES.
   });
 }
 

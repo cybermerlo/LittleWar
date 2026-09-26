@@ -90,12 +90,15 @@ const skyFragmentShader = /* glsl */ `
     // luna (a falce) di notte. HDR, così il bloom lo fa brillare; il terreno
     // lo copre da solo, perché il cielo è disegnato per primo.
     // Distanze come corde, non coseni: vicino a 1 il coseno perde precisione.
-    float dc = length(viewDir - uDiscDir);
-    float disc = 1.0 - smoothstep(uDiscSize - 0.0025, uDiscSize + 0.0015, dc);
-    float shade = 1.0 - smoothstep(uDiscSize - 0.0025, uDiscSize + 0.0015, length(viewDir - uShadowDir));
-    disc *= 1.0 - shade * uCrescent;
-    float halo = exp(-dc * 16.0) * 0.35 + exp(-dc * 60.0) * 0.5;
-    col += uDiscColor * ((disc * 1.8 + halo) * uDisc);
+    // Ramo su una uniform (coerente su tutta la GPU): di giorno non costa nulla.
+    if (uDisc > 0.001) {
+      float dc = length(viewDir - uDiscDir);
+      float disc = 1.0 - smoothstep(uDiscSize - 0.0025, uDiscSize + 0.0015, dc);
+      float shade = 1.0 - smoothstep(uDiscSize - 0.0025, uDiscSize + 0.0015, length(viewDir - uShadowDir));
+      disc *= 1.0 - shade * uCrescent;
+      float halo = exp(-dc * 16.0) * 0.35 + exp(-dc * 60.0) * 0.5;
+      col += uDiscColor * ((disc * 1.8 + halo) * uDisc);
+    }
 
     gl_FragColor = vec4(col, 1.0);
     // In qualità alta sono vuoti (si disegna nel render target del composer e
