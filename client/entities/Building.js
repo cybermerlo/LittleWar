@@ -119,6 +119,7 @@ const MODE_NEUTRAL = 0;
 const MODE_CAPTURING = 1;
 const MODE_OWNED = 2;
 const MODE_CONTESTED = 3;
+const ZONE_MODE_NAMES = ['neutral', 'capturing', 'owned', 'contested'];
 
 // ── Parametri beacon ──────────────────────────────────────────────────────────
 
@@ -877,6 +878,15 @@ export class BuildingEntity {
     this._contenders = contenders;
     this._localPos = localPos;
   }
+
+  /** Progresso di conquista come lo mostra l'anello (0..1, levigato): per l'HUD. */
+  get captureProgress() { return this._shownProgress; }
+
+  /** 'neutral' | 'capturing' | 'owned' | 'contested': per l'HUD. */
+  get zoneMode() { return ZONE_MODE_NAMES[this._mode]; }
+
+  /** L'aereo locale è nella zona di conquista (vedi setZoneState). */
+  get localInside() { return this._inside === 1; }
 
   _updateMode() {
     let mode;
