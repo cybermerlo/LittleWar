@@ -5,9 +5,11 @@ import { Birds } from './Birds.js';
 import { ChimneySmoke } from './ChimneySmoke.js';
 import { Lighthouses } from './Lighthouses.js';
 import { Aurora } from './Aurora.js';
+import { Paths } from './Paths.js';
 
 /**
- * Vita del mondo: barche, stormi, fumo dei comignoli, fari e aurora.
+ * Vita del mondo: barche, stormi, fumo dei comignoli, fari, sentieri con
+ * lampioni e aurora.
  *
  * Due momenti di costruzione, entrambi PRIMA della pre-compilazione degli
  * shader (`warmupShaders` in main.js aspetta `worldReady`):
@@ -32,6 +34,7 @@ export class WorldLife {
     this.birds = null;
     this.smoke = null;
     this.lighthouses = null;
+    this.paths = null;
     this._tmp = new THREE.Color();
   }
 
@@ -45,6 +48,7 @@ export class WorldLife {
     const t0 = performance.now();
     this.birds = new Birds(this.scene, { towns, lowQuality: this.lowQuality });
     this.lighthouses = new Lighthouses(this.scene, { towns, terrainGroup, lowQuality: this.lowQuality });
+    this.paths = new Paths(this.scene, { towns, buildings, terrainGroup });
     if (!this.lowQuality) this.smoke = new ChimneySmoke(this.scene, { buildings, houseTemplate });
     if (import.meta.env?.DEV) {
       console.log('[life]', JSON.stringify({
@@ -52,6 +56,7 @@ export class WorldLife {
         birds: this.birds.count,
         lighthouses: this.lighthouses.sites.length,
         smoke: this.smoke?.count ?? 0,
+        paths: this.paths.stats,
         ms: Math.round(performance.now() - t0),
       }));
     }
@@ -79,6 +84,7 @@ export class WorldLife {
     this.boats.update(delta, this.time, nightFactor);
     this.birds?.update(nightFactor);
     this.lighthouses?.update(nightFactor);
+    this.paths?.update(nightFactor);
     this.aurora?.update(nightFactor);
   }
 
@@ -93,6 +99,7 @@ export class WorldLife {
       item('barche', () => this.boats),
       item('uccelli', () => this.birds),
       item('fari', () => this.lighthouses),
+      item('sentieri e lampioni', () => this.paths),
     ];
     if (!this.lowQuality) {
       list.push(item('fumo comignoli', () => this.smoke));

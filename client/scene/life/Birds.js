@@ -18,7 +18,7 @@ import { mulberry32, withLifeUniforms, tangentBasis, offsetDir } from './lifeSha
  */
 
 /** Quota massima: sotto gli aerei (56) e sotto la camera che li insegue. */
-const MAX_ALTITUDE = 54.3;
+const MAX_ALTITUDE = 53.8;
 
 const FLOCKS = {
   gull: {
@@ -210,7 +210,9 @@ export class Birds {
         // Stormo raccolto: fasi vicine, così si inseguono invece di stare in cerchio.
         aParams.set([
           lead + (rand() - 0.5) * 1.8,
-          dirSign * omega * (0.9 + rand() * 0.2),
+          // Stessa velocità angolare per tutto lo stormo: con velocità diverse
+          // in pochi minuti si sparpaglierebbe lungo tutto l'anello.
+          dirSign * omega,
           cfg.size * (0.85 + rand() * 0.3),
           rand() * Math.PI * 2,
         ], i * 4);

@@ -62,3 +62,37 @@ export function offsetDir(center, u, v, a, rho, out) {
     .addScaledVector(v, Math.sin(a) * s)
     .normalize();
 }
+
+/**
+ * Lambert con colori per vertice e lampade che si accendono al buio (fari,
+ * lampioni). L'attributo `aGlow` è la soglia di accensione del vertice:
+ * 0 = non è una lampada, 0.01 = si accende per prima. Confrontata con
+ * `uLampOn` (0..1) fa accendere le lampade una alla volta invece che tutte
+ * insieme. È solo emissione aggiunta, nessuna luce vera.
+ *
+ * @param {{value:number}} onUniform  uniform 0..1 del chiamante
+ * @param {THREE.Color} color         colore (HDR) della lampada accesa
+ */
+export function lampLambertMaterial(onUniform, color) {
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+  const uColor = { value: color };
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uLampOn = onUniform;
+    shader.uniforms.uLampColor = uColor;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aGlow;\nvarying float vGlow;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uLampOn;\nuniform vec3 uLampColor;\nvarying float vGlow;')
+      .replace('#include <emissivemap_fragment>', [
+        '#include <emissivemap_fragment>',
+        'float lampLit = vGlow > 0.0 ? smoothstep(vGlow, vGlow + 0.08, uLampOn) : 0.0;',
+        'totalEmissiveRadiance += uLampColor * lampLit;',
+      ].join('\n'));
+  };
+  // Senza chiave propria Three.js riuserebbe il programma di un altro Lambert
+  // con colori per vertice, senza la patch. Stessa chiave per tutti: il codice
+  // è identico, le uniform restano di ciascun materiale.
+  mat.customProgramCacheKey = () => 'lw-lamp';
+  return mat;
+}

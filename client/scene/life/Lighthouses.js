@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PLANET_RADIUS } from '../../../shared/planetField.js';
 import { sampleGround, makeSurfaceHit, fitGroundPlane, SEA_SURFACE_RADIUS } from '../planetSurface.js';
 import { BIOME, biomeAt } from '../planetBiomes.js';
-import { mulberry32, withLifeUniforms, nightRamp, tangentBasis, offsetDir } from './lifeShared.js';
+import { mulberry32, withLifeUniforms, nightRamp, tangentBasis, offsetDir, lampLambertMaterial } from './lifeShared.js';
 
 /**
  * Fari a strisce sui promontori, con due fasci che ruotano sul mare di notte.
@@ -81,7 +81,7 @@ function buildLighthouseGeometry() {
   }
   const yGallery = PLINTH_H + TOWER_H;
   cyl(0.4, 0.4, GALLERY_H, yGallery, dark);
-  cyl(0.19, 0.19, ROOM_H, yGallery + GALLERY_H, glass, 1);
+  cyl(0.19, 0.19, ROOM_H, yGallery + GALLERY_H, glass, 0.01);
   const dome = new THREE.ConeGeometry(0.27, DOME_H, 8, 1).toNonIndexed();
   dome.translate(0, yGallery + GALLERY_H + ROOM_H + DOME_H / 2, 0);
   parts.push(colorize(dome, red));
@@ -90,24 +90,6 @@ function buildLighthouseGeometry() {
   const merged = mergeGeometries(parts, false);
   for (const p of parts) p.dispose();
   return merged;
-}
-
-function createBodyMaterial(lamp) {
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
-  mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uLampOn = lamp.uLampOn;
-    shader.uniforms.uLampColor = lamp.uLampColor;
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aGlow;\nvarying float vGlow;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;');
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uLampOn;\nuniform vec3 uLampColor;\nvarying float vGlow;')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += uLampColor * vGlow * uLampOn;');
-  };
-  // Senza chiave propria Three.js riuserebbe il programma di un altro Lambert
-  // con colori per vertice, senza la patch.
-  mat.customProgramCacheKey = () => 'lw-lighthouse';
-  return mat;
 }
 
 // ── Fasci e alone ────────────────────────────────────────────────────────────
@@ -287,10 +269,7 @@ export class Lighthouses {
 
     // Corpi fusi in un'unica mesh, torre sempre verticale (radiale): un faro
     // inclinato come la faccia su cui poggia sembrerebbe cadere.
-    this.lamp = {
-      uLampOn: { value: 0 },
-      uLampColor: { value: new THREE.Color(1.0, 0.78, 0.4).multiplyScalar(2.2) },
-    };
+    this.lampOn = { value: 0 };
     const template = buildLighthouseGeometry();
     const pieces = [];
     const m = new THREE.Matrix4();
@@ -321,7 +300,7 @@ export class Lighthouses {
     if (pieces.length) {
       const geo = mergeGeometries(pieces, false);
       for (const p of pieces) p.dispose();
-      this.body = new THREE.Mesh(geo, createBodyMaterial(this.lamp));
+      this.body = new THREE.Mesh(geo, lampLambertMaterial(this.lampOn, new THREE.Color(1.0, 0.78, 0.4).multiplyScalar(2.2)));
       this.body.matrixAutoUpdate = false;
       this.group.add(this.body);
     }
@@ -359,7 +338,7 @@ export class Lighthouses {
   update(nightFactor) {
     if (!this.enabled) return;
     // La lanterna si accende al crepuscolo, i fasci solo a notte fatta.
-    this.lamp.uLampOn.value = nightRamp(nightFactor, 0.42, 0.7);
+    this.lampOn.value = nightRamp(nightFactor, 0.42, 0.7);
     const on = nightRamp(nightFactor, 0.5, 0.85);
     this.beamUniforms.uOn.value = on;
     this.beams.visible = on > 0.01 && this.sites.length > 0;
@@ -368,6 +347,6 @@ export class Lighthouses {
   setEnabled(on) {
     this.enabled = on;
     this.group.visible = on;
-    if (!on) this.lamp.uLampOn.value = 0;
+    if (!on) this.lampOn.value = 0;
   }
 }
