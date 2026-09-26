@@ -88,7 +88,7 @@ export class HUD {
     this._weaponBarShown = -1;
     this._boostActive = null;
     this._boostEmpty = null;
-    this._extremeState = '';
+    this._extremeState = null;
     this._shieldOn = null;
 
     this._toasts = [];
@@ -374,10 +374,11 @@ export class HUD {
     const el = this.el.extremeBoost;
     if (!el) return;
     const activeNow = timer > 0;
-    const state = activeNow ? `a${Math.ceil(timer)}` : (hasExtremeBoost ? 'r' : '');
+    // Secondi rimasti se attivo, -1 se pronto, 0 se assente: un numero, non una stringa per frame.
+    const state = activeNow ? Math.ceil(timer) : (hasExtremeBoost ? -1 : 0);
     if (state === this._extremeState) return;
     this._extremeState = state;
-    el.style.display = state ? '' : 'none';
+    el.style.display = state !== 0 ? '' : 'none';
     el.classList.toggle('hud-extreme--active', activeNow);
     el.classList.toggle('hud-extreme--ready', hasExtremeBoost && !activeNow);
     if (this.el.extremeLabel) this.el.extremeLabel.textContent = activeNow ? `${Math.ceil(timer)}s` : 'Boost+';
