@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { PLANET_RADIUS, elevationAt } from '../../shared/planetField.js';
 import { buildPlanetSurfaceIndex, SEA_SURFACE_RADIUS } from './planetSurface.js';
 import { faceColor, hash01 } from './planetBiomes.js';
+import { worldUniforms, patchWorldMaterial, CLOUD_SHADOW_GLSL, CLOUD_SHADOWS } from './worldShaders.js';
 
 /**
  * Pianeta low-poly: terreno, mare e atmosfera.
@@ -24,6 +25,11 @@ import { faceColor, hash01 } from './planetBiomes.js';
  * schiuma dove la profondità tende a zero (cioè esattamente sulla costa
  * disegnata) e ghiaccio vicino ai poli. Le facce interamente sopra la costa
  * non vengono create. L'illuminazione segue il ciclo giorno/notte.
+ * In qualità alta linee di schiuma corrono verso riva (anche questo solo da
+ * `aDepth`, niente texture).
+ *
+ * Terreno e mare ricevono le ombre delle nuvole, e il terreno gli aloni caldi
+ * dei paesi di notte: entrambi calcolati per vertice (worldShaders.js).
  */
 
 const DETAIL = 36;
@@ -95,6 +101,8 @@ const WATER_VERT = /* glsl */`
   varying vec3  vDir;
   varying float vDepth;
   varying float vIce;
+  varying float vCloudLit;
+  ${CLOUD_SHADOW_GLSL}
   #include <fog_pars_vertex>
 
   void main() {
@@ -113,6 +121,11 @@ const WATER_VERT = /* glsl */`
     vDir = dir;
     vDepth = aDepth;
     vIce = aIce;
+    #ifdef LW_CLOUDS
+      vCloudLit = lwCloudLight(dir);
+    #else
+      vCloudLit = 1.0;
+    #endif
     vec4 mvPosition = viewMatrix * wp;
     gl_Position = projectionMatrix * mvPosition;
     #include <fog_vertex>
@@ -132,6 +145,7 @@ const WATER_FRAG = /* glsl */`
   varying vec3  vDir;
   varying float vDepth;
   varying float vIce;
+  varying float vCloudLit;
   #include <fog_pars_fragment>
 
   void main() {
@@ -141,15 +155,21 @@ const WATER_FRAG = /* glsl */`
     if (dot(N, vDir) < 0.0) N = -N;
     vec3 V = normalize(cameraPosition - vWorldPos);
     float ndl = max(dot(N, uSunDir), 0.0);
-    vec3 light = uAmbient + uSunColor * ndl;
+    // Sotto una nuvola manca solo il sole: l'ambiente resta.
+    vec3 light = uAmbient + uSunColor * (ndl * vCloudLit);
 
     float depthT = smoothstep(0.05, 1.9, vDepth);
     vec3 col = mix(uShallow, uDeep, depthT) * light;
 
-    // Riflesso del sole: scintille sulle singole facce, non una macchia unica.
-    vec3 R = reflect(-uSunDir, N);
-    float spec = pow(max(dot(R, V), 0.0), 90.0);
-    col += uSunColor * smoothstep(0.25, 0.8, spec) * 0.35;
+    // Riflesso del sole. Calcolato sulla sola normale di faccia accendeva
+    // triangoli interi: attorno a un vertice sollevato dalle onde sei facce
+    // prendevano la stessa inclinazione e diventavano un esagono bianco pieno.
+    // Ora il lobo segue la normale liscia della sfera (una macchia rotonda e
+    // morbida) e la normale di faccia decide solo quanto scintilla ogni faccia
+    // dentro la macchia.
+    float sheen = pow(max(dot(reflect(-uSunDir, vDir), V), 0.0), 36.0);
+    float glint = pow(max(dot(reflect(-uSunDir, N), V), 0.0), 48.0);
+    float spec = sheen * (0.3 + 0.7 * glint);
 
     // Fresnel: ai bordi del pianeta l'acqua riflette il cielo.
     float fres = pow(1.0 - max(dot(N, V), 0.0), 4.0);
@@ -158,7 +178,29 @@ const WATER_FRAG = /* glsl */`
     // Schiuma sulla costa: una fascia che respira col tempo.
     float breathe = 0.5 + 0.5 * sin(uTime * 1.6 + dot(vDir, vec3(40.0, 23.0, 31.0)));
     float foam = 1.0 - smoothstep(0.015, 0.08 + 0.04 * breathe, vDepth);
+
+    #ifdef SHORE_WAVES
+      // Onde che corrono verso riva: linee a profondità costante che, col
+      // tempo, scivolano verso profondità minori, cioè verso la spiaggia, e si
+      // sciolgono nella risacca. vDepth è interpolato dentro triangoli da 1.4
+      // unità, quindi le linee sono isobate spezzate che ricalcano la costa.
+      // fwidth le allarga quanto un pixel e le spegne quando diventano più
+      // fitte dei pixel stessi (da lontano sfarfallerebbero).
+      float wt = vDepth * 4.5 + uTime * 0.4 + 0.35 * sin(dot(vDir, vec3(17.0, 11.0, 23.0)) + uTime * 0.3);
+      float fw = fwidth(wt);
+      float band = fract(wt);
+      float ring = smoothstep(0.80 - fw, 0.86, band) * (1.0 - smoothstep(0.9, 0.97 + fw, band));
+      // Ogni onda è spezzata in tratti di qualche unità, con un disegno suo
+      // (floor(wt) è costante lungo la cresta mentre avanza): continue,
+      // sembravano le curve di livello di una carta nautica.
+      float dash = smoothstep(-0.2, 0.5, sin(dot(vDir, vec3(37.0, 29.0, 41.0)) + floor(wt) * 2.1));
+      float reach = smoothstep(0.03, 0.1, vDepth) * (1.0 - smoothstep(0.1, 0.6, vDepth));
+      float waves = ring * dash * reach * (1.0 - smoothstep(0.25, 0.5, fw)) * (1.0 - vIce);
+      foam = max(foam, waves * 0.75);
+    #endif
+
     col = mix(col, uFoam * light, foam * 0.85);
+    col += uSunColor * (spec * 0.5 * vCloudLit * (1.0 - foam));
 
     // Banchisa polare.
     col = mix(col, uIce * light, vIce);
@@ -167,6 +209,11 @@ const WATER_FRAG = /* glsl */`
     alpha = max(alpha, max(foam * 0.9, vIce));
     alpha = min(1.0, alpha + fres * 0.1);
     gl_FragColor = vec4(col, alpha);
+    // Vuoti nel render target del composer (qualità alta). In bassa la scena
+    // va dritta a schermo e senza questi l'acqua usciva in lineare, senza
+    // tone mapping: più scura e satura di tutto il resto.
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
     #include <fog_fragment>
   }
 `;
@@ -210,21 +257,37 @@ function buildWaterGeometry(elevation) {
   return geo;
 }
 
-function createWaterMaterial() {
+/**
+ * @param {boolean} lowQuality  niente onde di riva (≈12 ALU per pixel d'acqua,
+ *        e l'acqua copre metà schermo); in bassa l'acqua è comunque ferma.
+ */
+function createWaterMaterial(lowQuality) {
+  const uniforms = THREE.UniformsUtils.merge([
+    THREE.UniformsLib.fog,
+    {
+      uTime:     { value: 0 },
+      uSunDir:   { value: new THREE.Vector3(1, 1, 1).normalize() },
+      uSunColor: { value: new THREE.Color(1, 1, 1) },
+      uAmbient:  { value: new THREE.Color(0.5, 0.5, 0.5) },
+      uShallow:  { value: new THREE.Color(0x46d3d8) },
+      uDeep:     { value: new THREE.Color(0x2272c4) },
+      uFoam:     { value: new THREE.Color(0xf4fbff) },
+      uIce:      { value: new THREE.Color(0xe6f2fb) },
+    },
+  ]);
+  // Dopo il merge, che clona: le ombre delle nuvole devono restare gli stessi
+  // oggetti di worldUniforms, aggiornati una volta per frame da CloudShadows.
+  const defines = {};
+  if (CLOUD_SHADOWS) {
+    defines.LW_CLOUDS = '';
+    uniforms.uCloudA = worldUniforms.uCloudA;
+    uniforms.uCloudB = worldUniforms.uCloudB;
+    uniforms.uCloudK = worldUniforms.uCloudK;
+  }
+  if (!lowQuality) defines.SHORE_WAVES = '';
   return new THREE.ShaderMaterial({
-    uniforms: THREE.UniformsUtils.merge([
-      THREE.UniformsLib.fog,
-      {
-        uTime:     { value: 0 },
-        uSunDir:   { value: new THREE.Vector3(1, 1, 1).normalize() },
-        uSunColor: { value: new THREE.Color(1, 1, 1) },
-        uAmbient:  { value: new THREE.Color(0.5, 0.5, 0.5) },
-        uShallow:  { value: new THREE.Color(0x46d3d8) },
-        uDeep:     { value: new THREE.Color(0x2272c4) },
-        uFoam:     { value: new THREE.Color(0xf4fbff) },
-        uIce:      { value: new THREE.Color(0xe6f2fb) },
-      },
-    ]),
+    uniforms,
+    defines,
     vertexShader: WATER_VERT,
     fragmentShader: WATER_FRAG,
     transparent: true,
@@ -296,12 +359,14 @@ export function createPlanet(scene, options = {}) {
   // qualcosa sul terreno interroga la superficie vera, non il campo analitico.
   buildPlanetSurfaceIndex(geo);
 
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  // Ombre delle nuvole e aloni dei paesi: per vertice, nessun costo per pixel
+  // oltre a una moltiplicazione (vedi worldShaders.js).
+  const mat = patchWorldMaterial(new THREE.MeshLambertMaterial({ vertexColors: true }), { clouds: true, glow: true });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.matrixAutoUpdate = false;
   scene.add(mesh);
 
-  const waterMat = createWaterMaterial();
+  const waterMat = createWaterMaterial(lowQuality);
   const water = new THREE.Mesh(buildWaterGeometry(elevation), waterMat);
   water.renderOrder = 1;
   water.matrixAutoUpdate = false;

@@ -54,6 +54,9 @@ import { shotHeadingOffsets } from '../shared/projectile.js';
 // [hook:imports:aircraft]
 
 // [hook:imports:terrain]
+import { NightLights } from './scene/NightLights.js';
+import { CloudShadows } from './scene/CloudShadows.js';
+import { worldUniforms } from './scene/worldShaders.js';
 
 // [hook:imports:life]
 
@@ -348,6 +351,29 @@ const planeShadows = new PlaneShadows(scene);
 // [hook:init:aircraft]
 
 // [hook:init:terrain]
+// Mondo vivo: finestre e aloni dei paesi di notte, ombre delle nuvole, vento
+// sugli alberi. Tutto dentro i materiali che esistono già (worldShaders.js):
+// nessuna draw call e nessuna luce in più.
+const nightLights = new NightLights();
+const cloudShadows = new CloudShadows(sky.cloudRoot);
+perfProbe.scenarios.push(
+  {
+    label: 'ombre delle nuvole',
+    off() { cloudShadows.paused = true; },
+    on()  { cloudShadows.paused = false; },
+  },
+  {
+    label: 'vento sugli alberi',
+    off() { worldUniforms.uWindAmp.value = 0; },
+    on()  { worldUniforms.uWindAmp.value = 1; },
+  },
+  {
+    // Di giorno sono già spente: ha senso misurarle solo di notte.
+    label: 'luci notturne (finestre, aloni)',
+    off() { nightLights.paused = true; },
+    on()  { nightLights.paused = false; },
+  },
+);
 
 // [hook:init:life]
 
@@ -370,6 +396,8 @@ const worldReady = Promise.all([
   // [hook:world-ready:aircraft]
 
   // [hook:world-ready:terrain]
+  nightLights.setTerrain(terrainGroup);
+  if (import.meta.env?.DEV && window.__lwDebug) window.__lwDebug.worldUniforms = worldUniforms;
 
   // [hook:world-ready:life]
 
@@ -1342,6 +1370,8 @@ function animate() {
   // [hook:frame:aircraft]
 
   // [hook:frame:terrain]
+  nightLights.update(delta, nightFactor);
+  cloudShadows.update(camera.position, lights.sun.position);
 
   // [hook:frame:life]
 
