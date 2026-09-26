@@ -46,14 +46,9 @@ import {
 } from '../shared/constants.js';
 import { shotHeadingOffsets } from '../shared/projectile.js';
 
-// Punti di aggancio per i pacchetti di lavoro paralleli: ognuno aggiunge il
-// proprio codice subito dopo il PROPRIO segnaposto, così i merge non si
-// pestano i piedi. Verranno tolti a integrazione finita.
-// [hook:imports:render]
 import { BloomOnlyPass, GradePass, ScreenEffects } from './scene/PostFX.js';
 import { excludeAdditiveFromFog } from './scene/Lighting.js';
 
-// [hook:imports:aircraft]
 import { RESPAWN_DELAY } from '../shared/constants.js';
 import { createAirplaneWarmupMesh } from './entities/Airplane.js';
 import { setSalvoListener } from './entities/Projectile.js';
@@ -65,15 +60,12 @@ import { setGlowViewportHeight } from './entities/glowSprite.js';
 import { tickAirplaneLook } from './entities/airplaneLook.js';
 import { NearMissFlash } from './ui/NearMissFlash.js';
 
-// [hook:imports:terrain]
 import { NightLights } from './scene/NightLights.js';
 import { CloudShadows } from './scene/CloudShadows.js';
 import { worldUniforms } from './scene/worldShaders.js';
 
-// [hook:imports:life]
 import { WorldLife } from './scene/life/WorldLife.js';
 
-// [hook:imports:objectives]
 import {
   initObjectiveFx, objectiveFxRoot, tickObjectiveTime, endObjectiveFx, precompileObjectives,
 } from './entities/ObjectiveFx.js';
@@ -82,7 +74,6 @@ import { initTargetFx } from './entities/Target.js';
 import { createBuildingPrototypes } from './entities/Building.js';
 import { createPowerupPrototypes, preloadPowerupModels } from './entities/PowerUp.js';
 
-// [hook:imports:ui]
 import { LobbyAttract } from './ui/LobbyAttract.js';
 
 /** Distanza 3D tra due punti sferici allo stesso raggio — stessa formula del server. */
@@ -437,13 +428,13 @@ initExplosionPool(scene);
 initTurretEffects(scene);
 const planeShadows = new PlaneShadows(scene);
 
-// [hook:init:render]
+// Rendering (post-processing, cielo, nebbia)
 /** Effetti a schermo di gioco (turbo, morte, scudo perso): vedi scene/PostFX.js. */
 const screenFx = new ScreenEffects({ gradePass, lowQuality: LOW_POWER_DEFAULTS });
 /** Stato letto a ogni frame per gli effetti, riusato: niente allocazioni. */
 const _fxState = { active: false, alive: true, boost: false, extreme: false, shield: false };
 
-// [hook:init:aircraft]
+// Aerei (scie, effetti, camera)
 // Effetti degli aerei (scie, luci di navigazione, vampate, anelli di comparsa,
 // schegge dello scudo, rottami, linee di velocità): tutti in pool fissi e in
 // scena da subito, così la pre-compilazione ne compila gli shader in lobby.
@@ -486,7 +477,7 @@ setSalvoListener((o) => {
   plane?.flashMuzzle(o.headings.length);
 });
 
-// [hook:init:terrain]
+// Mondo (luci notturne, ombre delle nuvole)
 // Mondo vivo: finestre e aloni dei paesi di notte, ombre delle nuvole, vento
 // sugli alberi. Tutto dentro i materiali che esistono già (worldShaders.js):
 // nessuna draw call e nessuna luce in più.
@@ -511,21 +502,21 @@ perfProbe.scenarios.push(
   },
 );
 
-// [hook:init:life]
+// Vita del mondo
 // Barche e aurora dipendono solo dal pianeta; stormi, fari, fumo e sentieri
 // aspettano il terreno (world-ready). Tutto entra in scena prima di warmupShaders.
 const worldLife = new WorldLife(scene, { lowQuality: LOW_POWER_DEFAULTS });
 perfProbe.scenarios.push(...worldLife.probeScenarios());
 if (import.meta.env?.DEV) window.__lwLife = worldLife;
 
-// [hook:init:objectives]
+// Obiettivi
 // Effetti di obiettivi, bombe e bersaglio: InstancedMesh create ora, così i
 // loro shader rientrano nella pre-compilazione (vedi ObjectiveFx.js).
 initObjectiveFx(scene, { lowQuality: LOW_POWER_DEFAULTS });
 initBombFx(objectiveFxRoot());
 initTargetFx(objectiveFxRoot());
 
-// [hook:init:ui]
+// Interfaccia (lobby dal vivo, HUD)
 /** Lobby dal vivo: pianeta in orbita e aereo dimostrativo (ui/LobbyAttract.js). */
 const lobbyAttract = new LobbyAttract({
   scene,
@@ -560,25 +551,25 @@ const worldReady = Promise.all([
 ]).then(([treeTemplates, buildingTemplates, hospitalTemplates]) => {
   terrainGroup = createTerrain(scene, treeTemplates, buildingTemplates, hospitalTemplates);
 
-  // [hook:world-ready:render]
+  // Rendering (post-processing, cielo, nebbia)
   // Prima della pre-compilazione: la nebbia ora è attiva e sui materiali
   // additivi farebbe aloni (vedi Lighting.js).
   excludeAdditiveFromFog(scene);
   if (import.meta.env?.DEV && window.__lwDebug) window.__lwDebug.postFx = screenFx;
 
-  // [hook:world-ready:aircraft]
+  // Aerei (scie, effetti, camera)
   // Aereo invisibile con gli stessi materiali di quelli veri: rim, scudo,
   // disco dell'elica e particelle turbo si compilano con la pre-compilazione.
   scene.add(createAirplaneWarmupMesh());
 
-  // [hook:world-ready:terrain]
+  // Mondo (luci notturne, ombre delle nuvole)
   nightLights.setTerrain(terrainGroup);
   if (import.meta.env?.DEV && window.__lwDebug) window.__lwDebug.worldUniforms = worldUniforms;
 
-  // [hook:world-ready:life]
+  // Vita del mondo
   worldLife.onWorldReady(terrainGroup, { houseTemplate: buildingTemplates[0] ?? null });
 
-  // [hook:world-ready:objectives]
+  // Obiettivi
   // Copie nascoste di avamposto, torretta conquistata e powerup: i loro
   // programmi si compilano ora, in lobby, e non alla prima conquista. Restano
   // nella scena invisibili (costo nullo: il render scarta i rami nascosti).
@@ -600,7 +591,7 @@ const worldReady = Promise.all([
     });
   }
 
-  // [hook:world-ready:ui]
+  // Interfaccia (lobby dal vivo, HUD)
   // Mondo pronto: la lobby toglie la copertura e inizia a disegnare il pianeta.
   // Gli shader si compilano già qui, mentre si sceglie il nickname, invece che
   // al click su GIOCA (warmupShaders parte dopo che questa callback è finita,
@@ -1727,7 +1718,7 @@ function animate() {
     be.tick(delta, nightFactor, camera);
   }
 
-  // [hook:frame:render]
+  // Rendering (post-processing, cielo, nebbia)
   // Disco del sole, bagliore e nebbia li orienta il cielo da sé sulla camera
   // che lo disegna (Sky.js, onBeforeRender); qui esposizione e grading.
   renderer.toneMappingExposure = sky.exposure;
@@ -1740,7 +1731,7 @@ function animate() {
   _fxState.shield = !!localState?.hasShield;
   screenFx.update(delta, _fxState);
 
-  // [hook:frame:aircraft]
+  // Aerei (scie, effetti, camera)
   // Da morti la camera orbita sull'esplosione e cerca chi ha sparato.
   if (inGame && !isAlive) {
     camCtrl.updateDeath(delta);
@@ -1753,14 +1744,14 @@ function animate() {
   aircraftFx.tick(delta);
   wreckage.tick(delta);
 
-  // [hook:frame:terrain]
+  // Mondo (luci notturne, ombre delle nuvole)
   nightLights.update(delta, nightFactor);
   cloudShadows.update(camera.position, lights.sun.position);
 
-  // [hook:frame:life]
+  // Vita del mondo
   worldLife.update(delta, nightFactor, lights);
 
-  // [hook:frame:objectives]
+  // Obiettivi
   tickObjectiveTime(delta);
   // Mirino di sgancio: solo con la bomba pronta e un obiettivo vicino.
   if (inGame && isAlive && localAirplane && now - lastBombTime > BOMB_COOLDOWN) {
@@ -1769,7 +1760,7 @@ function animate() {
   tickBombFx(delta);
   endObjectiveFx(delta, camera);
 
-  // [hook:frame:ui]
+  // Interfaccia (lobby dal vivo, HUD)
   if (inGame !== _uiWasInGame) {
     _uiWasInGame = inGame;
     if (inGame) {
