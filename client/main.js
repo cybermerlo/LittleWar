@@ -235,6 +235,18 @@ gradePass.enabled = !LOW_POWER_DEFAULTS;
 gradePass.setFxaa(!LOW_POWER_DEFAULTS && MSAA_SAMPLES === 0);
 composer.addPass(gradePass);
 
+/**
+ * Render target in cui disegna davvero la RenderPass, per le pre-compilazioni:
+ * tone mapping e spazio colore fanno parte della chiave del programma. Non si
+ * legge `renderPass.renderToScreen`, che imposta solo `composer.render()`: le
+ * pre-compilazioni partono prima del primo frame, e in bassa (bloom e grade
+ * spenti, la RenderPass disegna a schermo) preparavano le varianti per il
+ * target del composer, mai usate — tutto si ricompilava in partita.
+ */
+function sceneRenderTarget() {
+  return composer.renderToScreen && composer.isLastEnabledPass(0) ? null : composer.readBuffer;
+}
+
 
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -578,9 +590,7 @@ const worldReady = Promise.all([
     scene.add(protos);
     // Stesso render target della RenderPass: tone mapping e spazio colore
     // fanno parte della chiave del programma.
-    const rp = composer.passes[0];
-    precompileObjectives(renderer, scene, camera, [objectiveFxRoot(), protos],
-      rp?.renderToScreen ? null : composer.readBuffer);
+    precompileObjectives(renderer, scene, camera, [objectiveFxRoot(), protos], sceneRenderTarget());
   });
   if (import.meta.env?.DEV && window.__lwDebug) {
     // Per le verifiche visive degli obiettivi (solo sviluppo).
@@ -619,12 +629,12 @@ function warmupShaders() {
   return worldReady
     .then(() => {
       // Tone mapping e spazio colore fanno parte della chiave del programma e
-      // `compile` li ricava dal render target corrente: compilando a schermo
-      // si preparavano le varianti sbagliate (sRGB + ACES) e quelle vere, per
-      // il render target del composer, nascevano al primo uso in partita.
-      const rp = composer.passes[0];
+      // `compile` li ricava dal render target corrente: va compilato per il
+      // target in cui disegna la RenderPass (quello del composer in alta, lo
+      // schermo in bassa), altrimenti le varianti vere nascono al primo uso
+      // in partita.
       const prev = renderer.getRenderTarget();
-      renderer.setRenderTarget(rp?.renderToScreen ? null : composer.readBuffer);
+      renderer.setRenderTarget(sceneRenderTarget());
       try {
         if (typeof renderer.compileAsync === 'function') return renderer.compileAsync(scene, camera);
         renderer.compile(scene, camera);
@@ -695,6 +705,8 @@ let localPlayerId = null;
 let localState    = null;        // stato locale del nostro giocatore
 let isAlive       = true;
 let inGame        = false;
+/** Ultima partita avviata in solo (il suo colore non conta tra gli occupati della lobby). */
+let sessionSolo   = false;
 
 // Theta/phi/heading locali (aggiornati ogni frame)
 let theta   = Math.PI / 2;
@@ -773,6 +785,31 @@ function pruneMissing(map, seen, onRemove) {
   }
 }
 
+/**
+ * Via le entità della sessione chiusa. In lobby il pianeta torna visibile e,
+ * senza più game-state, nessuno le potava: il segno d'impatto delle bombe
+ * lampeggiava per sempre, i powerup restavano in "scadenza" lampeggiante,
+ * torrette e bersaglio della sessione solo restavano sul pianeta e i
+ * proiettili in volo facevano ancora quasi-colpi sull'aereo nascosto.
+ * `onJoined` ricrea tutto dal payload d'ingresso.
+ */
+function clearSessionEntities() {
+  for (const e of bombEntities.values()) e.dispose(scene);
+  bombEntities.clear();
+  for (const e of powerupEntities.values()) e.dispose(scene);
+  powerupEntities.clear();
+  powerupPositions.clear();
+  powerupLastTryAt.clear();
+  targetEntity?.dispose(scene);
+  targetEntity = null;
+  currentTarget = null;
+  for (const e of buildingEntities.values()) e.dispose(scene);
+  buildingEntities.clear();
+  buildingStates = [];
+  projectiles.clear();
+  projectiles.listener = null;
+}
+
 // Throttle invio input (allineato al tick server)
 let lastInputSend = 0;
 
@@ -810,6 +847,7 @@ function _enterGame(nickname, color, model, solo = false) {
   warmupShaders();
   AudioManager.startMusic();
   AudioManager.startEngine();
+  sessionSolo = solo;
   if (solo) {
     net.joinSolo(nickname, color, model);
   } else {
@@ -837,8 +875,11 @@ const net = new NetworkManager({
     AudioManager.stopEngine();
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     death.hide();
+    // Il colore con cui si è volato torna selezionato (vedi LobbyScreen.reclaimColor).
+    if (inGame && localState?.color) lobby.reclaimColor(localState.color, { release: !sessionSolo });
     lobby.show();
     lobby.setMessage(voluntary ? '' : 'Disconnesso. Ricarica la pagina.');
+    clearSessionEntities();
     inGame = false;
     hud.hide();
     mobile?.hide();
@@ -874,6 +915,14 @@ const net = new NetworkManager({
     isAlive = true;
     death.hide();
     camCtrl.snap();
+    // L'aereo locale non sa cambiare colore: rientrando con un altro colore si
+    // volava col vecchio (mentre server, altri client e rottami usavano il
+    // nuovo). Se ne crea uno nuovo qui sotto; stessi materiali, e le luci
+    // tornano al pool.
+    if (localAirplane && localState && localAirplane.color !== localState.color) {
+      localAirplane.dispose(scene);
+      localAirplane = null;
+    }
     localAirplane?.revive(0);
 
     if (localState) {
@@ -881,6 +930,10 @@ const net = new NetworkManager({
       phi     = localState.phi;
       heading = localState.heading;
       boostEnergy = typeof localState.boostEnergy === 'number' ? localState.boostEnergy : BOOST_MAX;
+      // Creato qui e non a metà frame in animate(): il modello GLB si aggancia
+      // in un microtask, che così arriva prima del prossimo render. Altrimenti
+      // il primo frame disegnava il sostituto procedurale e ne compilava lo shader.
+      ensureLocalAirplane(localState.color ?? '#ff4444', localState.model ?? 'airplane');
     }
 
     // Cleanup di entità eventualmente già create da game-state ricevuti prima
