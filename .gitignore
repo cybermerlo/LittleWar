@@ -9,3 +9,6 @@ Thumbs.db
 
 # Output degli screenshot di verifica (tests/visual-ground-check.mjs)
 tests/out/
+
+# Worktree temporanee degli agenti (lavoro in parallelo)
+.claude/worktrees/
