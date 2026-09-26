@@ -71,6 +71,7 @@ import { CloudShadows } from './scene/CloudShadows.js';
 import { worldUniforms } from './scene/worldShaders.js';
 
 // [hook:imports:life]
+import { WorldLife } from './scene/life/WorldLife.js';
 
 // [hook:imports:objectives]
 import {
@@ -500,6 +501,11 @@ perfProbe.scenarios.push(
 );
 
 // [hook:init:life]
+// Barche e aurora dipendono solo dal pianeta; stormi, fari, fumo e sentieri
+// aspettano il terreno (world-ready). Tutto entra in scena prima di warmupShaders.
+const worldLife = new WorldLife(scene, { lowQuality: LOW_POWER_DEFAULTS });
+perfProbe.scenarios.push(...worldLife.probeScenarios());
+if (import.meta.env?.DEV) window.__lwLife = worldLife;
 
 // [hook:init:objectives]
 // Effetti di obiettivi, bombe e bersaglio: InstancedMesh create ora, così i
@@ -536,6 +542,7 @@ const worldReady = Promise.all([
   if (import.meta.env?.DEV && window.__lwDebug) window.__lwDebug.worldUniforms = worldUniforms;
 
   // [hook:world-ready:life]
+  worldLife.onWorldReady(terrainGroup, { houseTemplate: buildingTemplates[0] ?? null });
 
   // [hook:world-ready:objectives]
   // Copie nascoste di avamposto, torretta conquistata e powerup: i loro
@@ -1633,6 +1640,7 @@ function animate() {
   cloudShadows.update(camera.position, lights.sun.position);
 
   // [hook:frame:life]
+  worldLife.update(delta, nightFactor, lights);
 
   // [hook:frame:objectives]
   tickObjectiveTime(delta);
