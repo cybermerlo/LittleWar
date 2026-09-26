@@ -166,6 +166,7 @@ export class HudMarkers {
   constructor() {
     this.root = document.getElementById('hud-markers');
     this._frame = makeFlightFrame();
+    this._camFrame = makeFlightFrame();
     this._frameNo = 0;
     this._slots = [];
     this._slotById = new Map();
@@ -213,8 +214,12 @@ export class HudMarkers {
     else _localPos.set(f.px * FLY_ALTITUDE, f.py * FLY_ALTITUDE, f.pz * FLY_ALTITUDE);
     this._updateEllipse(W, H);
     this._edgeN = 0;
+    // Da morti (resta la freccia di chi ci ha abbattuto) la rotta congelata
+    // non vuol dire più nulla: la camera orbita attorno al relitto e si gira
+    // verso il killer, quindi "davanti" è dove guarda lei.
+    let ef = f;
     if (frame.alive) this._computeAhead(camera, W, H, f);
-    else { this._aheadX = 0; this._aheadY = -1; }
+    else ef = this._cameraFrame(camera);
 
     // Candidati: nemici vivi e disegnati, ordinati per distanza (≤ 9, a inserimento).
     let n = 0;
@@ -252,7 +257,7 @@ export class HudMarkers {
         this._slotById.set(c.id, m);
       }
       m.seen = this._frameNo;
-      this._placePlane(m, c, r, frame, camera, W, H, now, f);
+      this._placePlane(m, c, r, frame, camera, W, H, now, ef);
     }
 
     // Slot non più usati (morto, uscito): nascosti e liberati.
@@ -263,7 +268,7 @@ export class HudMarkers {
       }
     }
 
-    this._placeTarget(target, frame, camera, W, H, now, f);
+    this._placeTarget(target, frame, camera, W, H, now, ef);
     this._layoutEdges(W, H);
   }
 
@@ -369,6 +374,39 @@ export class HudMarkers {
   }
 
   /**
+   * Terna "di volo" della camera, per le frecce da morti: P sotto la camera,
+   * D = dove guarda, portato sul piano tangente, R = D × P come in
+   * fillFlightFrame. La direzione "davanti" a schermo è quella di D vista
+   * dalla camera, così un eventuale rollio è compreso.
+   */
+  _cameraFrame(camera) {
+    const e = camera.matrixWorld.elements;
+    const f = this._camFrame;
+    const pl = Math.hypot(e[12], e[13], e[14]) || 1;
+    f.px = e[12] / pl; f.py = e[13] / pl; f.pz = e[14] / pl;
+    // Avanti della camera (−Z); se guarda in verticale, il suo "su" (+Y).
+    let dx = -e[8], dy = -e[9], dz = -e[10];
+    let k = dx * f.px + dy * f.py + dz * f.pz;
+    if (1 - Math.abs(k) < 1e-4) {
+      dx = e[4]; dy = e[5]; dz = e[6];
+      k = dx * f.px + dy * f.py + dz * f.pz;
+    }
+    dx -= k * f.px; dy -= k * f.py; dz -= k * f.pz;
+    const dl = Math.hypot(dx, dy, dz) || 1;
+    f.dx = dx / dl; f.dy = dy / dl; f.dz = dz / dl;
+    f.rx = f.dy * f.pz - f.dz * f.py;
+    f.ry = f.dz * f.px - f.dx * f.pz;
+    f.rz = f.dx * f.py - f.dy * f.px;
+    // D nello spazio camera: x lungo la destra (+X), y lungo il su (+Y).
+    const sx = f.dx * e[0] + f.dy * e[1] + f.dz * e[2];
+    const sy = -(f.dx * e[4] + f.dy * e[5] + f.dz * e[6]);
+    const sl = Math.hypot(sx, sy);
+    if (sl > 1e-4) { this._aheadX = sx / sl; this._aheadY = sy / sl; }
+    else { this._aheadX = 0; this._aheadY = -1; }
+    return f;
+  }
+
+  /**
    * Freccia verso dove virare: la rotta relativa del bersaglio (0 = dritto,
    * positiva = a destra, ±π = alle spalle) applicata alla direzione "davanti"
    * dello schermo. Su = dritto, destra = vira a destra, giù = alle spalle.
@@ -420,8 +458,13 @@ export class HudMarkers {
     this._lastW = W;
     this._lastH = H;
     this._isMobile = document.body.classList.contains('is-mobile');
-    const insetX = this._isMobile ? Math.min(200, W * 0.24) : Math.min(250, W * 0.2);
-    const insetY = this._isMobile ? 62 : 96;
+    // Su telefono joystick e tasti bomba/boost arrivano all'altezza del
+    // mirino e occupano ~170 px per lato: con W * 0.24 (136 px a 568 di
+    // larghezza) le frecce laterali ci finivano sopra. In basso la fila delle
+    // pillole è alta ~50 px, e sotto la freccia più bassa (badge di 30 px) c'è
+    // la distanza, fino a 48 px più giù: con 62 finiva sull'arma e sul boost.
+    const insetX = this._isMobile ? 200 : Math.min(250, W * 0.2);
+    const insetY = this._isMobile ? 100 : 96;
     this._ax = Math.max(60, W * 0.5 - insetX);
     this._ay = Math.max(60, H * 0.5 - insetY);
     // Cambio di layout: le etichette vanno riscritte (nome intero o iniziale).
