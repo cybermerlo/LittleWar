@@ -843,6 +843,7 @@ export function createTerrain(scene, treeTemplates = [], buildingTemplates = [],
         position: obj.position.clone(),
         up: new THREE.Vector3(0, 1, 0).applyQuaternion(obj.quaternion),
         size: footprint,
+        height: obj.userData.height,
         kind,
         quaternion: obj.quaternion.clone(),
         scale: obj.scale.x,
@@ -924,7 +925,7 @@ export function createTerrain(scene, treeTemplates = [], buildingTemplates = [],
     tree.userData.kind = 'tree';
     tree.userData.sway = { h: tree.userData.height, k: rule.kind === 'pine' ? 0.6 : 1, phase: hash01(trees + 7919) * Math.PI * 2 };
     terrainGroup.add(tree);
-    placedTrees.push({ dir: dir.clone(), footprintRadius: fp });
+    placedTrees.push({ dir: dir.clone(), footprintRadius: fp, position: tree.position.clone(), height: tree.userData.height });
     recordPlacement('tree', tree);
     trees++;
     return true;
@@ -943,11 +944,13 @@ export function createTerrain(scene, treeTemplates = [], buildingTemplates = [],
   if (import.meta.env?.DEV) console.log('[terrain]', JSON.stringify({ towns: towns.length, buildings: placedBuildings.length, trees }));
   mergeStaticTerrain(terrainGroup);
   terrainGroup.userData.isTerrainGroup = true;
-  // Per chi decora il mondo dopo la costruzione (luci notturne, fumo, fari…):
-  // centri dei paesi (direzioni unitarie) ed edifici piazzati (posizione world,
-  // verticale locale, raggio d'impronta, 'house' | 'hospital').
+  // Per chi decora il mondo dopo la costruzione (luci notturne, fumo, fari,
+  // stormi…): centri dei paesi (direzioni unitarie), edifici piazzati
+  // (posizione world della base, verticale locale, raggio d'impronta, altezza,
+  // 'house' | 'hospital') e alberi (base, altezza, impronta).
   terrainGroup.userData.towns = towns.map((t) => t.clone());
-  terrainGroup.userData.buildings = placedBuildings.map(({ position, up, size, kind, quaternion, scale }) => ({ position, up, size, kind, quaternion, scale }));
+  terrainGroup.userData.buildings = placedBuildings.map(({ position, up, size, height, kind, quaternion, scale }) => ({ position, up, size, height, kind, quaternion, scale }));
+  terrainGroup.userData.trees = placedTrees.map(({ position, height, footprintRadius }) => ({ position, height, size: footprintRadius }));
   terrainGroup.userData.placements = placements;
   scene.add(terrainGroup);
   return terrainGroup;

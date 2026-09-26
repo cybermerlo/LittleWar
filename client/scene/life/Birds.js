@@ -15,10 +15,21 @@ import { mulberry32, withLifeUniforms, tangentBasis, offsetDir } from './lifeSha
  *
  * Di notte gli uccelli "vanno a dormire": scendono di quota e rimpiccioliscono
  * fino a triangoli degeneri (zero pixel), poi la mesh viene nascosta.
+ *
+ * Quota di ogni orbita: `lift` sopra il terreno più alto sotto l'anello e
+ * `clear` sopra il tetto o la chioma più alti (edifici e alberi del terreno).
+ * `clear` copre scarto del singolo uccello (±0.4), ondeggio (±0.45) e mezza
+ * ala inclinata in virata: prima contava solo il terreno e le rondini
+ * entravano e uscivano dal tetto dell'ospedale. Un sito che non ci sta sotto
+ * `MAX_ALTITUDE` (una collina alta nell'anello) viene scartato, non schiacciato.
  */
 
-/** Quota massima: sotto gli aerei (56) e sotto la camera che li insegue. */
-const MAX_ALTITUDE = 53.8;
+/**
+ * Quota massima del centro dell'orbita: con ondeggio, scarto e ali il punto
+ * più alto di uno stormo resta sotto ~55.4, cioè sotto gli aerei (56) e sotto
+ * la camera che li insegue.
+ */
+const MAX_ALTITUDE = 54.0;
 
 const FLOCKS = {
   gull: {
@@ -26,7 +37,8 @@ const FLOCKS = {
     radius: 3.4,        // unità mondo dell'orbita
     speed: 2.4,         // unità/s
     size: 1.0,
-    lift: 2.2,          // sopra il punto più alto sotto l'orbita
+    lift: 2.2,          // sopra il terreno più alto sotto l'orbita
+    clear: 1.45,        // sopra il tetto/la chioma più alti sotto l'orbita
     birds: [7, 5],      // [alta, bassa]
   },
   swallow: {
@@ -35,6 +47,7 @@ const FLOCKS = {
     speed: 3.6,
     size: 0.72,
     lift: 1.6,
+    clear: 1.25,
     birds: [9, 6],
   },
 };
@@ -44,6 +57,7 @@ const BIRD_VERT = /* glsl */`
   attribute vec4 aAxis;     // xyz asse tangente di riferimento, w quota dell'orbita
   attribute vec4 aParams;   // x fase, y velocità angolare (con segno), z scala, w fase del battito
   attribute vec3 aColor;
+  attribute float aSink;    // discesa massima al tramonto (resta sopra tetti e terreno)
   attribute float aShade;   // per vertice: punte delle ali più scure
   uniform float uTime;
   uniform float uFade;
@@ -63,7 +77,7 @@ const BIRD_VERT = /* glsl */`
     float rho = aCenter.w * (1.0 + 0.2 * sin(uTime * 0.37 + ph * 2.3));
     vec3 radial = U * cos(a) + V * sin(a);
     vec3 up = normalize(C * cos(rho) + radial * sin(rho));
-    float alt = aAxis.w + 0.45 * sin(uTime * 0.8 + ph * 5.0) - (1.0 - uFade) * 1.5;
+    float alt = aAxis.w + 0.45 * sin(uTime * 0.8 + ph * 5.0) - (1.0 - uFade) * aSink;
     vec3 fwd = (V * cos(a) - U * sin(a)) * sign(aParams.y);
     fwd = normalize(fwd - up * dot(fwd, up));
     vec3 right = cross(fwd, up);
@@ -134,17 +148,30 @@ const _u = new THREE.Vector3();
 const _v = new THREE.Vector3();
 const _probe = new THREE.Vector3();
 
-/** Quota di sicurezza per un'orbita: il punto più alto del terreno sotto di essa. */
-function orbitAltitude(center, rho, lift) {
+/**
+ * Quota di un'orbita (vedi in testa) e il punto più alto sotto di essa, o
+ * null se l'orbita non ci sta sotto MAX_ALTITUDE.
+ * @param {{position:THREE.Vector3, height:number, size:number}[]} obstacles
+ */
+function orbitAltitude(center, rho, cfg, obstacles) {
   tangentBasis(center, _u, _v);
-  let top = Math.max(SEA_SURFACE_RADIUS, sampleGround(center, _hit).radius);
+  let ground = Math.max(SEA_SURFACE_RADIUS, sampleGround(center, _hit).radius);
   for (let k = 0; k < 24; k++) {
     for (const f of [0.7, 1.0, 1.3]) {
       offsetDir(center, _u, _v, (k / 24) * Math.PI * 2, rho * f, _probe);
-      top = Math.max(top, sampleGround(_probe, _hit).radius);
+      ground = Math.max(ground, sampleGround(_probe, _hit).radius);
     }
   }
-  return Math.min(MAX_ALTITUDE, top + lift);
+  // Gli uccelli girano fra 0.64 e 1.44 volte `rho` (raggio del singolo
+  // 0.8–1.2, respiro dell'orbita 0.8–1.2): conta ciò che tocca quell'anello.
+  let roof = 0;
+  for (const o of obstacles) {
+    if (center.angleTo(o.position) < rho * 1.5 + o.size / PLANET_RADIUS) {
+      roof = Math.max(roof, o.position.length() + o.height);
+    }
+  }
+  const alt = Math.max(ground + cfg.lift, roof + cfg.clear);
+  return alt > MAX_ALTITUDE ? null : { alt, top: Math.max(ground, roof) };
 }
 
 /** Sito per i gabbiani: terra bassa con il mare a pochi passi. */
@@ -163,28 +190,37 @@ function isCoastSite(dir) {
 export class Birds {
   /**
    * @param {THREE.Scene} scene
-   * @param {{towns?: THREE.Vector3[], lowQuality?: boolean}} [options]
+   * @param {{towns?: THREE.Vector3[], obstacles?: {position:THREE.Vector3, height:number, size:number}[],
+   *          lowQuality?: boolean}} [options]  obstacles: edifici e alberi del terreno
    */
-  constructor(scene, { towns = [], lowQuality = false } = {}) {
+  constructor(scene, { towns = [], obstacles = [], lowQuality = false } = {}) {
     this.enabled = true;
     const rand = mulberry32(4242);
     const q = lowQuality ? 1 : 0;
 
     const sites = [];
+    const site = (kind, center) => {
+      const orbit = orbitAltitude(center, FLOCKS[kind].radius / PLANET_RADIUS, FLOCKS[kind], obstacles);
+      if (orbit) sites.push({ kind, center: center.clone(), ...orbit });
+      return !!orbit;
+    };
     // Gabbiani sulle coste.
     const gullFlocks = lowQuality ? 1 : 3;
     const dir = new THREE.Vector3();
-    for (let attempt = 0; attempt < 3000 && sites.filter((s) => s.kind === 'gull').length < gullFlocks; attempt++) {
+    for (let attempt = 0, n = 0; attempt < 3000 && n < gullFlocks; attempt++) {
       dir.set(rand() * 2 - 1, rand() * 2 - 1, rand() * 2 - 1);
       if (dir.lengthSq() < 1e-4 || dir.lengthSq() > 1) continue;
       dir.normalize();
       if (sites.some((s) => s.center.angleTo(dir) < 0.5)) continue;
       if (!isCoastSite(dir)) continue;
-      sites.push({ kind: 'gull', center: dir.clone() });
+      if (site('gull', dir)) n++;
     }
-    // Rondini sopra i paesi (i primi, già sparsi sul pianeta).
+    // Rondini sopra i paesi (i primi, già sparsi sul pianeta) che le lasciano
+    // girare sopra i tetti restando sotto gli aerei.
     const swallowFlocks = lowQuality ? 1 : 3;
-    for (const t of towns.slice(0, swallowFlocks)) sites.push({ kind: 'swallow', center: t.clone() });
+    for (let i = 0, n = 0; i < towns.length && n < swallowFlocks; i++) {
+      if (site('swallow', towns[i])) n++;
+    }
 
     let total = 0;
     for (const s of sites) total += FLOCKS[s.kind].birds[q];
@@ -194,19 +230,23 @@ export class Birds {
     const aAxis = new Float32Array(total * 4);
     const aParams = new Float32Array(total * 4);
     const aColor = new Float32Array(total * 3);
+    const aSink = new Float32Array(total);
     const col = new THREE.Color();
     let i = 0;
     for (const s of sites) {
       const cfg = FLOCKS[s.kind];
       const rho = cfg.radius / PLANET_RADIUS;
-      const alt = orbitAltitude(s.center, rho, cfg.lift);
       tangentBasis(s.center, _u, _v);
       const dirSign = rand() < 0.5 ? -1 : 1;
       const omega = cfg.speed / cfg.radius;
       const lead = rand() * Math.PI * 2;
       for (let b = 0; b < cfg.birds[q]; b++, i++) {
         aCenter.set([s.center.x, s.center.y, s.center.z, rho * (0.8 + rand() * 0.4)], i * 4);
-        aAxis.set([_u.x, _u.y, _u.z, alt + (rand() - 0.5) * 0.8], i * 4);
+        const alt = s.alt + (rand() - 0.5) * 0.8;
+        aAxis.set([_u.x, _u.y, _u.z, alt], i * 4);
+        // Al tramonto scende al più fin quasi al punto più alto sotto l'orbita,
+        // ondeggio compreso: rimpicciolisce mentre scende, non ci entra.
+        aSink[i] = Math.min(1.5, Math.max(0, alt - s.top - 0.55));
         // Stormo raccolto: fasi vicine, così si inseguono invece di stare in cerchio.
         aParams.set([
           lead + (rand() - 0.5) * 1.8,
@@ -229,6 +269,7 @@ export class Birds {
     geo.setAttribute('aAxis', new THREE.InstancedBufferAttribute(aAxis, 4));
     geo.setAttribute('aParams', new THREE.InstancedBufferAttribute(aParams, 4));
     geo.setAttribute('aColor', new THREE.InstancedBufferAttribute(aColor, 3));
+    geo.setAttribute('aSink', new THREE.InstancedBufferAttribute(aSink, 1));
     geo.instanceCount = total;
 
     this.uniforms = withLifeUniforms({ uFade: { value: 1 } });

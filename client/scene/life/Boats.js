@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { sampleGround, makeSurfaceHit, SEA_SURFACE_RADIUS } from '../planetSurface.js';
+import { seaIceAt } from '../Planet.js';
 import { mulberry32, withLifeUniforms, nightRamp, tangentBasis, offsetDir } from './lifeShared.js';
 
 /**
@@ -8,8 +9,9 @@ import { mulberry32, withLifeUniforms, nightRamp, tangentBasis, offsetDir } from
  * Il mare è metà del pianeta ed era vuoto. Ogni barca percorre un giro chiuso
  * e irregolare al largo (una baia, il periplo di un isolotto), calcolato una
  * volta sola al caricamento sulla superficie *renderizzata*: la rotta viene
- * scartata se un solo punto ha meno di `MIN_DEPTH` d'acqua sotto, quindi le
- * barche non toccano mai terra né spiaggia.
+ * scartata se un solo punto ha meno di `MIN_DEPTH` d'acqua sotto o cade nella
+ * banchisa polare disegnata sull'acqua (con qualche unità di margine per la
+ * scia), quindi le barche non toccano mai terra, spiaggia né ghiaccio.
  *
  * Rendering: quattro InstancedMesh (scafi, vele, scie, lanterne) che
  * condividono lo STESSO `instanceMatrix`: una sola matrice per barca, caricata
@@ -24,6 +26,8 @@ const COUNT_HIGH = 12;
 const COUNT_LOW = 6;
 /** Fondale minimo sotto ogni punto della rotta (unità mondo). */
 const MIN_DEPTH = 0.55;
+/** Margine dal bordo della banchisa (in |y| unitario, ~3 unità a 62°). */
+const ICE_MARGIN = 0.03;
 /** Punti della rotta dopo il campionamento a passo costante. */
 const ROUTE_POINTS = 160;
 /** Distanza angolare minima fra i centri di due rotte. */
@@ -154,7 +158,7 @@ const WAKE_FRAG = /* glsl */`
     float behind = smoothstep(1.25, 1.6, x);
     float churn = (1.0 - smoothstep(0.1, 0.32 + 0.08 * x, y)) * behind;
     churn *= 0.8 + 0.2 * sin(x * 7.0 - uTime * 6.0 + y * 9.0);
-    float fade = pow(1.0 - x / ${WAKE_LEN.toFixed(2)}, 1.3);
+    float fade = pow(max(1.0 - x / ${WAKE_LEN.toFixed(2)}, 0.0), 1.3);
     float a = max(arms * ripple, churn * 0.75) * fade * 0.55;
     vec3 col = vec3(0.93, 0.97, 1.0) * (uAmbient + uSunColor * 0.75);
     gl_FragColor = vec4(col, a);
@@ -211,6 +215,10 @@ function depthAt(dir) {
   return SEA_SURFACE_RADIUS - sampleGround(dir, _hit).radius;
 }
 
+function inIce(dir) {
+  return seaIceAt(dir.x, dir.y, dir.z, ICE_MARGIN) > 0;
+}
+
 /**
  * Cerca un giro chiuso al largo: 7 punti attorno a un centro in acqua
  * profonda, raccordati da una Catmull-Rom chiusa e ricampionati a passo
@@ -221,13 +229,13 @@ function tryRoute(rand, centers) {
   const center = new THREE.Vector3();
   const u = new THREE.Vector3(), v = new THREE.Vector3();
   const tmp = new THREE.Vector3();
-  for (let attempt = 0; attempt < 60; attempt++) {
+  for (let attempt = 0; attempt < 200; attempt++) {
     // Seme fisso invece di randomDirection (Math.random): rotte uguali a ogni
     // caricamento, comodo per confrontare gli screenshot.
     center.set(rand() * 2 - 1, rand() * 2 - 1, rand() * 2 - 1);
     if (center.lengthSq() < 1e-4 || center.lengthSq() > 1) continue;
     center.normalize();
-    if (depthAt(center) < 1.0) continue;
+    if (depthAt(center) < 1.0 || inIce(center)) continue;
     if (centers.some((c) => c.angleTo(center) < MIN_ROUTE_SEPARATION)) continue;
 
     tangentBasis(center, u, v);
@@ -254,7 +262,7 @@ function tryRoute(rand, centers) {
     let valid = true;
     for (const p of pts) {
       p.normalize();
-      if (depthAt(p) < MIN_DEPTH) { valid = false; break; }
+      if (depthAt(p) < MIN_DEPTH || inIce(p)) { valid = false; break; }
     }
     if (!valid) continue;
     centers.push(center.clone());

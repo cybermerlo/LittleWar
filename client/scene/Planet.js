@@ -93,12 +93,25 @@ function buildTerrainGeometry() {
 
 // ── Mare ─────────────────────────────────────────────────────────────────────
 
+// Varying costante su tutta la faccia (quella del vertice "provocante"). La
+// geometria dell'acqua non è indicizzata, quindi ogni faccia ha i suoi vertici.
+// WebGL1 non ha `flat`: lì ricade su un varying normale (riflesso più morbido).
+const FLAT_VARYING = /* glsl */`
+  #if __VERSION__ >= 300
+    #define LW_FLAT flat
+  #else
+    #define LW_FLAT
+  #endif
+`;
+
 const WATER_VERT = /* glsl */`
   attribute float aDepth;
   attribute float aIce;
   uniform float uTime;
   varying vec3  vWorldPos;
   varying vec3  vDir;
+  ${FLAT_VARYING}
+  LW_FLAT varying vec3 vFacePos;
   varying float vDepth;
   varying float vIce;
   varying float vCloudLit;
@@ -118,6 +131,7 @@ const WATER_VERT = /* glsl */`
 
     vec4 wp = modelMatrix * vec4(p, 1.0);
     vWorldPos = wp.xyz;
+    vFacePos = wp.xyz;
     vDir = dir;
     vDepth = aDepth;
     vIce = aIce;
@@ -146,6 +160,8 @@ const WATER_FRAG = /* glsl */`
   varying float vDepth;
   varying float vIce;
   varying float vCloudLit;
+  ${FLAT_VARYING}
+  LW_FLAT varying vec3 vFacePos;
   #include <fog_pars_fragment>
 
   void main() {
@@ -161,15 +177,19 @@ const WATER_FRAG = /* glsl */`
     float depthT = smoothstep(0.05, 1.9, vDepth);
     vec3 col = mix(uShallow, uDeep, depthT) * light;
 
-    // Riflesso del sole. Calcolato sulla sola normale di faccia accendeva
-    // triangoli interi: attorno a un vertice sollevato dalle onde sei facce
-    // prendevano la stessa inclinazione e diventavano un esagono bianco pieno.
-    // Ora il lobo segue la normale liscia della sfera (una macchia rotonda e
-    // morbida) e la normale di faccia decide solo quanto scintilla ogni faccia
-    // dentro la macchia.
-    float sheen = pow(max(dot(reflect(-uSunDir, vDir), V), 0.0), 36.0);
-    float glint = pow(max(dot(reflect(-uSunDir, N), V), 0.0), 48.0);
-    float spec = sheen * (0.3 + 0.7 * glint);
+    // Riflesso del sole: scintille faccia per faccia, in una zona piccola.
+    // Tutto è costante sul triangolo (normale di faccia, direzione e vista dal
+    // vertice flat), quindi ogni faccia si accende intera o resta spenta,
+    // come le sfaccettature del terreno. La normale liscia della sfera dice
+    // DOVE possono accendersi, quella di faccia, inclinata dalle onde, QUALI.
+    // Due versioni scartate: la sola normale di faccia accendeva esagoni pieni
+    // attorno ai vertici sollevati dalle onde, lontano quanto voleva; un lobo
+    // largo sulla normale liscia, acceso anche dove la faccia non scintillava,
+    // dipingeva una macchia bianca tonda e sfocata (allargata dal bloom).
+    vec3 Vf = normalize(cameraPosition - vFacePos);
+    float zone = dot(reflect(-uSunDir, normalize(vFacePos)), Vf);
+    float glint = dot(reflect(-uSunDir, N), Vf);
+    float spec = smoothstep(0.993, 0.9995, glint) * smoothstep(0.97, 0.99, zone);
 
     // Fresnel: ai bordi del pianeta l'acqua riflette il cielo.
     float fres = pow(1.0 - max(dot(N, V), 0.0), 4.0);
@@ -200,7 +220,7 @@ const WATER_FRAG = /* glsl */`
     #endif
 
     col = mix(col, uFoam * light, foam * 0.85);
-    col += uSunColor * (spec * 0.5 * vCloudLit * (1.0 - foam));
+    col += uSunColor * (spec * 0.45 * vCloudLit * (1.0 - foam));
 
     // Banchisa polare.
     col = mix(col, uIce * light, vIce);
@@ -217,6 +237,19 @@ const WATER_FRAG = /* glsl */`
     #include <fog_fragment>
   }
 `;
+
+/**
+ * Banchisa polare (0..1) nella direzione unitaria (dx, dy, dz): ghiaccio oltre
+ * ~62° di latitudine, con un bordo frastagliato. È l'attributo `aIce`
+ * dell'acqua; chi naviga (Boats.js) lo interroga per restarne fuori.
+ * @param {number} [margin]  anticipa il bordo di tanto (in |y| unitario): con
+ *        0.03 il ghiaccio "comincia" ~3 unità prima di quello disegnato
+ */
+export function seaIceAt(dx, dy, dz, margin = 0) {
+  const x = dx * SEA_SURFACE_RADIUS, z = dz * SEA_SURFACE_RADIUS;
+  const edge = 0.88 + 0.035 * Math.sin(x * 0.9) * Math.cos(z * 0.7);
+  return THREE.MathUtils.smoothstep(Math.abs(dy) + margin, edge - 0.015, edge + 0.015);
+}
 
 function buildWaterGeometry(elevation) {
   const src = new THREE.IcosahedronGeometry(SEA_SURFACE_RADIUS, DETAIL);
@@ -240,10 +273,7 @@ function buildWaterGeometry(elevation) {
       const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
       positions[o * 3] = x; positions[o * 3 + 1] = y; positions[o * 3 + 2] = z;
       depth[o] = -elevation[i];
-      // Ghiaccio oltre ~62° di latitudine, con un bordo frastagliato.
-      const lat = Math.abs(y) / SEA_SURFACE_RADIUS;
-      const edge = 0.88 + 0.035 * Math.sin(x * 0.9) * Math.cos(z * 0.7);
-      ice[o] = THREE.MathUtils.smoothstep(lat, edge - 0.015, edge + 0.015);
+      ice[o] = seaIceAt(x / SEA_SURFACE_RADIUS, y / SEA_SURFACE_RADIUS, z / SEA_SURFACE_RADIUS);
       o++;
     }
   }
